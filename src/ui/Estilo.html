@@ -122,6 +122,34 @@
 
   .em-breve { text-align: center; padding: 40px 16px; color: var(--suave); }
 
+  .acoes { margin-top: 12px; }
+  .subtitulo-secao { margin-top: 24px; }
+  .cabecalho-compilado { margin: 8px 0 12px; }
+  .cabecalho-compilado h2 { font-size: 19px; margin: 0; }
+  .secao-compilado { padding: 0; overflow: hidden; }
+  .secao-compilado .nota { margin: 0; padding: 8px 12px 12px; font-size: 13px; color: var(--suave); font-style: italic; }
+  table.compilado { font-size: 13px; font-variant-numeric: tabular-nums; }
+  table.compilado th, table.compilado td { padding: 6px 8px; text-align: right; white-space: nowrap; }
+  table.compilado .rotulo {
+    text-align: left; white-space: normal; min-width: 220px; position: sticky; left: 0; background: var(--cartao);
+  }
+  table.compilado thead th { background: #e8eef7; color: var(--texto); }
+  table.compilado thead th.rotulo { background: #e8eef7; font-size: 14px; }
+  table.compilado .total { font-weight: 600; background: #f3f6f9; }
+  table.compilado tr.destaque td { font-weight: 700; background: #f7f9fb; }
+  table.compilado td.zero { color: #b8c2cc; }
+
+  @media print {
+    body { background: #fff; font-size: 11px; }
+    .topo, .nao-imprimir, .aviso { display: none !important; }
+    .conteudo { max-width: none; padding: 0; }
+    h1 { display: none; }
+    .cartao { border: 0; padding: 0; margin-bottom: 10px; break-inside: avoid; }
+    .tabela-rolagem { overflow: visible; }
+    table.compilado .rotulo { position: static; min-width: 0; }
+    table.compilado th, table.compilado td { padding: 2px 4px; border-bottom: 1px solid #ddd; }
+  }
+
   @media (max-width: 720px) {
     .topo { padding: 8px 12px; }
     .marca { flex: 1; }

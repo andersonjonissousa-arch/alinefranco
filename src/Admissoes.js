@@ -61,7 +61,8 @@ function recalcularAdmissoes(ids) {
     if (Object.keys(r.campos).some(function (c) { return String(adm[c]) !== String(r.campos[c]); })) mudancasAdm[id] = r.campos;
     daAdmissao.forEach(function (a) {
       var novo = r.porAtendimento[a.id];
-      if (a.prazo_limite !== novo.prazo_limite || a.no_prazo !== novo.no_prazo || a.conta_prazo !== novo.conta_prazo) {
+      var mudou = Object.keys(novo).some(function (c) { return String(a[c]) !== String(novo[c]); });
+      if (mudou) {
         mudancasAtend[a.id] = novo;
       }
     });
@@ -282,6 +283,7 @@ function apiRegistrarAtendimento(dados) {
     var prof = profissionalDoRegistro(dados.profissional_id, usuario);
     var atendimento = {
       admissao_id: adm.id,
+      unidade_id: adm.unidade_id,
       data: data,
       publico: dados.publico,
       quantidade: quantidade,
@@ -328,8 +330,8 @@ function apiRegistrarAtividade(dados) {
     if (quantidade === null) throw new Error('Quantidade inválida.');
     var prof = profissionalDoRegistro(dados.profissional_id, usuario);
     inserir('ATIVIDADES', {
-      admissao_id: adm.id, data: data, tipo: dados.tipo, quantidade: quantidade,
-      profissional_id: prof.id, categoria: prof.categoria
+      admissao_id: adm.id, unidade_id: adm.unidade_id, data: data, tipo: dados.tipo, quantidade: quantidade,
+      profissional_id: prof.id, categoria: prof.categoria, criado_por: usuario.id
     });
     return detalheAdmissao(adm);
   });

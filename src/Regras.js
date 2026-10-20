@@ -209,7 +209,9 @@ function calcularAdmissao(adm, atendimentos, op) {
     });
 
   var porAtendimento = {};
-  atendimentos.forEach(function (a) { porAtendimento[a.id] = { prazo_limite: '', no_prazo: '', conta_prazo: contaParaPrazo(a) ? 'SIM' : 'NÃO' }; });
+  atendimentos.forEach(function (a) {
+    porAtendimento[a.id] = { prazo_limite: '', no_prazo: '', conta_prazo: contaParaPrazo(a) ? 'SIM' : 'NÃO', tipo_prazo: '' };
+  });
 
   var anterior = null;
   var i = 0;
@@ -229,7 +231,9 @@ function calcularAdmissao(adm, atendimentos, op) {
       var prazo = prazoDaJustificativa(op.prazos, anterior.justificativa_id || adm.justificativa_id);
       limite = prazo === null || anterior.data >= dia ? '' : adicionarDiasUteis(anterior.data, prazo, feriados);
     }
+    var tipo = anterior ? 'RETORNO' : 'PRIMEIRO';
     doDia.forEach(function (a) {
+      porAtendimento[a.id].tipo_prazo = tipo;
       porAtendimento[a.id].prazo_limite = limite;
       porAtendimento[a.id].no_prazo = limite ? (dia <= limite ? 'SIM' : 'NÃO') : '';
     });

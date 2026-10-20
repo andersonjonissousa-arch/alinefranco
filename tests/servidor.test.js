@@ -253,3 +253,62 @@ test('parâmetro do prazo do 1º atendimento e prazo de justificativa recalculam
   const lista = ctx.apiListarAdmissoes({ abertas: 'SIM' });
   assert.equal(lista.dados[0].situacao, 'NO PRAZO');
 });
+
+test('compilado pela API e exportação para uma planilha nova', () => {
+  const { ctx, google, admitir, atender } = sistemaComAdmissao();
+  const adm = admitir().dados.admissao;
+  atender(adm, { data: '2026-10-14' });
+  atender(adm, { data: '2026-10-16', publico: 'FAMÍLIA', quantidade: '2', paciente_impossibilitado: 'NÃO' });
+
+  const c = ctx.apiCompilado({ ano: '2026', mes: '10', eixo: 'UNIDADE', grupo: 'TODOS' });
+  assert.equal(c.ok, true, c.erro);
+  const cm2 = c.dados.colunas.findIndex((x) => x.nome === 'CM 2');
+  const linha = (t, rot) => c.dados.secoes.find((s) => s.titulo.startsWith(t)).linhas.find((l) => l.rotulo.startsWith(rot));
+  assert.equal(linha('Atendimentos', 'PACIENTE').valores[cm2], 1);
+  assert.equal(linha('Atendimentos', 'FAMÍLIA').valores[cm2], 2);
+  assert.equal(linha('1º atendimento', 'NO PRAZO').valores[cm2], 1);
+  assert.match(c.dados.secoes.find((s) => s.titulo.startsWith('1º atendimento')).titulo, /até 3 dia/);
+
+  assert.equal(ctx.apiCompilado({ ano: '2026', eixo: 'UNIDADE' }).ok, false); // falta o mês
+
+  ctx.novaExecucao();
+  const exp = ctx.apiExportarCompilado({ ano: '2026', mes: '10', eixo: 'UNIDADE', grupo: 'EMPRESA' });
+  assert.equal(exp.ok, true, exp.erro);
+  const criada = google.criadas[0];
+  assert.match(criada.getName(), /COMPILADO OUTUBRO DE 2026 — Profissionais da empresa/);
+  const aba = criada.getSheets()[0];
+  assert.equal(aba.getName(), 'Compilado');
+  assert.equal(aba.linhas[0][0], 'COMPILADO OUTUBRO DE 2026');
+  assert.ok(google.planilha.getSheetByName('ADMISSOES')); // o banco não foi mexido
+});
+
+test('registro do dia: reuniões e atividades gerenciais, com exclusão só pelo autor ou coordenação', () => {
+  const { ctx, google, unidade } = sistemaComAdmissao();
+  const reu = ctx.apiRegistrarReuniao({ data: '2026-10-19', unidade_id: unidade.id, tipo: 'GRUPO', quantidade: '2' });
+  assert.equal(reu.ok, true, reu.erro);
+  assert.equal(reu.dados.reunioes.length, 1);
+  assert.equal(reu.dados.reunioes[0].unidade_nome, 'CM 2');
+  ctx.novaExecucao();
+  assert.equal(ctx.apiRegistrarReuniao({ data: '2026-10-19', tipo: 'GRUPO' }).ok, false); // sem unidade
+  ctx.novaExecucao();
+  const ger = ctx.apiRegistrarGerencial({ data: '2026-10-19', tipo: 'TREINAMENTO', quantidade: '1' });
+  assert.equal(ger.ok, true, ger.erro);
+  assert.equal(ger.dados.gerenciais.length, 1);
+  ctx.novaExecucao();
+  assert.equal(ctx.apiRegistrarGerencial({ data: '2026-10-19', tipo: 'INVENTADO' }).ok, false);
+
+  ctx.novaExecucao();
+  ctx.apiSalvarProfissional({ nome: 'Elane', email: 'elane@exemplo.com', categoria: 'PROFISSIONAL DA EMPRESA', perfil: 'PROFISSIONAL' });
+  google.sessao.email = 'elane@exemplo.com';
+  ctx.novaExecucao();
+  const negado = ctx.apiExcluirGerencial(ger.dados.gerenciais[0].id);
+  assert.equal(negado.ok, false);
+  google.sessao.email = 'coordenacao@exemplo.com';
+  ctx.novaExecucao();
+  assert.equal(ctx.apiExcluirGerencial(ger.dados.gerenciais[0].id).dados.gerenciais.length, 0);
+
+  ctx.novaExecucao();
+  const c = ctx.apiCompilado({ ano: '2026', mes: '10', eixo: 'UNIDADE' }).dados;
+  const grupo = c.secoes.find((s) => s.titulo === 'Reuniões de equipe').linhas.find((l) => l.rotulo === 'GRUPO');
+  assert.equal(grupo.total, 2);
+});

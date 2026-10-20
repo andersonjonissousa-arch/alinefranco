@@ -1,0 +1,979 @@
+<script>
+  var estado = { usuario: null, cad: null, tela: 'inicio' };
+
+  var NOMES_LISTAS = {
+    TIPO_SOLICITACAO: 'Tipo de solicitação',
+    ATENDIDO: 'Atendido',
+    DESCRICAO_SOLICITACAO: 'Descrição da solicitação',
+    PRIORIDADE_SOLICITACAO: 'Prioridade da solicitação',
+    DESCRICAO_DEMANDA: 'Descrição da demanda',
+    PRIORIDADE_DEMANDA: 'Prioridade da demanda',
+    NECESSIDADE_ACOMPANHAMENTO: 'Necessidade de acompanhamento',
+    ATIVIDADE_ASSISTENCIAL: 'Atividades assistenciais',
+    REUNIAO_EQUIPE: 'Reuniões de equipe',
+    ATIVIDADE_GERENCIAL: 'Atividades gerenciais'
+  };
+
+  var ROTULO_CATEGORIA = {
+    'PROFISSIONAL DA EMPRESA': 'Profissional da empresa',
+    'RESIDENTE': 'Residente',
+    'ESTAGIÁRIO': 'Estagiário(a)'
+  };
+
+  // ---------- utilidades ----------
+
+  /** Chama uma função do servidor e devolve uma Promise com os dados (ou erro com mensagem). */
+  function chamar(nome) {
+    var args = Array.prototype.slice.call(arguments, 1);
+    return new Promise(function (resolve, reject) {
+      google.script.run
+        .withSuccessHandler(function (r) { r && r.ok ? resolve(r.dados) : reject(new Error(r ? r.erro : 'Sem resposta.')); })
+        .withFailureHandler(reject)[nome].apply(null, args);
+    });
+  }
+
+  /** Cria elementos sem usar innerHTML: h('td', { class: 'x' }, 'texto', filho...). */
+  function h(tag, attrs) {
+    var el = document.createElement(tag);
+    Object.keys(attrs || {}).forEach(function (k) {
+      var v = attrs[k];
+      if (v === false || v === null || v === undefined) return;
+      if (k.indexOf('on') === 0) el.addEventListener(k.slice(2), v);
+      else if (k === 'value') el.value = v;
+      else el.setAttribute(k, v === true ? '' : v);
+    });
+    Array.prototype.slice.call(arguments, 2).forEach(function (filho) {
+      if (filho === null || filho === undefined || filho === false) return;
+      (Array.isArray(filho) ? filho : [filho]).forEach(function (f) {
+        el.appendChild(typeof f === 'object' ? f : document.createTextNode(String(f)));
+      });
+    });
+    return el;
+  }
+
+  function avisar(msg, tipo) {
+    var el = document.getElementById('aviso');
+    el.textContent = msg;
+    el.className = 'aviso mostrar ' + (tipo || '');
+    clearTimeout(avisar.t);
+    avisar.t = setTimeout(function () { el.className = 'aviso'; }, tipo === 'erro' ? 6000 : 3000);
+  }
+
+  function campo(rotulo, controle) {
+    var id = 'c' + Math.random().toString(36).slice(2, 8);
+    controle.id = id;
+    return h('div', { class: 'campo' }, h('label', { for: id }, rotulo), controle);
+  }
+
+  function seletor(nome, opcoes, valor, vazio) {
+    var sel = h('select', { name: nome });
+    if (vazio !== false) sel.appendChild(h('option', { value: '' }, vazio || 'Selecione…'));
+    opcoes.forEach(function (o) {
+      var op = typeof o === 'object' ? o : { valor: o, rotulo: o };
+      sel.appendChild(h('option', { value: op.valor, selected: String(op.valor) === String(valor) }, op.rotulo));
+    });
+    return sel;
+  }
+
+  function lerFormulario(form) {
+    var dados = {};
+    Array.prototype.forEach.call(form.elements, function (el) { if (el.name) dados[el.name] = el.value; });
+    return dados;
+  }
+
+  /** Desabilita o botão enquanto salva e mostra o resultado. */
+  function enviar(botao, promessa, msgOk) {
+    botao.disabled = true;
+    return promessa.then(function (dados) {
+      avisar(msgOk || 'Salvo.', 'ok');
+      return dados;
+    }).catch(function (e) {
+      avisar(e.message, 'erro');
+      throw e;
+    }).finally(function () { botao.disabled = false; });
+  }
+
+  function tela(titulo) {
+    var main = document.getElementById('conteudo');
+    main.textContent = '';
+    main.appendChild(h('h1', null, titulo));
+    return main;
+  }
+
+  function ehCoordenacao() {
+    return estado.usuario && estado.usuario.perfil === 'COORDENAÇÃO';
+  }
+
+  /** 'AAAA-MM-DD' -> 'DD/MM/AAAA'. */
+  function dataBr(iso) {
+    var m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso || '');
+    return m ? m[3] + '/' + m[2] + '/' + m[1] : '';
+  }
+
+  /** Valores ativos de uma lista de seleção. */
+  function opcoesLista(nome) {
+    return (estado.cad.listas[nome] || []).filter(function (i) { return i.ativo === 'SIM'; }).map(function (i) { return i.valor; });
+  }
+
+  function ativos(lista) {
+    return lista.filter(function (x) { return x.ativo === 'SIM'; });
+  }
+
+  function opcoesUnidades() {
+    return ativos(estado.cad.unidades).map(function (u) { return { valor: u.id, rotulo: u.nome + ' · ' + u.setor }; });
+  }
+
+  function opcoesProfissionais() {
+    return ativos(estado.cad.profissionais).map(function (p) {
+      return { valor: p.id, rotulo: p.nome + (p.categoria === 'PROFISSIONAL DA EMPRESA' ? '' : ' (' + ROTULO_CATEGORIA[p.categoria] + ')') };
+    });
+  }
+
+  function opcoesJustificativas() {
+    return ativos(estado.cad.justificativas).map(function (j) {
+      var prazo = j.prazo_dias_uteis === '' ? 'sem prazo definido' : 'até ' + j.prazo_dias_uteis + ' dia(s) útil(eis)';
+      return { valor: j.id, rotulo: j.nome + ' — ' + prazo };
+    });
+  }
+
+  var CLASSE_SITUACAO = { 'ATRASADO': 'selo atrasado', 'VENCE HOJE': 'selo hoje', 'NO PRAZO': 'selo prazo' };
+
+  function selo(situacao) {
+    return situacao ? h('span', { class: CLASSE_SITUACAO[situacao] }, situacao.toLowerCase()) : '';
+  }
+
+  // ---------- navegação ----------
+
+  var TELAS = {
+    inicio: telaInicio,
+    pacientes: telaPacientes,
+    admissoes: telaAdmissoes,
+    registro: telaRegistro,
+    compilado: telaCompilado,
+    cadastros: telaCadastros
+  };
+
+  function abrir(nome, arg) {
+    estado.tela = nome;
+    document.querySelectorAll('#menu button').forEach(function (b) {
+      b.classList.toggle('ativo', b.dataset.tela === nome);
+    });
+    TELAS[nome](arg);
+  }
+
+  // ---------- Início: painel do dia ----------
+
+  function telaInicio() {
+    var primeiro = estado.usuario.nome.split(' ')[0].toLowerCase().replace(/^./, function (c) { return c.toUpperCase(); });
+    var main = tela('Olá, ' + primeiro);
+    var resumo = h('div', { class: 'indicadores' }, h('p', { class: 'carregando' }, 'Carregando…'));
+    var lista = h('div', { class: 'cartao tabela-rolagem' });
+    main.appendChild(resumo);
+    main.appendChild(lista);
+    chamar('apiListarAdmissoes', { abertas: 'SIM' }).then(function (adms) {
+      var conta = { 'ATRASADO': 0, 'VENCE HOJE': 0, 'NO PRAZO': 0 };
+      var aguardando = 0;
+      adms.forEach(function (a) {
+        if (a.situacao in conta) conta[a.situacao]++;
+        if (a.status === estado.cad.status_admissao.aguardando) aguardando++;
+      });
+      resumo.textContent = '';
+      [['Admissões abertas', adms.length, ''], ['Aguardando 1º atendimento', aguardando, ''],
+        ['Atrasados', conta['ATRASADO'], 'atrasado'], ['Vencem hoje', conta['VENCE HOJE'], 'hoje'],
+        ['No prazo', conta['NO PRAZO'], 'prazo']].forEach(function (i) {
+        resumo.appendChild(h('div', { class: 'indicador ' + i[2] }, h('div', { class: 'numero' }, i[1]), h('div', null, i[0])));
+      });
+      var urgentes = adms.filter(function (a) { return a.situacao === 'ATRASADO' || a.situacao === 'VENCE HOJE'; });
+      lista.textContent = '';
+      lista.appendChild(h('h2', null, 'Para atender hoje'));
+      if (!urgentes.length) {
+        lista.appendChild(h('p', { class: 'suave' }, 'Nenhum paciente atrasado ou com prazo para hoje.'));
+        return;
+      }
+      lista.appendChild(tabelaAdmissoes(urgentes));
+    }).catch(function (e) { avisar(e.message, 'erro'); });
+  }
+
+  // ---------- Pacientes ----------
+
+  function telaPacientes() {
+    var main = tela('Pacientes');
+    var resultado = h('div', { class: 'tabela-rolagem' });
+    var busca = h('input', { type: 'search', placeholder: 'Prontuário ou parte do nome', autocomplete: 'off' });
+    var formulario = h('div');
+
+    function buscar() {
+      var termo = busca.value.trim();
+      resultado.textContent = '';
+      if (termo.length < 2) return;
+      chamar('apiBuscarPacientes', termo).then(function (lista) {
+        resultado.textContent = '';
+        if (!lista.length) {
+          resultado.appendChild(h('p', { class: 'suave' }, 'Nenhum paciente encontrado. Cadastre abaixo.'));
+          return;
+        }
+        resultado.appendChild(h('table', null,
+          h('thead', null, h('tr', null, h('th', null, 'Prontuário'), h('th', null, 'Nome'))),
+          h('tbody', null, lista.map(function (p) {
+            return h('tr', { class: 'clicavel', onclick: function () { editar(p); } },
+              h('td', null, p.prontuario), h('td', null, p.nome));
+          }))));
+      }).catch(function (e) { avisar(e.message, 'erro'); });
+    }
+
+    function editar(p) {
+      formulario.textContent = '';
+      var form = h('form', { class: 'linha' },
+        h('input', { type: 'hidden', name: 'id', value: p.id || '' }),
+        campo('Prontuário', h('input', { name: 'prontuario', inputmode: 'numeric', value: p.prontuario || '', required: true })),
+        campo('Nome completo', h('input', { name: 'nome', value: p.nome || '', required: true })));
+      var botao = h('button', { class: 'btn', type: 'submit' }, p.id ? 'Salvar alterações' : 'Cadastrar paciente');
+      form.appendChild(botao);
+      form.addEventListener('submit', function (ev) {
+        ev.preventDefault();
+        enviar(botao, chamar('apiSalvarPaciente', lerFormulario(form)), 'Paciente salvo.').then(function (salvo) {
+          busca.value = salvo.prontuario;
+          buscar();
+          editar({});
+        }).catch(function () {});
+      });
+      formulario.appendChild(h('h2', null, p.id ? 'Editar paciente' : 'Novo paciente'));
+      formulario.appendChild(form);
+    }
+
+    var espera;
+    busca.addEventListener('input', function () { clearTimeout(espera); espera = setTimeout(buscar, 300); });
+    main.appendChild(h('div', { class: 'cartao' }, campo('Buscar', busca), resultado));
+    main.appendChild(h('div', { class: 'cartao' }, formulario));
+    editar({});
+    busca.focus();
+  }
+
+  // ---------- Admissões ----------
+
+  var filtrosAdmissoes = { abertas: 'SIM', status: '', termo: '', setor_id: '', unidade_id: '', situacao: '' };
+
+  var ROTULO_PRIMEIRO = {
+    'SIM': ['no prazo', 'selo prazo'],
+    'NÃO': ['fora do prazo', 'selo atrasado'],
+    'EM ANDAMENTO': ['em andamento', 'selo hoje'],
+    'NÃO SE APLICA': ['não se aplica', 'selo']
+  };
+
+  function seloPrimeiro(valor) {
+    var r = ROTULO_PRIMEIRO[valor];
+    return r ? h('span', { class: r[1] }, r[0]) : '';
+  }
+
+  function seloStatus(a) {
+    var classe = a.status === estado.cad.status_admissao.encerrada ? 'selo'
+      : a.status === estado.cad.status_admissao.acompanhamentoEncerrado ? 'selo hoje' : 'selo prazo';
+    return h('span', { class: classe }, a.status.toLowerCase());
+  }
+
+  function tabelaAdmissoes(adms) {
+    return h('table', null,
+      h('thead', null, h('tr', null, ['Paciente', 'Unidade', 'Admissão', '1º atendimento', 'Próximo prazo', 'Situação', 'Status']
+        .map(function (t) { return h('th', null, t); }))),
+      h('tbody', null, adms.map(function (a) {
+        return h('tr', { class: 'clicavel', onclick: function () { abrir('admissoes', { id: a.id }); } },
+          h('td', null, h('strong', null, a.paciente_nome), h('div', { class: 'suave' }, 'Pront. ' + a.prontuario)),
+          h('td', null, a.unidade_nome),
+          h('td', null, dataBr(a.data_admissao)),
+          h('td', null, a.primeiro_atendimento ? dataBr(a.primeiro_atendimento) + ' ' : '', seloPrimeiro(a.primeiro_no_prazo)),
+          h('td', null, dataBr(a.proximo_prazo)),
+          h('td', null, selo(a.situacao)),
+          h('td', null, seloStatus(a)));
+      })));
+  }
+
+  function telaAdmissoes(arg) {
+    if (arg && arg.id) return abrirAdmissao(arg.id);
+    if (arg && arg.nova) return novaAdmissao();
+    var main = tela('Admissões');
+    var lista = h('div', { class: 'cartao tabela-rolagem' }, h('p', { class: 'carregando' }, 'Carregando…'));
+    var st = estado.cad.status_admissao;
+    var setores = estado.cad.setores.map(function (x) { return { valor: x.id, rotulo: x.nome }; });
+    var form = h('form', { class: 'linha' },
+      campo('Paciente', h('input', { name: 'termo', type: 'search', placeholder: 'Nome ou prontuário', value: filtrosAdmissoes.termo })),
+      campo('Admissões', seletor('abertas', [{ valor: 'SIM', rotulo: 'Abertas' }, { valor: 'NÃO', rotulo: 'Encerradas' }],
+        filtrosAdmissoes.abertas, 'Todas')),
+      campo('Status', seletor('status', [st.aguardando, st.acompanhamento, st.acompanhamentoEncerrado, st.encerrada]
+        .map(function (x) { return { valor: x, rotulo: x.toLowerCase() }; }), filtrosAdmissoes.status, 'Todos')),
+      campo('Setor', seletor('setor_id', setores, filtrosAdmissoes.setor_id, 'Todos')),
+      campo('Unidade', seletor('unidade_id', opcoesUnidades(), filtrosAdmissoes.unidade_id, 'Todas')),
+      campo('Situação do prazo', seletor('situacao', ['ATRASADO', 'VENCE HOJE', 'NO PRAZO'], filtrosAdmissoes.situacao, 'Todas')),
+      h('button', { class: 'btn', type: 'button', onclick: function () { abrir('admissoes', { nova: true }); } }, 'Nova admissão'));
+
+    function carregar() {
+      filtrosAdmissoes = lerFormulario(form);
+      chamar('apiListarAdmissoes', filtrosAdmissoes).then(function (adms) {
+        lista.textContent = '';
+        lista.appendChild(h('p', { class: 'suave' }, adms.length + ' admissão(ões)'));
+        if (adms.length) lista.appendChild(tabelaAdmissoes(adms));
+      }).catch(function (e) { avisar(e.message, 'erro'); });
+    }
+    var espera;
+    form.addEventListener('input', function () { clearTimeout(espera); espera = setTimeout(carregar, 350); });
+    form.addEventListener('submit', function (ev) { ev.preventDefault(); carregar(); });
+    main.appendChild(h('div', { class: 'cartao' }, form));
+    main.appendChild(lista);
+    carregar();
+  }
+
+  function voltarLista() {
+    return h('button', { class: 'btn sec voltar', type: 'button', onclick: function () { abrir('admissoes'); } }, '← Voltar à lista');
+  }
+
+  function abrirAdmissao(id) {
+    tela('Admissão').appendChild(h('p', { class: 'carregando' }, 'Carregando…'));
+    chamar('apiObterAdmissao', id).then(desenharAdmissao).catch(function (e) { avisar(e.message, 'erro'); abrir('admissoes'); });
+  }
+
+  function novaAdmissao() {
+    var main = tela('Nova admissão');
+    main.appendChild(voltarLista());
+    main.appendChild(formularioAdmissao({}, desenharAdmissao));
+  }
+
+  function info(rotulo) {
+    return h('div', null, h('span', { class: 'suave' }, rotulo + ' '), Array.prototype.slice.call(arguments, 1));
+  }
+
+  function desenharAdmissao(det) {
+    var a = det.admissao;
+    var st = estado.cad.status_admissao;
+    var main = tela(det.paciente ? det.paciente.nome : 'Admissão');
+    main.appendChild(voltarLista());
+    main.appendChild(h('div', { class: 'cartao cabecalho-caso' },
+      info('Prontuário', a.prontuario),
+      info('Unidade', a.unidade_nome),
+      info('Admissão', dataBr(a.data_admissao)),
+      info('1º atendimento', a.primeiro_atendimento ? dataBr(a.primeiro_atendimento) : 'até ' + dataBr(a.prazo_primeiro_atendimento),
+        ' ', seloPrimeiro(a.primeiro_no_prazo)),
+      info('Justificativa', a.justificativa_nome || '—'),
+      info('Próximo prazo', dataBr(a.proximo_prazo) || '—', ' ', selo(a.situacao)),
+      seloStatus(a)));
+
+    if (a.status === st.acompanhamentoEncerrado) main.appendChild(formularioRetomada(a));
+    else if (a.status !== st.encerrada) main.appendChild(formularioAtendimento(a));
+    main.appendChild(listaAtendimentos(det));
+    main.appendChild(blocoAtividades(det));
+    var dados = h('details', { class: 'cartao', open: a.status === st.aguardando && !det.atendimentos.length },
+      h('summary', null, h('h2', { class: 'inline' }, 'Dados da admissão')));
+    dados.appendChild(formularioAdmissao(a, desenharAdmissao));
+    main.appendChild(dados);
+    if (det.outras_admissoes.length) {
+      main.appendChild(h('div', { class: 'cartao tabela-rolagem' }, h('h2', null, 'Outras admissões deste paciente'),
+        tabelaAdmissoes(det.outras_admissoes)));
+    }
+  }
+
+  function formularioRetomada(a) {
+    var form = h('form', { class: 'linha' },
+      campo('Data da retomada', h('input', { name: 'data', type: 'date', value: estado.cad.hoje, max: estado.cad.hoje, required: true })),
+      campo('Necessidade de acompanhamento', seletor('necessidade_acompanhamento', opcoesLista('NECESSIDADE_ACOMPANHAMENTO'), a.necessidade_acompanhamento)),
+      campo('Justificativa', seletor('justificativa_id', opcoesJustificativas(), a.justificativa_id)));
+    var botao = h('button', { class: 'btn', type: 'submit' }, 'Retomar acompanhamento');
+    form.appendChild(botao);
+    form.addEventListener('submit', function (ev) {
+      ev.preventDefault();
+      enviar(botao, chamar('apiRetomarAcompanhamento', Object.assign(lerFormulario(form), { id: a.id })), 'Acompanhamento retomado.')
+        .then(desenharAdmissao).catch(function () {});
+    });
+    return h('div', { class: 'cartao' },
+      h('h2', null, 'Acompanhamento encerrado'),
+      h('p', { class: 'suave' }, 'Desfecho ' + a.desfecho_nome.toLowerCase() + ' em ' + dataBr(a.data_desfecho) +
+        '. Se o paciente segue internado e precisa ser atendido de novo, retome o acompanhamento nesta mesma admissão.'),
+      form);
+  }
+
+  function formularioAtendimento(a) {
+    var publico = seletor('publico', estado.cad.publicos.map(function (p) {
+      return { valor: p, rotulo: p === 'PACIENTE' ? 'Paciente' : 'Família' };
+    }), 'PACIENTE', false);
+    var quantos = campo('Quantos familiares', h('input', { name: 'quantidade', type: 'number', min: 1, max: 30, value: 1 }));
+    var impossibilitado = campo('Paciente impossibilitado de ser atendido?', seletor('paciente_impossibilitado',
+      [{ valor: 'NÃO', rotulo: 'Não' }, { valor: 'SIM', rotulo: 'Sim — conta para o prazo do paciente' }], 'NÃO', false));
+    var form = h('form', { class: 'linha' },
+      campo('Data', h('input', { name: 'data', type: 'date', value: estado.cad.hoje, max: estado.cad.hoje, required: true })),
+      campo('Atendimento a', publico), quantos, impossibilitado,
+      campo('Profissional', seletor('profissional_id', opcoesProfissionais(), estado.usuario.id, false)),
+      campo('Observação', h('input', { name: 'observacao', placeholder: 'Opcional' })));
+    function ajustar() {
+      var familia = publico.value === 'FAMÍLIA';
+      quantos.hidden = !familia;
+      impossibilitado.hidden = !familia;
+    }
+    publico.addEventListener('change', ajustar);
+    ajustar();
+    var botao = h('button', { class: 'btn', type: 'submit' }, 'Registrar atendimento');
+    form.appendChild(botao);
+    form.addEventListener('submit', function (ev) {
+      ev.preventDefault();
+      var dados = Object.assign(lerFormulario(form), { admissao_id: a.id });
+      enviar(botao, chamar('apiRegistrarAtendimento', dados), 'Atendimento registrado.').then(desenharAdmissao).catch(function () {});
+    });
+    var titulo = a.status === estado.cad.status_admissao.aguardando ? 'Registrar 1º atendimento (avaliação)' : 'Registrar atendimento';
+    return h('div', { class: 'cartao' }, h('h2', null, titulo), form);
+  }
+
+  function botaoExcluir(api, id) {
+    var b = h('button', { class: 'link perigo', type: 'button', title: 'Excluir' }, 'excluir');
+    b.addEventListener('click', function (ev) {
+      ev.stopPropagation();
+      if (!confirm('Excluir este registro?')) return;
+      enviar(b, chamar(api, id), 'Excluído.').then(desenharAdmissao).catch(function () {});
+    });
+    return b;
+  }
+
+  function listaAtendimentos(det) {
+    var bloco = h('div', { class: 'cartao tabela-rolagem' }, h('h2', null, 'Atendimentos (' + det.atendimentos.length + ')'));
+    if (!det.atendimentos.length) {
+      bloco.appendChild(h('p', { class: 'suave' }, 'Nenhum atendimento registrado.'));
+      return bloco;
+    }
+    bloco.appendChild(h('table', null,
+      h('thead', null, h('tr', null, ['Data', 'A quem', 'Profissional', 'Prazo era até', 'No prazo', '', '']
+        .map(function (t) { return h('th', null, t); }))),
+      h('tbody', null, det.atendimentos.map(function (at) {
+        var familia = at.publico === 'FAMÍLIA';
+        return h('tr', null,
+          h('td', null, dataBr(at.data)),
+          h('td', null, familia ? 'Família · ' + at.quantidade + ' pessoa(s)' : 'Paciente',
+            familia && at.paciente_impossibilitado === 'SIM' ? h('div', { class: 'suave' }, 'paciente impossibilitado') : ''),
+          h('td', null, at.profissional_nome, at.categoria !== 'PROFISSIONAL DA EMPRESA'
+            ? h('div', { class: 'suave' }, ROTULO_CATEGORIA[at.categoria] || at.categoria) : ''),
+          h('td', null, dataBr(at.prazo_limite) || '—'),
+          h('td', null, at.conta_prazo === 'NÃO' ? h('span', { class: 'suave' }, 'não conta')
+            : at.no_prazo === 'SIM' ? h('span', { class: 'selo prazo' }, 'sim')
+              : at.no_prazo === 'NÃO' ? h('span', { class: 'selo atrasado' }, 'não') : '—'),
+          h('td', { class: 'suave' }, at.observacao || ''),
+          h('td', null, botaoExcluir('apiExcluirAtendimento', at.id)));
+      }))));
+    return bloco;
+  }
+
+  function blocoAtividades(det) {
+    var a = det.admissao;
+    var st = estado.cad.status_admissao;
+    var bloco = h('details', { class: 'cartao' }, h('summary', null, h('h2', { class: 'inline' }, 'Atividades assistenciais (' + det.atividades.length + ')')));
+    if (a.status === st.aguardando || a.status === st.acompanhamento) {
+      var form = h('form', { class: 'linha' },
+        campo('Data', h('input', { name: 'data', type: 'date', value: estado.cad.hoje, max: estado.cad.hoje, required: true })),
+        campo('Atividade', seletor('tipo', opcoesLista('ATIVIDADE_ASSISTENCIAL'), '')),
+        campo('Quantidade', h('input', { name: 'quantidade', type: 'number', min: 1, max: 20, value: 1 })),
+        campo('Profissional', seletor('profissional_id', opcoesProfissionais(), estado.usuario.id, false)));
+      var botao = h('button', { class: 'btn', type: 'submit' }, 'Registrar atividade');
+      form.appendChild(botao);
+      form.addEventListener('submit', function (ev) {
+        ev.preventDefault();
+        enviar(botao, chamar('apiRegistrarAtividade', Object.assign(lerFormulario(form), { admissao_id: a.id })), 'Atividade registrada.')
+          .then(desenharAdmissao).catch(function () {});
+      });
+      bloco.appendChild(form);
+    }
+    if (det.atividades.length) {
+      bloco.appendChild(h('table', null, h('tbody', null, det.atividades.map(function (at) {
+        return h('tr', null, h('td', null, dataBr(at.data)), h('td', null, at.tipo), h('td', null, at.quantidade),
+          h('td', null, at.profissional_nome), h('td', null, botaoExcluir('apiExcluirAtividade', at.id)));
+      }))));
+    }
+    return bloco;
+  }
+
+  /** Escolha do paciente na admissão nova: busca e, se não achar, cadastro na hora. */
+  function seletorPaciente(aoEscolher) {
+    var caixa = h('div', { class: 'cartao' }, h('h2', null, 'Paciente'));
+    var busca = h('input', { type: 'search', placeholder: 'Prontuário ou nome', autocomplete: 'off' });
+    var resultado = h('div');
+    var espera;
+    function mostrarEscolhido(p) {
+      caixa.textContent = '';
+      caixa.appendChild(h('h2', null, 'Paciente'));
+      caixa.appendChild(h('div', { class: 'linha' }, h('div', null, h('strong', null, p.nome), h('div', { class: 'suave' }, 'Pront. ' + p.prontuario)),
+        h('button', { class: 'btn sec', type: 'button', onclick: function () { aoEscolher(null); caixa.replaceWith(seletorPaciente(aoEscolher)); } }, 'Trocar')));
+      aoEscolher(p);
+    }
+    function cadastrar(termo) {
+      var soNumeros = /^\d+$/.test(termo);
+      var form = h('form', { class: 'linha' },
+        campo('Prontuário', h('input', { name: 'prontuario', inputmode: 'numeric', value: soNumeros ? termo : '', required: true })),
+        campo('Nome completo', h('input', { name: 'nome', value: soNumeros ? '' : termo, required: true })));
+      var botao = h('button', { class: 'btn', type: 'submit' }, 'Cadastrar e usar');
+      form.appendChild(botao);
+      form.addEventListener('submit', function (ev) {
+        ev.preventDefault();
+        enviar(botao, chamar('apiSalvarPaciente', lerFormulario(form)), 'Paciente cadastrado.').then(mostrarEscolhido).catch(function () {});
+      });
+      return form;
+    }
+    busca.addEventListener('input', function () {
+      clearTimeout(espera);
+      espera = setTimeout(function () {
+        var termo = busca.value.trim();
+        resultado.textContent = '';
+        if (termo.length < 2) return;
+        chamar('apiBuscarPacientes', termo).then(function (lista) {
+          resultado.textContent = '';
+          lista.forEach(function (p) {
+            resultado.appendChild(h('button', { class: 'opcao', type: 'button', onclick: function () { mostrarEscolhido(p); } },
+              p.nome + ' · Pront. ' + p.prontuario));
+          });
+          resultado.appendChild(h('p', { class: 'suave' }, lista.length ? 'Não é nenhum destes? Cadastre:' : 'Paciente não encontrado. Cadastre:'));
+          resultado.appendChild(cadastrar(termo));
+        }).catch(function (e) { avisar(e.message, 'erro'); });
+      }, 300);
+    });
+    caixa.appendChild(campo('Buscar', busca));
+    caixa.appendChild(resultado);
+    setTimeout(function () { busca.focus(); }, 0);
+    return caixa;
+  }
+
+  function opcoesDesfechos() {
+    return ativos(estado.cad.desfechos).map(function (d) {
+      return { valor: d.id, rotulo: d.nome + (d.encerra_admissao === 'SIM' ? ' (saída do hospital)' : ' (encerra o acompanhamento)') };
+    });
+  }
+
+  function formularioAdmissao(a, aoSalvar) {
+    var area = h('div');
+    var pacienteId = a.paciente_id || '';
+    if (!a.id) area.appendChild(seletorPaciente(function (p) { pacienteId = p ? p.id : ''; }));
+    var v = function (k) { return a[k] || ''; };
+    var data = function (nome, rotulo, obrig) {
+      return campo(rotulo, h('input', { name: nome, type: 'date', value: v(nome), max: estado.cad.hoje, required: obrig }));
+    };
+    var lista = function (nome, rotulo, listaNome) { return campo(rotulo, seletor(nome, opcoesLista(listaNome), v(nome))); };
+    var grupo = function (titulo) {
+      var campos = Array.prototype.slice.call(arguments, 1);
+      return h('fieldset', null, h('legend', null, titulo), h('div', { class: 'linha' }, campos));
+    };
+    var form = h('form', null,
+      grupo('Admissão no hospital',
+        data('data_admissao', 'Data da admissão', true),
+        campo('Unidade', seletor('unidade_id', opcoesUnidades(), v('unidade_id')))),
+      grupo('Solicitação',
+        data('data_solicitacao', 'Data da solicitação'),
+        lista('tipo_solicitacao', 'Tipo de solicitação', 'TIPO_SOLICITACAO'),
+        lista('descricao_solicitacao', 'Descrição da solicitação', 'DESCRICAO_SOLICITACAO'),
+        lista('prioridade_solicitacao', 'Prioridade', 'PRIORIDADE_SOLICITACAO')),
+      grupo('Avaliação (1º atendimento)',
+        lista('descricao_demanda', 'Descrição da demanda', 'DESCRICAO_DEMANDA'),
+        lista('prioridade_demanda', 'Prioridade da demanda', 'PRIORIDADE_DEMANDA')),
+      grupo('Acompanhamento',
+        lista('necessidade_acompanhamento', 'Necessidade de acompanhamento', 'NECESSIDADE_ACOMPANHAMENTO'),
+        campo('Justificativa', seletor('justificativa_id', opcoesJustificativas(), v('justificativa_id')))),
+      grupo('Desfecho',
+        campo('Desfecho', seletor('desfecho_id', opcoesDesfechos(), v('desfecho_id'), 'Sem desfecho')),
+        data('data_desfecho', 'Data do desfecho'),
+        campo('Observações', h('textarea', { name: 'observacoes', rows: 3 }, v('observacoes')))));
+    var botao = h('button', { class: 'btn', type: 'submit' }, a.id ? 'Salvar admissão' : 'Registrar admissão');
+    form.appendChild(botao);
+    form.addEventListener('submit', function (ev) {
+      ev.preventDefault();
+      if (!pacienteId) { avisar('Escolha ou cadastre o paciente.', 'erro'); return; }
+      var dados = Object.assign(lerFormulario(form), { id: a.id || '', paciente_id: pacienteId });
+      enviar(botao, chamar('apiSalvarAdmissao', dados), 'Admissão salva.').then(aoSalvar).catch(function () {});
+    });
+    area.appendChild(a.id ? form : h('div', { class: 'cartao' }, form));
+    return area;
+  }
+
+  // ---------- Registro do dia: reuniões de equipe e atividades gerenciais ----------
+
+  function telaRegistro() {
+    var main = tela('Registro do dia');
+    var listas = h('div');
+    var dataRef = estado.cad.hoje;
+
+    function formulario(titulo, api, campos, msg) {
+      var form = h('form', { class: 'linha' },
+        campo('Data', h('input', { name: 'data', type: 'date', value: estado.cad.hoje, max: estado.cad.hoje, required: true })),
+        campos,
+        campo('Quantidade', h('input', { name: 'quantidade', type: 'number', min: 1, max: 50, value: 1 })),
+        campo('Profissional', seletor('profissional_id', opcoesProfissionais(), estado.usuario.id, false)));
+      var botao = h('button', { class: 'btn', type: 'submit' }, 'Registrar');
+      form.appendChild(botao);
+      form.addEventListener('submit', function (ev) {
+        ev.preventDefault();
+        var dados = lerFormulario(form);
+        dataRef = dados.data;
+        enviar(botao, chamar(api, dados), msg).then(desenhar).catch(function () {});
+      });
+      return h('div', { class: 'cartao' }, h('h2', null, titulo), form);
+    }
+
+    function tabela(titulo, itens, colunas, apiExcluir) {
+      var bloco = h('div', { class: 'cartao tabela-rolagem' }, h('h2', null, titulo + ' (' + itens.length + ')'));
+      if (!itens.length) {
+        bloco.appendChild(h('p', { class: 'suave' }, 'Nada registrado neste mês.'));
+        return bloco;
+      }
+      bloco.appendChild(h('table', null, h('tbody', null, itens.map(function (r) {
+        var apagar = h('button', { class: 'link perigo', type: 'button' }, 'excluir');
+        apagar.addEventListener('click', function () {
+          if (!confirm('Excluir este registro?')) return;
+          enviar(apagar, chamar(apiExcluir, r.id), 'Excluído.').then(desenhar).catch(function () {});
+        });
+        return h('tr', null, colunas.map(function (c) { return h('td', null, c(r)); }), h('td', null, apagar));
+      }))));
+      return bloco;
+    }
+
+    function desenhar(dados) {
+      listas.textContent = '';
+      var p = dados.mes.split('-');
+      listas.appendChild(h('h2', { class: 'subtitulo-secao' }, 'Registros de ' + NOMES_MESES[Number(p[1]) - 1].toLowerCase() + ' de ' + p[0]));
+      listas.appendChild(tabela('Reuniões de equipe', dados.reunioes, [
+        function (r) { return dataBr(r.data); }, function (r) { return r.unidade_nome; }, function (r) { return r.tipo; },
+        function (r) { return r.quantidade; }, function (r) { return r.profissional_nome; }], 'apiExcluirReuniao'));
+      listas.appendChild(tabela('Atividades gerenciais', dados.gerenciais, [
+        function (r) { return dataBr(r.data); }, function (r) { return r.tipo; },
+        function (r) { return r.quantidade; }, function (r) { return r.profissional_nome; }], 'apiExcluirGerencial'));
+    }
+
+    main.appendChild(h('p', { class: 'suave' }, 'Atendimentos e atividades assistenciais são registrados dentro de cada admissão.'));
+    main.appendChild(formulario('Reunião de equipe', 'apiRegistrarReuniao', [
+      campo('Unidade', seletor('unidade_id', opcoesUnidades(), '')),
+      campo('Tipo', seletor('tipo', opcoesLista('REUNIAO_EQUIPE'), ''))], 'Reunião registrada.'));
+    main.appendChild(formulario('Atividade gerencial', 'apiRegistrarGerencial', [
+      campo('Atividade', seletor('tipo', opcoesLista('ATIVIDADE_GERENCIAL'), ''))], 'Atividade registrada.'));
+    main.appendChild(listas);
+    chamar('apiRegistrosDoMes', dataRef).then(desenhar).catch(function (e) { avisar(e.message, 'erro'); });
+  }
+
+  // ---------- Compilado ----------
+
+  var NOMES_MESES = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro',
+    'Outubro', 'Novembro', 'Dezembro'];
+
+  function formatarValor(valor, tipo) {
+    if (valor === null || valor === undefined) return '—';
+    if (tipo === 'pct') return Math.round(valor * 100) + '%';
+    if (tipo === 'media') return (Math.round(valor * 10) / 10).toString().replace('.', ',');
+    return String(valor);
+  }
+
+  var filtrosCompilado = null;
+
+  function telaCompilado() {
+    var main = tela('Compilado');
+    var hojeP = estado.cad.hoje.split('-');
+    if (!filtrosCompilado) {
+      filtrosCompilado = { eixo: 'UNIDADE', ano: hojeP[0], mes: String(Number(hojeP[1])), grupo: 'TODOS', setor_id: '', unidade_id: '' };
+    }
+    var f = filtrosCompilado;
+    var anos = [];
+    for (var a = Number(hojeP[0]); a >= 2026; a--) anos.push(String(a));
+    if (anos.indexOf(f.ano) === -1) anos.push(f.ano);
+    var grupos = Object.keys(estado.cad.grupos).map(function (k) { return { valor: k, rotulo: estado.cad.grupos[k] }; });
+    var setores = estado.cad.setores.map(function (x) { return { valor: x.id, rotulo: x.nome }; });
+    var campoMes = campo('Mês', seletor('mes', NOMES_MESES.map(function (m, i) { return { valor: String(i + 1), rotulo: m }; }), f.mes, false));
+    var form = h('form', { class: 'linha nao-imprimir' },
+      campo('Compilado', seletor('eixo', [{ valor: 'UNIDADE', rotulo: 'Mensal, por unidade' }, { valor: 'MES', rotulo: 'Anual, por mês' }], f.eixo, false)),
+      campo('Ano', seletor('ano', anos, f.ano, false)),
+      campoMes,
+      campo('Profissionais', seletor('grupo', grupos, f.grupo, false)),
+      campo('Setor', seletor('setor_id', setores, f.setor_id, 'Todos')),
+      campo('Unidade', seletor('unidade_id', opcoesUnidades(), f.unidade_id, 'Todas')));
+    var exportar = h('button', { class: 'btn sec', type: 'button' }, 'Exportar para Google Planilhas');
+    var imprimir = h('button', { class: 'btn sec', type: 'button', onclick: function () { window.print(); } }, 'Imprimir');
+    var resultado = h('div', null, h('p', { class: 'carregando' }, 'Carregando…'));
+
+    function gerar() {
+      filtrosCompilado = lerFormulario(form);
+      campoMes.hidden = filtrosCompilado.eixo === 'MES';
+      resultado.textContent = '';
+      resultado.appendChild(h('p', { class: 'carregando' }, 'Calculando…'));
+      chamar('apiCompilado', filtrosCompilado).then(desenharCompilado).catch(function (e) { avisar(e.message, 'erro'); });
+    }
+
+    function desenharCompilado(c) {
+      resultado.textContent = '';
+      resultado.appendChild(h('div', { class: 'cabecalho-compilado' }, h('h2', null, c.titulo), h('div', { class: 'suave' }, c.subtitulo)));
+      c.secoes.forEach(function (s) {
+        var cabecalho = [h('th', { class: 'rotulo' }, s.titulo)];
+        if (!s.semColunas) c.colunas.forEach(function (col) { cabecalho.push(h('th', null, col.nome)); });
+        cabecalho.push(h('th', { class: 'total' }, 'Total'));
+        var corpo = s.linhas.map(function (l) {
+          var celulas = [h('td', { class: 'rotulo' }, l.rotulo)];
+          if (!s.semColunas) {
+            l.valores.forEach(function (v) {
+              celulas.push(h('td', { class: (v === 0 || v === null) ? 'zero' : '' }, formatarValor(v, l.tipo)));
+            });
+          }
+          celulas.push(h('td', { class: 'total' }, formatarValor(l.total, l.tipo)));
+          return h('tr', { class: l.destaque ? 'destaque' : '' }, celulas);
+        });
+        resultado.appendChild(h('div', { class: 'cartao secao-compilado' },
+          h('div', { class: 'tabela-rolagem' }, h('table', { class: 'compilado' }, h('thead', null, h('tr', null, cabecalho)), h('tbody', null, corpo))),
+          s.nota ? h('p', { class: 'nota' }, s.nota) : null));
+      });
+    }
+
+    exportar.addEventListener('click', function () {
+      enviar(exportar, chamar('apiExportarCompilado', lerFormulario(form)), 'Planilha criada.').then(function (r) {
+        var link = h('a', { href: r.url, target: '_blank', rel: 'noopener' }, 'Abrir "' + r.nome + '"');
+        resultado.insertBefore(h('div', { class: 'cartao' }, 'Planilha criada no seu Google Drive. ', link), resultado.firstChild);
+      }).catch(function () {});
+    });
+    form.addEventListener('change', gerar);
+    main.appendChild(h('div', { class: 'cartao nao-imprimir' }, form, h('div', { class: 'linha acoes' }, exportar, imprimir)));
+    main.appendChild(resultado);
+    gerar();
+  }
+
+  // ---------- Cadastros (coordenação) ----------
+
+  function telaCadastros() {
+    var main = tela('Cadastros');
+    var abas = h('div', { class: 'abas' });
+    var corpo = h('div');
+    var secoes = {
+      Profissionais: cadProfissionais,
+      'Justificativas e prazos': cadJustificativas,
+      Desfechos: cadDesfechos,
+      'Prazo do 1º atendimento': cadParametros,
+      'Setores e unidades': cadUnidades,
+      Listas: cadListas,
+      Feriados: cadFeriados
+    };
+    var atual = 'Profissionais';
+
+    function mostrar(nome) {
+      atual = nome;
+      abas.querySelectorAll('button').forEach(function (b) { b.classList.toggle('ativo', b.textContent === nome); });
+      corpo.textContent = '';
+      secoes[nome](corpo, function (cad) { estado.cad = cad; mostrar(atual); });
+    }
+
+    Object.keys(secoes).forEach(function (nome) {
+      abas.appendChild(h('button', { type: 'button', onclick: function () { mostrar(nome); } }, nome));
+    });
+    main.appendChild(abas);
+    main.appendChild(corpo);
+    mostrar(atual);
+  }
+
+  /** Monta uma seção de cadastro: tabela à esquerda, formulário de edição abaixo. */
+  function secaoCadastro(alvo, cfg) {
+    var formArea = h('div', { class: 'cartao' });
+
+    function editar(item) {
+      formArea.textContent = '';
+      var form = h('form', { class: 'linha' }, h('input', { type: 'hidden', name: 'id', value: item.id || '' }));
+      cfg.campos(item).forEach(function (c) { form.appendChild(c); });
+      if (!cfg.semAtivo) form.appendChild(campo('Ativo', seletor('ativo', ['SIM', 'NÃO'], item.ativo || 'SIM', false)));
+      var botao = h('button', { class: 'btn', type: 'submit' }, item.id ? 'Salvar' : 'Adicionar');
+      var novo = h('button', { class: 'btn sec', type: 'button', onclick: function () { editar({}); } }, 'Novo');
+      form.appendChild(botao);
+      form.appendChild(novo);
+      if (item.id && cfg.apiExcluir) {
+        var apagar = h('button', { class: 'btn perigo', type: 'button' }, 'Excluir');
+        apagar.addEventListener('click', function () {
+          if (!confirm('Excluir este registro?')) return;
+          enviar(apagar, chamar(cfg.apiExcluir, item.id), 'Excluído.').then(cfg.aoSalvar).catch(function () {});
+        });
+        form.appendChild(apagar);
+      }
+      form.addEventListener('submit', function (ev) {
+        ev.preventDefault();
+        var dados = Object.assign(cfg.extra ? cfg.extra() : {}, lerFormulario(form));
+        enviar(botao, chamar(cfg.api, dados)).then(cfg.aoSalvar).catch(function () {});
+      });
+      formArea.appendChild(h('h2', null, item.id ? 'Editar' : 'Adicionar'));
+      formArea.appendChild(form);
+    }
+
+    alvo.appendChild(formArea);
+    alvo.appendChild(h('div', { class: 'cartao tabela-rolagem' }, h('table', null,
+      h('thead', null, h('tr', null, cfg.colunas.map(function (c) { return h('th', null, c[0]); }))),
+      h('tbody', null, cfg.itens.map(function (item) {
+        return h('tr', { class: 'clicavel' + (item.ativo === 'NÃO' ? ' inativo' : ''), onclick: function () { editar(item); } },
+          cfg.colunas.map(function (c) { return h('td', null, c[1](item)); }));
+      })))));
+    editar({});
+  }
+
+  function cadProfissionais(alvo, aoSalvar) {
+    secaoCadastro(alvo, {
+      api: 'apiSalvarProfissional',
+      aoSalvar: aoSalvar,
+      itens: estado.cad.profissionais,
+      colunas: [['Nome', function (p) { return p.nome; }], ['E-mail', function (p) { return p.email; }],
+        ['Categoria', function (p) { return ROTULO_CATEGORIA[p.categoria] || p.categoria; }],
+        ['Perfil', function (p) { return p.perfil; }]],
+      campos: function (p) {
+        return [
+          campo('Nome', h('input', { name: 'nome', value: p.nome || '', required: true })),
+          campo('E-mail Google', h('input', { name: 'email', type: 'email', value: p.email || '', required: true })),
+          campo('Categoria', seletor('categoria', estado.cad.categorias.map(function (c) {
+            return { valor: c, rotulo: ROTULO_CATEGORIA[c] || c };
+          }), p.categoria)),
+          campo('Perfil', seletor('perfil', estado.cad.perfis, p.perfil || 'PROFISSIONAL', false))
+        ];
+      }
+    });
+  }
+
+  function cadJustificativas(alvo, aoSalvar) {
+    alvo.appendChild(h('p', { class: 'suave' },
+      'Depois de cada atendimento, o paciente tem que ser visto de novo em até o número de dias úteis da justificativa. ' +
+      'Sem prazo preenchido, o sistema não acompanha o retorno.'));
+    secaoCadastro(alvo, {
+      api: 'apiSalvarJustificativa',
+      aoSalvar: aoSalvar,
+      itens: estado.cad.justificativas,
+      colunas: [['Justificativa', function (j) { return j.nome; }],
+        ['Prazo (dias úteis)', function (j) { return j.prazo_dias_uteis === '' ? '—' : j.prazo_dias_uteis; }],
+        ['Ordem', function (j) { return j.ordem; }]],
+      campos: function (j) {
+        return [
+          campo('Justificativa', h('input', { name: 'nome', value: j.nome || '', required: true })),
+          campo('Prazo em dias úteis', h('input', { name: 'prazo_dias_uteis', type: 'number', min: 0, value: j.prazo_dias_uteis === undefined ? '' : j.prazo_dias_uteis })),
+          campo('Ordem', h('input', { name: 'ordem', type: 'number', value: j.ordem || '' }))
+        ];
+      }
+    });
+  }
+
+  function cadDesfechos(alvo, aoSalvar) {
+    alvo.appendChild(h('p', { class: 'suave' },
+      'Desfechos de saída do hospital encerram a admissão: se o paciente voltar, abre-se uma nova admissão. ' +
+      'Os outros encerram só o acompanhamento, que pode ser retomado na mesma admissão.'));
+    secaoCadastro(alvo, {
+      api: 'apiSalvarDesfecho',
+      aoSalvar: aoSalvar,
+      itens: estado.cad.desfechos,
+      colunas: [['Desfecho', function (d) { return d.nome; }],
+        ['Encerra a admissão', function (d) { return d.encerra_admissao === 'SIM' ? 'Sim (saída do hospital)' : 'Não (só o acompanhamento)'; }],
+        ['Ordem', function (d) { return d.ordem; }]],
+      campos: function (d) {
+        return [
+          campo('Desfecho', h('input', { name: 'nome', value: d.nome || '', required: true })),
+          campo('Encerra a admissão?', seletor('encerra_admissao', [{ valor: 'SIM', rotulo: 'Sim, paciente saiu do hospital' },
+            { valor: 'NÃO', rotulo: 'Não, encerra só o acompanhamento' }], d.encerra_admissao || 'NÃO', false)),
+          campo('Ordem', h('input', { name: 'ordem', type: 'number', value: d.ordem || '' }))
+        ];
+      }
+    });
+  }
+
+  function cadParametros(alvo, aoSalvar) {
+    var p = estado.cad.parametros.filter(function (x) { return x.chave === 'PRAZO_PRIMEIRO_ATENDIMENTO_DIAS_UTEIS'; })[0];
+    if (!p) return;
+    var form = h('form', { class: 'linha' },
+      campo('Dias úteis para o 1º atendimento', h('input', { name: 'valor', type: 'number', min: 0, value: p.valor, required: true })));
+    var botao = h('button', { class: 'btn', type: 'submit' }, 'Salvar');
+    form.appendChild(botao);
+    form.addEventListener('submit', function (ev) {
+      ev.preventDefault();
+      enviar(botao, chamar('apiSalvarParametro', Object.assign(lerFormulario(form), { id: p.id }))).then(aoSalvar).catch(function () {});
+    });
+    alvo.appendChild(h('div', { class: 'cartao' }, h('p', { class: 'suave' }, p.descricao +
+      ' Admissões que tiverem desfecho dentro desse prazo sem terem sido atendidas ficam fora do indicador.'), form));
+  }
+
+  function cadFeriados(alvo, aoSalvar) {
+    alvo.appendChild(h('p', { class: 'suave' }, 'Feriados não contam como dia útil nos prazos. Inclua os estaduais, municipais e pontos facultativos.'));
+    secaoCadastro(alvo, {
+      api: 'apiSalvarFeriado',
+      apiExcluir: 'apiExcluirFeriado',
+      semAtivo: true,
+      aoSalvar: aoSalvar,
+      itens: estado.cad.feriados.slice().reverse(),
+      colunas: [['Data', function (f) { return dataBr(f.data); }], ['Descrição', function (f) { return f.descricao; }]],
+      campos: function (f) {
+        return [
+          campo('Data', h('input', { name: 'data', type: 'date', value: f.data || '', required: true })),
+          campo('Descrição', h('input', { name: 'descricao', value: f.descricao || '' }))
+        ];
+      }
+    });
+  }
+
+  function cadUnidades(alvo, aoSalvar) {
+    var setores = estado.cad.setores.map(function (s) { return { valor: s.id, rotulo: s.nome }; });
+    var blocoSetores = h('div');
+    var blocoUnidades = h('div');
+    alvo.appendChild(h('h2', null, 'Unidades'));
+    alvo.appendChild(blocoUnidades);
+    alvo.appendChild(h('h2', null, 'Setores'));
+    alvo.appendChild(blocoSetores);
+    secaoCadastro(blocoUnidades, {
+      api: 'apiSalvarUnidade',
+      aoSalvar: aoSalvar,
+      itens: estado.cad.unidades,
+      colunas: [['Unidade', function (u) { return u.nome; }], ['Setor', function (u) { return u.setor; }],
+        ['Ordem', function (u) { return u.ordem; }]],
+      campos: function (u) {
+        return [
+          campo('Unidade', h('input', { name: 'nome', value: u.nome || '', required: true })),
+          campo('Setor', seletor('setor_id', setores, u.setor_id)),
+          campo('Ordem', h('input', { name: 'ordem', type: 'number', value: u.ordem || '' }))
+        ];
+      }
+    });
+    secaoCadastro(blocoSetores, {
+      api: 'apiSalvarSetor',
+      aoSalvar: aoSalvar,
+      itens: estado.cad.setores,
+      colunas: [['Setor', function (s) { return s.nome; }], ['Ordem', function (s) { return s.ordem; }]],
+      campos: function (s) {
+        return [
+          campo('Setor', h('input', { name: 'nome', value: s.nome || '', required: true })),
+          campo('Ordem', h('input', { name: 'ordem', type: 'number', value: s.ordem || '' }))
+        ];
+      }
+    });
+  }
+
+  function cadListas(alvo, aoSalvar) {
+    var nomes = Object.keys(NOMES_LISTAS);
+    var escolha = seletor('lista', nomes.map(function (n) { return { valor: n, rotulo: NOMES_LISTAS[n] }; }),
+      cadListas.atual || nomes[0], false);
+    var bloco = h('div');
+    function desenhar() {
+      cadListas.atual = escolha.value;
+      bloco.textContent = '';
+      secaoCadastro(bloco, {
+        api: 'apiSalvarItemLista',
+        aoSalvar: aoSalvar,
+        extra: function () { return { lista: escolha.value }; },
+        itens: estado.cad.listas[escolha.value] || [],
+        colunas: [['Valor', function (i) { return i.valor; }], ['Ordem', function (i) { return i.ordem; }]],
+        campos: function (i) {
+          return [
+            campo('Valor', h('input', { name: 'valor', value: i.valor || '', required: true })),
+            campo('Ordem', h('input', { name: 'ordem', type: 'number', value: i.ordem || '' }))
+          ];
+        }
+      });
+    }
+    escolha.addEventListener('change', desenhar);
+    alvo.appendChild(h('div', { class: 'cartao' }, campo('Lista', escolha)));
+    alvo.appendChild(bloco);
+    desenhar();
+  }
+
+  // ---------- início ----------
+
+  document.getElementById('menu').addEventListener('click', function (ev) {
+    var b = ev.target.closest('button[data-tela]');
+    if (b) abrir(b.dataset.tela);
+  });
+
+  chamar('apiInicio').then(function (dados) {
+    estado.usuario = dados.usuario;
+    estado.cad = dados;
+    document.getElementById('usuario').textContent = dados.usuario.nome + ' · ' + dados.usuario.perfil.toLowerCase();
+    if (!ehCoordenacao()) document.querySelectorAll('[data-coordenacao]').forEach(function (b) { b.remove(); });
+    abrir('inicio');
+  }).catch(function (e) {
+    var main = tela('Sem acesso');
+    main.appendChild(h('div', { class: 'cartao' }, h('p', null, e.message)));
+  });
+</script>

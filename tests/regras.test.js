@@ -7,7 +7,7 @@ const vm = require('node:vm');
 
 // Carrega os arquivos do Apps Script num contexto isolado, como o Apps Script faz (escopo global único).
 const contexto = vm.createContext({});
-for (const arquivo of ['Config.js', 'Regras.js']) {
+for (const arquivo of ['Config.js', 'Regras.js', 'Indicadores.js']) {
   vm.runInContext(fs.readFileSync(path.join(__dirname, '..', 'src', arquivo), 'utf8'), contexto, { filename: arquivo });
 }
 const r = contexto;
@@ -143,10 +143,10 @@ test('calcularAdmissao: 1º atendimento e retornos, família sem impossibilidade
     { id: 'p2', data: '2026-10-21', publico: 'PACIENTE', justificativa_id: 'j2' }
   ];
   const res = r.calcularAdmissao(ADM, atend, { ...OP, hoje: '2026-10-21' });
-  assert.deepEqual({ ...res.porAtendimento.f1 }, { prazo_limite: '', no_prazo: '', conta_prazo: 'NÃO' });
-  assert.deepEqual({ ...res.porAtendimento.p1 }, { prazo_limite: '2026-10-14', no_prazo: 'SIM', conta_prazo: 'SIM' });
-  assert.deepEqual({ ...res.porAtendimento.f2 }, { prazo_limite: '2026-10-16', no_prazo: 'SIM', conta_prazo: 'SIM' });
-  assert.deepEqual({ ...res.porAtendimento.p2 }, { prazo_limite: '2026-10-20', no_prazo: 'NÃO', conta_prazo: 'SIM' });
+  assert.deepEqual({ ...res.porAtendimento.f1 }, { prazo_limite: '', no_prazo: '', conta_prazo: 'NÃO', tipo_prazo: '' });
+  assert.deepEqual({ ...res.porAtendimento.p1 }, { prazo_limite: '2026-10-14', no_prazo: 'SIM', conta_prazo: 'SIM', tipo_prazo: 'PRIMEIRO' });
+  assert.deepEqual({ ...res.porAtendimento.f2 }, { prazo_limite: '2026-10-16', no_prazo: 'SIM', conta_prazo: 'SIM', tipo_prazo: 'RETORNO' });
+  assert.deepEqual({ ...res.porAtendimento.p2 }, { prazo_limite: '2026-10-20', no_prazo: 'NÃO', conta_prazo: 'SIM', tipo_prazo: 'RETORNO' });
   const c = res.campos;
   assert.equal(c.status, 'EM ACOMPANHAMENTO');
   assert.equal(c.primeiro_atendimento, '2026-10-14');
@@ -192,4 +192,103 @@ test('calcularAdmissao: desfecho psicológico para os prazos; retomada recomeça
   const semAtendimentoAinda = r.calcularAdmissao(retomada, atend, { ...OP, hoje: '2026-10-26' }).campos;
   assert.equal(semAtendimentoAinda.ultimo_contato, '2026-10-26');
   assert.equal(semAtendimentoAinda.proximo_prazo, '2026-10-27');
+});
+
+test('montarCompilado: mensal por unidade, grupos e indicadores', () => {
+  const unidades = [
+    { id: 'u1', nome: 'PED 1', setor_id: 's1', ativo: 'SIM' },
+    { id: 'u2', nome: 'UTI 1', setor_id: 's2', ativo: 'SIM' },
+    { id: 'u3', nome: 'VELHA', setor_id: 's2', ativo: 'NÃO' }
+  ];
+  const E = 'PROFISSIONAL DA EMPRESA';
+  const dados = {
+    unidades,
+    admissoes: [
+      { id: 'a1', unidade_id: 'u1', data_admissao: '2026-10-05', tipo_solicitacao: 'EQUIPE', primeiro_no_prazo: 'SIM', dias_ate_primeiro_atendimento: '2', desfecho_id: 'd1', data_desfecho: '2026-10-20' },
+      { id: 'a2', unidade_id: 'u1', data_admissao: '2026-10-07', tipo_solicitacao: 'BUSCA ATIVA', primeiro_no_prazo: 'NÃO', dias_ate_primeiro_atendimento: '6' },
+      { id: 'a3', unidade_id: 'u2', data_admissao: '2026-10-08', primeiro_no_prazo: 'NÃO SE APLICA', dias_ate_primeiro_atendimento: '' },
+      { id: 'a4', unidade_id: 'u2', data_admissao: '2026-09-30', primeiro_no_prazo: 'SIM' } // outro mês
+    ],
+    atendimentos: [
+      { unidade_id: 'u1', data: '2026-10-06', publico: 'PACIENTE', categoria: E, tipo_prazo: 'PRIMEIRO', no_prazo: 'SIM' },
+      { unidade_id: 'u1', data: '2026-10-08', publico: 'PACIENTE', categoria: E, tipo_prazo: 'RETORNO', no_prazo: 'SIM' },
+      { unidade_id: 'u1', data: '2026-10-09', publico: 'FAMÍLIA', quantidade: '3', paciente_impossibilitado: 'SIM', categoria: 'RESIDENTE', tipo_prazo: 'RETORNO', no_prazo: 'NÃO' },
+      { unidade_id: 'u2', data: '2026-10-09', publico: 'PACIENTE', categoria: 'ESTAGIÁRIO' },
+      { unidade_id: 'u3', data: '2026-10-10', publico: 'PACIENTE', categoria: E },
+      { unidade_id: 'u1', data: '2026-11-01', publico: 'PACIENTE', categoria: E }
+    ],
+    atividades: [{ unidade_id: 'u2', data: '2026-10-09', tipo: 'DISCUSSÃO DE CASO', quantidade: '2', categoria: E }],
+    reunioes: [{ unidade_id: 'u1', data: '2026-10-09', tipo: 'GRUPO', quantidade: '1', categoria: E }],
+    gerenciais: [{ data: '2026-10-09', tipo: 'TREINAMENTO', quantidade: '4', categoria: E }],
+    listas: { TIPO_SOLICITACAO: ['EQUIPE', 'BUSCA ATIVA', 'ESPONTÂNEA'], ATIVIDADE_GERENCIAL: ['TREINAMENTO'] },
+    desfechos: [{ id: 'd1', nome: 'ALTA' }, { id: 'd2', nome: 'ÓBITO' }]
+  };
+  const op = { ano: 2026, mes: 10, eixo: 'UNIDADE', grupo: 'TODOS', diasPrimeiro: 3 };
+  const c = r.montarCompilado(dados, op);
+  assert.equal(c.titulo, 'COMPILADO OUTUBRO DE 2026');
+  assert.deepEqual(c.colunas.map((x) => x.nome), ['PED 1', 'UTI 1', 'VELHA']); // inativa com dado aparece
+  const sec = (t) => c.secoes.find((s) => s.titulo.startsWith(t));
+  const lin = (t, rot) => sec(t).linhas.find((l) => l.rotulo.startsWith(rot));
+
+  assert.deepEqual(Array.from(lin('Atendimentos', 'PACIENTE').valores), [2, 1, 1]);
+  assert.equal(lin('Atendimentos', 'FAMÍLIA').total, 3);
+  assert.equal(lin('Atendimentos', 'TOTAL').total, 7);
+  assert.equal(lin('Admissões', 'ADMISSÕES').total, 3);
+  assert.deepEqual(Array.from(lin('Tipo de solicitação', 'EQUIPE').valores), [1, 0, 0]);
+  assert.equal(lin('Tipo de solicitação', 'NÃO INFORMADO').total, 1);
+  assert.equal(lin('1º atendimento', '% NO PRAZO').total, 0.5);
+  assert.equal(lin('1º atendimento', 'NÃO SE APLICA').total, 1);
+  assert.equal(lin('1º atendimento', 'MÉDIA').total, 4);
+  assert.equal(lin('Retornos', '% NO PRAZO').valores[0], 0.5);
+  assert.equal(lin('Retornos', '% NO PRAZO').valores[1], null);
+  assert.equal(lin('Desfechos', 'ALTA').total, 1);
+  assert.equal(lin('Atividades assistenciais', 'DISCUSSÃO DE CASO').total, 2);
+  assert.equal(lin('Reuniões de equipe', 'GRUPO').total, 1);
+  assert.equal(sec('Atividades gerenciais').semColunas, true);
+  assert.equal(lin('Atividades gerenciais', 'TREINAMENTO').total, 4);
+
+  const emp = r.montarCompilado(dados, { ...op, grupo: 'EMPRESA' });
+  const linE = (t, rot) => emp.secoes.find((s) => s.titulo.startsWith(t)).linhas.find((l) => l.rotulo.startsWith(rot));
+  assert.equal(linE('Atendimentos', 'PACIENTE').total, 3); // sem a estagiária
+  assert.equal(linE('Atendimentos', 'FAMÍLIA').total, 0); // família foi da residente
+  assert.equal(linE('Retornos', '% NO PRAZO').total, 1);
+  assert.equal(linE('Admissões', 'ADMISSÕES').total, 3); // admissões são do serviço todo
+  assert.ok(emp.secoes.find((s) => s.titulo === 'Admissões').nota);
+
+  const setor = r.montarCompilado(dados, { ...op, setor_id: 's2' });
+  assert.deepEqual(setor.colunas.map((x) => x.nome), ['UTI 1', 'VELHA']);
+});
+
+test('montarCompilado: anual por mês e exportação em tabela', () => {
+  const dados = {
+    unidades: [{ id: 'u1', nome: 'PED 1', setor_id: 's1' }, { id: 'u2', nome: 'UTI 1', setor_id: 's2' }],
+    admissoes: [], atividades: [], reunioes: [],
+    atendimentos: [
+      { unidade_id: 'u1', data: '2026-01-10', publico: 'PACIENTE', categoria: 'RESIDENTE' },
+      { unidade_id: 'u2', data: '2026-03-10', publico: 'PACIENTE', categoria: 'RESIDENTE' },
+      { unidade_id: 'u1', data: '2025-03-10', publico: 'PACIENTE', categoria: 'RESIDENTE' }
+    ],
+    gerenciais: [{ data: '2026-03-02', tipo: 'TREINAMENTO', categoria: 'RESIDENTE' }],
+    listas: {}, desfechos: []
+  };
+  const c = r.montarCompilado(dados, { ano: 2026, eixo: 'MES', grupo: 'RESIDENTE', diasPrimeiro: 3 });
+  assert.equal(c.titulo, 'COMPILADO ANUAL 2026');
+  assert.equal(c.colunas.length, 12);
+  const pac = c.secoes[0].linhas[0];
+  assert.equal(pac.valores[0], 1);
+  assert.equal(pac.valores[2], 1);
+  assert.equal(pac.total, 2);
+  assert.equal(c.secoes.find((s) => s.titulo === 'Atividades gerenciais').linhas[0].valores[2], 1);
+  const soPed = r.montarCompilado(dados, { ano: 2026, eixo: 'MES', grupo: 'TODOS', unidade_id: 'u1', diasPrimeiro: 3 });
+  assert.equal(soPed.secoes[0].linhas[0].total, 1);
+
+  const t = r.compiladoEmTabela(c);
+  assert.equal(t.linhas[0][0], 'COMPILADO ANUAL 2026');
+  assert.ok(t.linhas.every((l) => l.length === t.largura));
+  const cab = t.linhas[t.tipos.indexOf('cabecalho')];
+  assert.deepEqual(Array.from(cab.slice(0, 3)), ['ATENDIMENTOS', 'JAN', 'FEV']);
+  assert.equal(cab[13], 'TOTAL');
+  assert.equal(r.formatarValorCompilado(0.857, 'pct'), '86%');
+  assert.equal(r.formatarValorCompilado(2.25, 'media'), '2,3');
+  assert.equal(r.formatarValorCompilado(null, 'pct'), '—');
 });

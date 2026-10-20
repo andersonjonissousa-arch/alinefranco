@@ -10,6 +10,9 @@ class AbaFalsa {
   getLastRow() { return this.linhas.length; }
   getMaxRows() { return Math.max(1000, this.linhas.length); }
   setFrozenRows() { return this; }
+  setFrozenColumns() { return this; }
+  setColumnWidth() { return this; }
+  setName(nome) { this.nome = nome; return this; }
   appendRow(valores) { this.linhas.push(valores.map(String)); return this; }
   deleteRow(n) { this.linhas.splice(n - 1, 1); }
   getRange(linha, coluna, nLinhas = 1, nColunas = 1) {
@@ -38,14 +41,18 @@ class AbaFalsa {
       },
       setFontWeight() { return intervalo; },
       setBackground() { return intervalo; },
-      setNumberFormat() { return intervalo; }
+      setNumberFormat() { return intervalo; },
+      setFontSize() { return intervalo; },
+      setFontStyle() { return intervalo; },
+      setFontColor() { return intervalo; }
     };
     return intervalo;
   }
 }
 
 class PlanilhaFalsa {
-  constructor() { this.abas = [new AbaFalsa('Página1')]; }
+  constructor(nome) { this.abas = [new AbaFalsa('Página1')]; this.nome = nome || 'Banco'; }
+  getName() { return this.nome; }
   getId() { return 'planilha-falsa'; }
   getUrl() { return 'https://docs.google.com/spreadsheets/d/planilha-falsa'; }
   getSheets() { return this.abas; }
@@ -58,16 +65,23 @@ function criarGoogleFalso({ email = 'coordenacao@exemplo.com' } = {}) {
   const planilha = new PlanilhaFalsa();
   const props = {};
   const sessao = { email };
+  const criadas = [];
   return {
     planilha,
     sessao,
+    criadas,
     globais: {
       console: { log() {}, error() {}, warn() {} },
       Logger: { log() {} },
       SpreadsheetApp: {
         getActiveSpreadsheet: () => planilha,
         openById: () => planilha,
-        create: () => planilha
+        // O banco é a planilha ativa; create só é usado nas exportações.
+        create: (nome) => {
+          const nova = new PlanilhaFalsa(nome);
+          criadas.push(nova);
+          return nova;
+        }
       },
       PropertiesService: {
         getScriptProperties: () => ({

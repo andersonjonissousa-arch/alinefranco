@@ -41,19 +41,20 @@ var TABELAS = {
     'dias_ate_primeiro_atendimento', 'dias_resposta', 'ultimo_contato', 'proximo_prazo',
     'criado_por', 'criado_em', 'atualizado_em'
   ],
-  // Cada atendimento: ao paciente ou à família (com quantas pessoas), por quem e se foi no prazo.
+  // Cada atendimento: ao paciente ou à família (com quantas pessoas), por quem, em que unidade e se foi no prazo.
+  // tipo_prazo: PRIMEIRO (1º atendimento da admissão) ou RETORNO.
   // Atendimento à família só conta para os prazos quando o paciente estava impossibilitado.
   ATENDIMENTOS: [
-    'id', 'admissao_id', 'data', 'publico', 'quantidade', 'paciente_impossibilitado', 'conta_prazo',
-    'profissional_id', 'categoria', 'justificativa_id', 'prazo_limite', 'no_prazo', 'observacao',
+    'id', 'admissao_id', 'unidade_id', 'data', 'publico', 'quantidade', 'paciente_impossibilitado', 'conta_prazo',
+    'profissional_id', 'categoria', 'justificativa_id', 'tipo_prazo', 'prazo_limite', 'no_prazo', 'observacao',
     'criado_por', 'criado_em'
   ],
   // Atividades assistenciais da admissão (ficha de admissão, discussão de caso, visitas...).
-  ATIVIDADES: ['id', 'admissao_id', 'data', 'tipo', 'quantidade', 'profissional_id', 'categoria', 'criado_em'],
+  ATIVIDADES: ['id', 'admissao_id', 'unidade_id', 'data', 'tipo', 'quantidade', 'profissional_id', 'categoria', 'criado_por', 'criado_em'],
   // Reuniões de equipe por unidade.
-  REUNIOES: ['id', 'data', 'unidade_id', 'tipo', 'quantidade', 'profissional_id', 'categoria', 'criado_em'],
+  REUNIOES: ['id', 'data', 'unidade_id', 'tipo', 'quantidade', 'profissional_id', 'categoria', 'criado_por', 'criado_em'],
   // Atividades gerenciais do serviço.
-  GERENCIAIS: ['id', 'data', 'tipo', 'quantidade', 'profissional_id', 'categoria', 'criado_em']
+  GERENCIAIS: ['id', 'data', 'tipo', 'quantidade', 'profissional_id', 'categoria', 'criado_por', 'criado_em']
 };
 
 /** Só a primeira categoria entra nos números da empresa; residentes e estagiários aparecem à parte. */

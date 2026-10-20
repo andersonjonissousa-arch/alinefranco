@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <base target="_top">
+  <meta charset="utf-8">
+  <?!= incluir('ui/Estilo') ?>
+</head>
+<body>
+  <header class="topo">
+    <div class="marca">Gestão da Psicologia</div>
+    <nav id="menu" class="menu" aria-label="Seções">
+      <button data-tela="inicio" class="ativo">Início</button>
+      <button data-tela="pacientes">Pacientes</button>
+      <button data-tela="admissoes">Admissões</button>
+      <button data-tela="registro">Registro do dia</button>
+      <button data-tela="compilado">Compilado</button>
+      <button data-tela="cadastros" data-coordenacao>Cadastros</button>
+    </nav>
+    <div id="usuario" class="usuario"></div>
+  </header>
+
+  <main id="conteudo" class="conteudo">
+    <p class="carregando">Carregando…</p>
+  </main>
+
+  <div id="aviso" class="aviso" role="status" aria-live="polite"></div>
+
+  <?!= incluir('ui/App') ?>
+</body>
+</html>

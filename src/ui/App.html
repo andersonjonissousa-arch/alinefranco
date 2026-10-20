@@ -148,8 +148,8 @@
     inicio: telaInicio,
     pacientes: telaPacientes,
     admissoes: telaAdmissoes,
-    registro: function () { emBreve('Registro do dia', 'Reuniões de equipe e atividades gerenciais.'); },
-    compilado: function () { emBreve('Compilado', 'Indicadores mensais por unidade e compilado anual.'); },
+    registro: telaRegistro,
+    compilado: telaCompilado,
     cadastros: telaCadastros
   };
 
@@ -159,10 +159,6 @@
       b.classList.toggle('ativo', b.dataset.tela === nome);
     });
     TELAS[nome](arg);
-  }
-
-  function emBreve(titulo, texto) {
-    tela(titulo).appendChild(h('div', { class: 'cartao em-breve' }, h('p', null, texto), h('p', null, 'Em construção.')));
   }
 
   // ---------- Início: painel do dia ----------
@@ -584,6 +580,150 @@
     });
     area.appendChild(a.id ? form : h('div', { class: 'cartao' }, form));
     return area;
+  }
+
+  // ---------- Registro do dia: reuniões de equipe e atividades gerenciais ----------
+
+  function telaRegistro() {
+    var main = tela('Registro do dia');
+    var listas = h('div');
+    var dataRef = estado.cad.hoje;
+
+    function formulario(titulo, api, campos, msg) {
+      var form = h('form', { class: 'linha' },
+        campo('Data', h('input', { name: 'data', type: 'date', value: estado.cad.hoje, max: estado.cad.hoje, required: true })),
+        campos,
+        campo('Quantidade', h('input', { name: 'quantidade', type: 'number', min: 1, max: 50, value: 1 })),
+        campo('Profissional', seletor('profissional_id', opcoesProfissionais(), estado.usuario.id, false)));
+      var botao = h('button', { class: 'btn', type: 'submit' }, 'Registrar');
+      form.appendChild(botao);
+      form.addEventListener('submit', function (ev) {
+        ev.preventDefault();
+        var dados = lerFormulario(form);
+        dataRef = dados.data;
+        enviar(botao, chamar(api, dados), msg).then(desenhar).catch(function () {});
+      });
+      return h('div', { class: 'cartao' }, h('h2', null, titulo), form);
+    }
+
+    function tabela(titulo, itens, colunas, apiExcluir) {
+      var bloco = h('div', { class: 'cartao tabela-rolagem' }, h('h2', null, titulo + ' (' + itens.length + ')'));
+      if (!itens.length) {
+        bloco.appendChild(h('p', { class: 'suave' }, 'Nada registrado neste mês.'));
+        return bloco;
+      }
+      bloco.appendChild(h('table', null, h('tbody', null, itens.map(function (r) {
+        var apagar = h('button', { class: 'link perigo', type: 'button' }, 'excluir');
+        apagar.addEventListener('click', function () {
+          if (!confirm('Excluir este registro?')) return;
+          enviar(apagar, chamar(apiExcluir, r.id), 'Excluído.').then(desenhar).catch(function () {});
+        });
+        return h('tr', null, colunas.map(function (c) { return h('td', null, c(r)); }), h('td', null, apagar));
+      }))));
+      return bloco;
+    }
+
+    function desenhar(dados) {
+      listas.textContent = '';
+      var p = dados.mes.split('-');
+      listas.appendChild(h('h2', { class: 'subtitulo-secao' }, 'Registros de ' + NOMES_MESES[Number(p[1]) - 1].toLowerCase() + ' de ' + p[0]));
+      listas.appendChild(tabela('Reuniões de equipe', dados.reunioes, [
+        function (r) { return dataBr(r.data); }, function (r) { return r.unidade_nome; }, function (r) { return r.tipo; },
+        function (r) { return r.quantidade; }, function (r) { return r.profissional_nome; }], 'apiExcluirReuniao'));
+      listas.appendChild(tabela('Atividades gerenciais', dados.gerenciais, [
+        function (r) { return dataBr(r.data); }, function (r) { return r.tipo; },
+        function (r) { return r.quantidade; }, function (r) { return r.profissional_nome; }], 'apiExcluirGerencial'));
+    }
+
+    main.appendChild(h('p', { class: 'suave' }, 'Atendimentos e atividades assistenciais são registrados dentro de cada admissão.'));
+    main.appendChild(formulario('Reunião de equipe', 'apiRegistrarReuniao', [
+      campo('Unidade', seletor('unidade_id', opcoesUnidades(), '')),
+      campo('Tipo', seletor('tipo', opcoesLista('REUNIAO_EQUIPE'), ''))], 'Reunião registrada.'));
+    main.appendChild(formulario('Atividade gerencial', 'apiRegistrarGerencial', [
+      campo('Atividade', seletor('tipo', opcoesLista('ATIVIDADE_GERENCIAL'), ''))], 'Atividade registrada.'));
+    main.appendChild(listas);
+    chamar('apiRegistrosDoMes', dataRef).then(desenhar).catch(function (e) { avisar(e.message, 'erro'); });
+  }
+
+  // ---------- Compilado ----------
+
+  var NOMES_MESES = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro',
+    'Outubro', 'Novembro', 'Dezembro'];
+
+  function formatarValor(valor, tipo) {
+    if (valor === null || valor === undefined) return '—';
+    if (tipo === 'pct') return Math.round(valor * 100) + '%';
+    if (tipo === 'media') return (Math.round(valor * 10) / 10).toString().replace('.', ',');
+    return String(valor);
+  }
+
+  var filtrosCompilado = null;
+
+  function telaCompilado() {
+    var main = tela('Compilado');
+    var hojeP = estado.cad.hoje.split('-');
+    if (!filtrosCompilado) {
+      filtrosCompilado = { eixo: 'UNIDADE', ano: hojeP[0], mes: String(Number(hojeP[1])), grupo: 'TODOS', setor_id: '', unidade_id: '' };
+    }
+    var f = filtrosCompilado;
+    var anos = [];
+    for (var a = Number(hojeP[0]); a >= 2026; a--) anos.push(String(a));
+    if (anos.indexOf(f.ano) === -1) anos.push(f.ano);
+    var grupos = Object.keys(estado.cad.grupos).map(function (k) { return { valor: k, rotulo: estado.cad.grupos[k] }; });
+    var setores = estado.cad.setores.map(function (x) { return { valor: x.id, rotulo: x.nome }; });
+    var campoMes = campo('Mês', seletor('mes', NOMES_MESES.map(function (m, i) { return { valor: String(i + 1), rotulo: m }; }), f.mes, false));
+    var form = h('form', { class: 'linha nao-imprimir' },
+      campo('Compilado', seletor('eixo', [{ valor: 'UNIDADE', rotulo: 'Mensal, por unidade' }, { valor: 'MES', rotulo: 'Anual, por mês' }], f.eixo, false)),
+      campo('Ano', seletor('ano', anos, f.ano, false)),
+      campoMes,
+      campo('Profissionais', seletor('grupo', grupos, f.grupo, false)),
+      campo('Setor', seletor('setor_id', setores, f.setor_id, 'Todos')),
+      campo('Unidade', seletor('unidade_id', opcoesUnidades(), f.unidade_id, 'Todas')));
+    var exportar = h('button', { class: 'btn sec', type: 'button' }, 'Exportar para Google Planilhas');
+    var imprimir = h('button', { class: 'btn sec', type: 'button', onclick: function () { window.print(); } }, 'Imprimir');
+    var resultado = h('div', null, h('p', { class: 'carregando' }, 'Carregando…'));
+
+    function gerar() {
+      filtrosCompilado = lerFormulario(form);
+      campoMes.hidden = filtrosCompilado.eixo === 'MES';
+      resultado.textContent = '';
+      resultado.appendChild(h('p', { class: 'carregando' }, 'Calculando…'));
+      chamar('apiCompilado', filtrosCompilado).then(desenharCompilado).catch(function (e) { avisar(e.message, 'erro'); });
+    }
+
+    function desenharCompilado(c) {
+      resultado.textContent = '';
+      resultado.appendChild(h('div', { class: 'cabecalho-compilado' }, h('h2', null, c.titulo), h('div', { class: 'suave' }, c.subtitulo)));
+      c.secoes.forEach(function (s) {
+        var cabecalho = [h('th', { class: 'rotulo' }, s.titulo)];
+        if (!s.semColunas) c.colunas.forEach(function (col) { cabecalho.push(h('th', null, col.nome)); });
+        cabecalho.push(h('th', { class: 'total' }, 'Total'));
+        var corpo = s.linhas.map(function (l) {
+          var celulas = [h('td', { class: 'rotulo' }, l.rotulo)];
+          if (!s.semColunas) {
+            l.valores.forEach(function (v) {
+              celulas.push(h('td', { class: (v === 0 || v === null) ? 'zero' : '' }, formatarValor(v, l.tipo)));
+            });
+          }
+          celulas.push(h('td', { class: 'total' }, formatarValor(l.total, l.tipo)));
+          return h('tr', { class: l.destaque ? 'destaque' : '' }, celulas);
+        });
+        resultado.appendChild(h('div', { class: 'cartao secao-compilado' },
+          h('div', { class: 'tabela-rolagem' }, h('table', { class: 'compilado' }, h('thead', null, h('tr', null, cabecalho)), h('tbody', null, corpo))),
+          s.nota ? h('p', { class: 'nota' }, s.nota) : null));
+      });
+    }
+
+    exportar.addEventListener('click', function () {
+      enviar(exportar, chamar('apiExportarCompilado', lerFormulario(form)), 'Planilha criada.').then(function (r) {
+        var link = h('a', { href: r.url, target: '_blank', rel: 'noopener' }, 'Abrir "' + r.nome + '"');
+        resultado.insertBefore(h('div', { class: 'cartao' }, 'Planilha criada no seu Google Drive. ', link), resultado.firstChild);
+      }).catch(function () {});
+    });
+    form.addEventListener('change', gerar);
+    main.appendChild(h('div', { class: 'cartao nao-imprimir' }, form, h('div', { class: 'linha acoes' }, exportar, imprimir)));
+    main.appendChild(resultado);
+    gerar();
   }
 
   // ---------- Cadastros (coordenação) ----------

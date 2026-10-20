@@ -39,6 +39,7 @@ function dadosDeCadastro(incluirInativos) {
     desfechos: listar('DESFECHOS').filter(ativo).sort(porOrdem),
     parametros: listar('PARAMETROS'),
     status_admissao: STATUS_ADMISSAO,
+    grupos: GRUPOS_COMPILADO,
     feriados: listar('FERIADOS').slice().sort(function (a, b) { return a.data < b.data ? -1 : 1; }),
     categorias: CATEGORIAS_PROFISSIONAL,
     perfis: PERFIS,
