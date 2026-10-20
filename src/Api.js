@@ -200,6 +200,12 @@ function apiSalvarDesfecho(dados) {
     if (dados.id) atualizar('DESFECHOS', dados.id, item);
     else inserir('DESFECHOS', item);
     recalcularAdmissoes(listar('ADMISSOES').filter(function (a) { return a.desfecho_id; }).map(function (a) { return a.id; }));
+    var mudancas = {};
+    listar('DESFECHOS_REGISTRADOS').forEach(function (r) {
+      var d = buscarPorId('DESFECHOS', r.desfecho_id);
+      if (d && d.encerra_admissao !== r.encerra_admissao) mudancas[r.id] = { encerra_admissao: d.encerra_admissao };
+    });
+    atualizarVarios('DESFECHOS_REGISTRADOS', mudancas);
     return dadosDeCadastro(true);
   });
 }

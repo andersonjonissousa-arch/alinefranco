@@ -33,7 +33,7 @@ function acumular(linha, chave, valor) {
 /**
  * Monta o compilado.
  *
- * @param dados { unidades, admissoes, atendimentos, atividades, reunioes, gerenciais,
+ * @param dados { unidades, admissoes, atendimentos, atividades, reunioes, gerenciais, desfechosRegistrados,
  *                listas: { NOME_DA_LISTA: [valores] }, desfechos: [{ id, nome }] }
  * @param op { ano, mes (1 a 12, só no mensal), eixo: 'UNIDADE' | 'MES', grupo, setor_id, unidade_id, diasPrimeiro }
  * @return { titulo, subtitulo, colunas: [{ chave, nome }], secoes: [{ titulo, nota, semColunas, linhas }] }
@@ -185,11 +185,18 @@ function montarCompilado(dados, op) {
     nota: 'Atendimentos de acompanhamento que contam para o prazo (paciente, ou família com paciente impossibilitado).'
   });
 
-  // 5. Desfechos no período
-  var comDesfecho = dados.admissoes.filter(function (a) { return a.desfecho_id && aceita(a.data_desfecho, a.unidade_id); });
-  secao('Desfechos', distribuicao(comDesfecho, function (a) { return (desfechos[a.desfecho_id] || {}).nome; },
-    (dados.desfechos || []).map(function (d) { return d.nome; }),
-    function (a) { return chave(a.data_desfecho, a.unidade_id); }), { nota: notaServico });
+  // 5. Desfechos no período, pelo histórico: conta todos, inclusive os que foram seguidos de retomada.
+  var registrados = (dados.desfechosRegistrados || []).filter(function (d) { return aceita(d.data, d.unidade_id); });
+  var chaveDesf = function (d) { return chave(d.data, d.unidade_id); };
+  var linhasDesf = distribuicao(registrados, function (d) { return (desfechos[d.desfecho_id] || {}).nome; },
+    (dados.desfechos || []).map(function (d) { return d.nome; }), chaveDesf);
+  var lSaida = linhaCompilado('… saídas do hospital');
+  var lSoAcomp = linhaCompilado('… só encerraram o acompanhamento');
+  registrados.forEach(function (d) { acumular(d.encerra_admissao === 'SIM' ? lSaida : lSoAcomp, chaveDesf(d), 1); });
+  secao('Desfechos', linhasDesf.concat([lSaida, lSoAcomp]), {
+    nota: [notaServico, 'Conta todos os desfechos registrados: um paciente que teve alta psicológica, retomou e depois teve alta conta duas vezes.']
+      .filter(Boolean).join(' ')
+  });
 
   // 6. Atividades assistenciais e 7. reuniões de equipe
   var ativ = dados.atividades.filter(function (a) { return aceita(a.data, a.unidade_id) && noGrupo(a.categoria, grupo); });

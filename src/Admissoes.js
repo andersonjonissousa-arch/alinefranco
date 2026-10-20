@@ -169,6 +169,11 @@ function detalheAdmissao(adm) {
     paciente: aux.pacientes[adm.paciente_id] || null,
     atendimentos: daAdmissao('ATENDIMENTOS'),
     atividades: daAdmissao('ATIVIDADES'),
+    desfechos: listar('DESFECHOS_REGISTRADOS').filter(function (d) { return d.admissao_id === adm.id; })
+      .sort(function (a, b) { return String(a.data).localeCompare(String(b.data)) || String(a.criado_em).localeCompare(String(b.criado_em)); })
+      .map(function (d) {
+        return Object.assign({ desfecho_nome: (aux.desfechos[d.desfecho_id] || {}).nome || '', unidade_nome: (aux.unidades[d.unidade_id] || {}).nome || '' }, d);
+      }),
     outras_admissoes: anteriores
   };
 }
@@ -192,6 +197,9 @@ function apiSalvarAdmissao(dados) {
     if (primeiroAtend && adm.data_admissao > primeiroAtend) erros.push('A admissão não pode ser depois do 1º atendimento.');
     var ultimoAtend = listar('ATENDIMENTOS').filter(function (a) { return atual && a.admissao_id === atual.id; })
       .reduce(function (m, a) { return a.data > m ? a.data : m; }, '');
+    if (adm.data_desfecho && atual && atual.retomado_em && adm.data_desfecho < normalizarData(atual.retomado_em)) {
+      erros.push('O desfecho não pode ser antes da retomada do acompanhamento.');
+    }
     if (adm.data_desfecho && ultimoAtend && adm.data_desfecho < ultimoAtend) {
       erros.push('O desfecho não pode ser antes do último atendimento (' + ultimoAtend.split('-').reverse().join('/') + ').');
     }
@@ -206,8 +214,41 @@ function apiSalvarAdmissao(dados) {
     var salvo = atual
       ? atualizar('ADMISSOES', atual.id, adm)
       : inserir('ADMISSOES', Object.assign({ criado_por: usuario.id, status: STATUS_ADMISSAO.aguardando }, adm));
+    registrarDesfecho(salvo, usuario);
     return detalheAdmissao(recalcularAdmissao(salvo.id));
   });
+}
+
+/** Desfecho atual (vigente) da admissão no histórico, se houver. */
+function desfechoVigente(admissaoId) {
+  return listar('DESFECHOS_REGISTRADOS').filter(function (d) {
+    return d.admissao_id === admissaoId && d.vigente === 'SIM';
+  })[0] || null;
+}
+
+/**
+ * Mantém o histórico de desfechos de acordo com a admissão salva:
+ * desfecho novo vira um lançamento; desfecho alterado corrige o lançamento vigente;
+ * desfecho apagado remove o lançamento vigente (foi lançado por engano).
+ */
+function registrarDesfecho(adm, usuario) {
+  var vigente = desfechoVigente(adm.id);
+  if (!adm.desfecho_id) {
+    if (vigente) excluir('DESFECHOS_REGISTRADOS', vigente.id);
+    return;
+  }
+  var dados = {
+    unidade_id: adm.unidade_id,
+    desfecho_id: adm.desfecho_id,
+    data: normalizarData(adm.data_desfecho),
+    encerra_admissao: desfechoEncerraAdmissao(adm.desfecho_id) ? 'SIM' : 'NÃO'
+  };
+  if (vigente) {
+    var mudou = Object.keys(dados).some(function (c) { return String(vigente[c]) !== String(dados[c]); });
+    if (mudou) atualizar('DESFECHOS_REGISTRADOS', vigente.id, dados);
+    return;
+  }
+  inserir('DESFECHOS_REGISTRADOS', Object.assign({ admissao_id: adm.id, vigente: 'SIM', criado_por: usuario.id }, dados));
 }
 
 /** Paciente teve desfecho psicológico e continua internado: o acompanhamento recomeça na mesma admissão. */
@@ -226,6 +267,8 @@ function apiRetomarAcompanhamento(dados) {
     var desfecho = buscarPorId('DESFECHOS', adm.desfecho_id) || {};
     var nota = 'Acompanhamento retomado em ' + data.split('-').reverse().join('/') + ' por ' + usuario.nome +
       ' (desfecho anterior: ' + (desfecho.nome || '?') + ' em ' + normalizarData(adm.data_desfecho).split('-').reverse().join('/') + ').';
+    var vigente = desfechoVigente(adm.id);
+    if (vigente) atualizar('DESFECHOS_REGISTRADOS', vigente.id, { vigente: 'NÃO' });
     atualizar('ADMISSOES', adm.id, {
       desfecho_id: '',
       data_desfecho: '',

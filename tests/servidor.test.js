@@ -312,3 +312,42 @@ test('registro do dia: reuniões e atividades gerenciais, com exclusão só pelo
   const grupo = c.secoes.find((s) => s.titulo === 'Reuniões de equipe').linhas.find((l) => l.rotulo === 'GRUPO');
   assert.equal(grupo.total, 2);
 });
+
+test('histórico de desfechos: retomada preserva o desfecho anterior; correção não duplica; apagar remove', () => {
+  const { ctx, desfecho, admitir, atender, paciente, unidade, j } = sistemaComAdmissao();
+  const adm = admitir().dados.admissao;
+  atender(adm, { data: '2026-10-13' });
+  const base = { id: adm.id, paciente_id: paciente.id, unidade_id: unidade.id, data_admissao: '2026-10-09',
+    necessidade_acompanhamento: 'PACIENTE', justificativa_id: j.id };
+  const salvar = (extra) => { ctx.novaExecucao(); const r = ctx.apiSalvarAdmissao({ ...base, ...extra }); ctx.novaExecucao(); return r; };
+
+  // Lança recusa por engano e corrige para alta psicológica: continua 1 registro.
+  salvar({ desfecho_id: desfecho('RECUSA').id, data_desfecho: '2026-10-14' });
+  const corrigido = salvar({ desfecho_id: desfecho('ALTA PSICOLÓGICA').id, data_desfecho: '2026-10-15' });
+  assert.equal(corrigido.dados.desfechos.length, 1);
+  assert.equal(corrigido.dados.desfechos[0].desfecho_nome, 'ALTA PSICOLÓGICA');
+
+  // Apagar o desfecho (lançado por engano) remove o registro; lançar de novo cria um só.
+  assert.equal(salvar({}).dados.desfechos.length, 0);
+  salvar({ desfecho_id: desfecho('ALTA PSICOLÓGICA').id, data_desfecho: '2026-10-15' });
+
+  // Retomada: o registro fica no histórico e não é mais o vigente.
+  const ret = ctx.apiRetomarAcompanhamento({ id: adm.id, data: '2026-10-16' });
+  assert.equal(ret.ok, true, ret.erro);
+  assert.equal(ret.dados.desfechos.length, 1);
+  assert.equal(ret.dados.desfechos[0].vigente, 'NÃO');
+
+  atender(adm, { data: '2026-10-19' });
+  const antesDaRetomada = salvar({ desfecho_id: desfecho('ALTA').id, data_desfecho: '2026-10-15' });
+  assert.equal(antesDaRetomada.ok, false);
+  const alta = salvar({ desfecho_id: desfecho('ALTA').id, data_desfecho: '2026-10-20' });
+  assert.equal(alta.ok, true, alta.erro);
+  assert.equal(alta.dados.desfechos.length, 2);
+  assert.deepEqual(Array.from(alta.dados.desfechos, (d) => d.desfecho_nome), ['ALTA PSICOLÓGICA', 'ALTA']);
+
+  const c = ctx.apiCompilado({ ano: '2026', mes: '10', eixo: 'UNIDADE' }).dados;
+  const linhas = c.secoes.find((s) => s.titulo === 'Desfechos').linhas;
+  assert.equal(linhas.find((l) => l.rotulo === 'TOTAL').total, 2);
+  assert.equal(linhas.find((l) => l.rotulo === 'ALTA PSICOLÓGICA').total, 1);
+  assert.equal(linhas.find((l) => l.rotulo.startsWith('… saídas')).total, 1);
+});

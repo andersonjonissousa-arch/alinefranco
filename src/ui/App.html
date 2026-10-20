@@ -359,6 +359,7 @@
     else if (a.status !== st.encerrada) main.appendChild(formularioAtendimento(a));
     main.appendChild(listaAtendimentos(det));
     main.appendChild(blocoAtividades(det));
+    if (det.desfechos.length) main.appendChild(historicoDesfechos(det.desfechos));
     var dados = h('details', { class: 'cartao', open: a.status === st.aguardando && !det.atendimentos.length },
       h('summary', null, h('h2', { class: 'inline' }, 'Dados da admissão')));
     dados.appendChild(formularioAdmissao(a, desenharAdmissao));
@@ -367,6 +368,20 @@
       main.appendChild(h('div', { class: 'cartao tabela-rolagem' }, h('h2', null, 'Outras admissões deste paciente'),
         tabelaAdmissoes(det.outras_admissoes)));
     }
+  }
+
+  function historicoDesfechos(lista) {
+    return h('div', { class: 'cartao tabela-rolagem' }, h('h2', null, 'Desfechos desta admissão (' + lista.length + ')'),
+      h('table', null,
+        h('thead', null, h('tr', null, ['Data', 'Desfecho', 'Tipo', 'Unidade', ''].map(function (t) { return h('th', null, t); }))),
+        h('tbody', null, lista.map(function (d) {
+          return h('tr', null,
+            h('td', null, dataBr(d.data)),
+            h('td', null, d.desfecho_nome),
+            h('td', null, d.encerra_admissao === 'SIM' ? 'Saída do hospital' : 'Encerrou o acompanhamento'),
+            h('td', null, d.unidade_nome),
+            h('td', null, d.vigente === 'SIM' ? h('span', { class: 'selo' }, 'atual') : h('span', { class: 'suave' }, 'acompanhamento retomado')));
+        }))));
   }
 
   function formularioRetomada(a) {

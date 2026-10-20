@@ -220,8 +220,14 @@ test('montarCompilado: mensal por unidade, grupos e indicadores', () => {
     atividades: [{ unidade_id: 'u2', data: '2026-10-09', tipo: 'DISCUSSÃO DE CASO', quantidade: '2', categoria: E }],
     reunioes: [{ unidade_id: 'u1', data: '2026-10-09', tipo: 'GRUPO', quantidade: '1', categoria: E }],
     gerenciais: [{ data: '2026-10-09', tipo: 'TREINAMENTO', quantidade: '4', categoria: E }],
+    // Mesmo paciente: alta psicológica, retomou, depois alta do hospital. Mais um de outro mês.
+    desfechosRegistrados: [
+      { admissao_id: 'a1', unidade_id: 'u1', desfecho_id: 'd3', data: '2026-10-12', encerra_admissao: 'NÃO', vigente: 'NÃO' },
+      { admissao_id: 'a1', unidade_id: 'u1', desfecho_id: 'd1', data: '2026-10-20', encerra_admissao: 'SIM', vigente: 'SIM' },
+      { admissao_id: 'a4', unidade_id: 'u2', desfecho_id: 'd1', data: '2026-09-30', encerra_admissao: 'SIM', vigente: 'SIM' }
+    ],
     listas: { TIPO_SOLICITACAO: ['EQUIPE', 'BUSCA ATIVA', 'ESPONTÂNEA'], ATIVIDADE_GERENCIAL: ['TREINAMENTO'] },
-    desfechos: [{ id: 'd1', nome: 'ALTA' }, { id: 'd2', nome: 'ÓBITO' }]
+    desfechos: [{ id: 'd1', nome: 'ALTA' }, { id: 'd2', nome: 'ÓBITO' }, { id: 'd3', nome: 'ALTA PSICOLÓGICA' }]
   };
   const op = { ano: 2026, mes: 10, eixo: 'UNIDADE', grupo: 'TODOS', diasPrimeiro: 3 };
   const c = r.montarCompilado(dados, op);
@@ -242,6 +248,10 @@ test('montarCompilado: mensal por unidade, grupos e indicadores', () => {
   assert.equal(lin('Retornos', '% NO PRAZO').valores[0], 0.5);
   assert.equal(lin('Retornos', '% NO PRAZO').valores[1], null);
   assert.equal(lin('Desfechos', 'ALTA').total, 1);
+  assert.equal(lin('Desfechos', 'ALTA PSICOLÓGICA').total, 1);
+  assert.equal(lin('Desfechos', 'TOTAL').total, 2); // os dois desfechos do mesmo paciente contam
+  assert.equal(lin('Desfechos', '… saídas').total, 1);
+  assert.equal(lin('Desfechos', '… só encerraram').total, 1);
   assert.equal(lin('Atividades assistenciais', 'DISCUSSÃO DE CASO').total, 2);
   assert.equal(lin('Reuniões de equipe', 'GRUPO').total, 1);
   assert.equal(sec('Atividades gerenciais').semColunas, true);

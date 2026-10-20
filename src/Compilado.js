@@ -28,6 +28,7 @@ function gerarCompilado(f) {
     atividades: listar('ATIVIDADES'),
     reunioes: listar('REUNIOES'),
     gerenciais: listar('GERENCIAIS'),
+    desfechosRegistrados: listar('DESFECHOS_REGISTRADOS'),
     listas: listas,
     desfechos: listar('DESFECHOS').slice().sort(porOrdem)
   }, opcoesCompilado(f));

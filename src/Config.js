@@ -24,6 +24,12 @@ var TABELAS = {
   FERIADOS: ['id', 'data', 'descricao'],
   // Desfechos e se cada um encerra a admissão (saída do hospital) ou só o acompanhamento psicológico.
   DESFECHOS: ['id', 'nome', 'encerra_admissao', 'ordem', 'ativo'],
+  // Histórico: cada desfecho registrado numa admissão, inclusive os que foram seguidos de retomada.
+  // vigente = SIM é o desfecho atual da admissão; vira NÃO quando o acompanhamento é retomado.
+  DESFECHOS_REGISTRADOS: [
+    'id', 'admissao_id', 'unidade_id', 'desfecho_id', 'data', 'encerra_admissao', 'vigente',
+    'criado_por', 'criado_em', 'atualizado_em'
+  ],
   // Parâmetros do sistema, como o prazo do 1º atendimento após a admissão.
   PARAMETROS: ['id', 'chave', 'valor', 'descricao'],
   PACIENTES: ['id', 'prontuario', 'nome', 'criado_em', 'atualizado_em'],

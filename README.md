@@ -54,6 +54,9 @@ gerado automaticamente. Base de dados nova, começando do zero.
   da justificativa; desfechos; atividades assistenciais; reuniões de equipe; atividades gerenciais.
 - **Datas usadas:** atendimentos, atividades e reuniões pela data do registro; admissões e 1º
   atendimento pela data de admissão; desfechos pela data do desfecho.
+- **Desfechos** vêm do histórico (`DESFECHOS_REGISTRADOS`): cada desfecho registrado conta, inclusive o
+  que foi seguido de retomada. Um paciente com alta psicológica, retomada e depois alta conta duas vezes.
+  Corrigir o desfecho (tipo ou data) corrige o registro; apagar o desfecho remove o registro.
 - **Exportar para Google Planilhas** cria uma planilha nova no Drive de quem exportou. **Imprimir**
   usa o layout de impressão da própria tela.
 
