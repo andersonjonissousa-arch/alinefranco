@@ -1,0 +1,350 @@
+<script>
+  var estado = { usuario: null, cad: null, tela: 'inicio' };
+
+  var NOMES_LISTAS = {
+    TIPO_SOLICITACAO: 'Tipo de solicitação',
+    ATENDIDO: 'Atendido',
+    DESCRICAO_SOLICITACAO: 'Descrição da solicitação',
+    PRIORIDADE_SOLICITACAO: 'Prioridade da solicitação',
+    DESCRICAO_DEMANDA: 'Descrição da demanda',
+    PRIORIDADE_DEMANDA: 'Prioridade da demanda',
+    SIM_NAO_NA: 'Sim / Não / N.A.',
+    JUSTIFICATIVA_REAVALIACAO: 'Justificativa da reavaliação',
+    NECESSIDADE_ACOMPANHAMENTO: 'Necessidade de acompanhamento',
+    JUSTIFICATIVA_ACOMPANHAMENTO: 'Justificativa do acompanhamento',
+    CONFORMIDADE: 'Conformidade',
+    DESFECHO: 'Desfecho',
+    ATIVIDADE_ASSISTENCIAL: 'Atividades assistenciais',
+    REUNIAO_EQUIPE: 'Reuniões de equipe',
+    ATIVIDADE_GERENCIAL: 'Atividades gerenciais',
+    PASSAGEM_AVALIADO: 'Passagem de plantão: avaliado',
+    PASSAGEM_JUSTIFICATIVA: 'Passagem de plantão: justificativa'
+  };
+
+  // ---------- utilidades ----------
+
+  /** Chama uma função do servidor e devolve uma Promise com os dados (ou erro com mensagem). */
+  function chamar(nome) {
+    var args = Array.prototype.slice.call(arguments, 1);
+    return new Promise(function (resolve, reject) {
+      google.script.run
+        .withSuccessHandler(function (r) { r && r.ok ? resolve(r.dados) : reject(new Error(r ? r.erro : 'Sem resposta.')); })
+        .withFailureHandler(reject)[nome].apply(null, args);
+    });
+  }
+
+  /** Cria elementos sem usar innerHTML: h('td', { class: 'x' }, 'texto', filho...). */
+  function h(tag, attrs) {
+    var el = document.createElement(tag);
+    Object.keys(attrs || {}).forEach(function (k) {
+      var v = attrs[k];
+      if (v === false || v === null || v === undefined) return;
+      if (k.indexOf('on') === 0) el.addEventListener(k.slice(2), v);
+      else if (k === 'value') el.value = v;
+      else el.setAttribute(k, v === true ? '' : v);
+    });
+    Array.prototype.slice.call(arguments, 2).forEach(function (filho) {
+      if (filho === null || filho === undefined || filho === false) return;
+      (Array.isArray(filho) ? filho : [filho]).forEach(function (f) {
+        el.appendChild(typeof f === 'object' ? f : document.createTextNode(String(f)));
+      });
+    });
+    return el;
+  }
+
+  function avisar(msg, tipo) {
+    var el = document.getElementById('aviso');
+    el.textContent = msg;
+    el.className = 'aviso mostrar ' + (tipo || '');
+    clearTimeout(avisar.t);
+    avisar.t = setTimeout(function () { el.className = 'aviso'; }, tipo === 'erro' ? 6000 : 3000);
+  }
+
+  function campo(rotulo, controle) {
+    var id = 'c' + Math.random().toString(36).slice(2, 8);
+    controle.id = id;
+    return h('div', { class: 'campo' }, h('label', { for: id }, rotulo), controle);
+  }
+
+  function seletor(nome, opcoes, valor, vazio) {
+    var sel = h('select', { name: nome });
+    if (vazio !== false) sel.appendChild(h('option', { value: '' }, vazio || 'Selecione…'));
+    opcoes.forEach(function (o) {
+      var op = typeof o === 'object' ? o : { valor: o, rotulo: o };
+      sel.appendChild(h('option', { value: op.valor, selected: String(op.valor) === String(valor) }, op.rotulo));
+    });
+    return sel;
+  }
+
+  function lerFormulario(form) {
+    var dados = {};
+    Array.prototype.forEach.call(form.elements, function (el) { if (el.name) dados[el.name] = el.value; });
+    return dados;
+  }
+
+  /** Desabilita o botão enquanto salva e mostra o resultado. */
+  function enviar(botao, promessa, msgOk) {
+    botao.disabled = true;
+    return promessa.then(function (dados) {
+      avisar(msgOk || 'Salvo.', 'ok');
+      return dados;
+    }).catch(function (e) {
+      avisar(e.message, 'erro');
+      throw e;
+    }).finally(function () { botao.disabled = false; });
+  }
+
+  function tela(titulo) {
+    var main = document.getElementById('conteudo');
+    main.textContent = '';
+    main.appendChild(h('h1', null, titulo));
+    return main;
+  }
+
+  function ehCoordenacao() {
+    return estado.usuario && estado.usuario.perfil === 'COORDENAÇÃO';
+  }
+
+  // ---------- navegação ----------
+
+  var TELAS = {
+    inicio: telaInicio,
+    pacientes: telaPacientes,
+    casos: function () { emBreve('Casos', 'Solicitação, avaliação, reavaliação, acompanhamento e desfecho.'); },
+    registro: function () { emBreve('Registro do dia', 'Atendimentos de paciente e família, atividades e reuniões.'); },
+    compilado: function () { emBreve('Compilado', 'Indicadores mensais por unidade e compilado anual.'); },
+    cadastros: telaCadastros
+  };
+
+  function abrir(nome) {
+    estado.tela = nome;
+    document.querySelectorAll('#menu button').forEach(function (b) {
+      b.classList.toggle('ativo', b.dataset.tela === nome);
+    });
+    TELAS[nome]();
+  }
+
+  function emBreve(titulo, texto) {
+    tela(titulo).appendChild(h('div', { class: 'cartao em-breve' }, h('p', null, texto), h('p', null, 'Em construção.')));
+  }
+
+  // ---------- Início ----------
+
+  function telaInicio() {
+    var main = tela('Olá, ' + estado.usuario.nome.split(' ')[0].toLowerCase().replace(/^./, function (c) { return c.toUpperCase(); }));
+    main.appendChild(h('div', { class: 'cartao' },
+      h('h2', null, 'Painel do dia'),
+      h('p', { class: 'suave' }, 'Aqui vão aparecer os pacientes em acompanhamento e os prazos de hoje.')));
+  }
+
+  // ---------- Pacientes ----------
+
+  function telaPacientes() {
+    var main = tela('Pacientes');
+    var resultado = h('div', { class: 'tabela-rolagem' });
+    var busca = h('input', { type: 'search', placeholder: 'Prontuário ou parte do nome', autocomplete: 'off' });
+    var formulario = h('div');
+
+    function buscar() {
+      var termo = busca.value.trim();
+      resultado.textContent = '';
+      if (termo.length < 2) return;
+      chamar('apiBuscarPacientes', termo).then(function (lista) {
+        resultado.textContent = '';
+        if (!lista.length) {
+          resultado.appendChild(h('p', { class: 'suave' }, 'Nenhum paciente encontrado. Cadastre abaixo.'));
+          return;
+        }
+        resultado.appendChild(h('table', null,
+          h('thead', null, h('tr', null, h('th', null, 'Prontuário'), h('th', null, 'Nome'))),
+          h('tbody', null, lista.map(function (p) {
+            return h('tr', { class: 'clicavel', onclick: function () { editar(p); } },
+              h('td', null, p.prontuario), h('td', null, p.nome));
+          }))));
+      }).catch(function (e) { avisar(e.message, 'erro'); });
+    }
+
+    function editar(p) {
+      formulario.textContent = '';
+      var form = h('form', { class: 'linha' },
+        h('input', { type: 'hidden', name: 'id', value: p.id || '' }),
+        campo('Prontuário', h('input', { name: 'prontuario', inputmode: 'numeric', value: p.prontuario || '', required: true })),
+        campo('Nome completo', h('input', { name: 'nome', value: p.nome || '', required: true })));
+      var botao = h('button', { class: 'btn', type: 'submit' }, p.id ? 'Salvar alterações' : 'Cadastrar paciente');
+      form.appendChild(botao);
+      form.addEventListener('submit', function (ev) {
+        ev.preventDefault();
+        enviar(botao, chamar('apiSalvarPaciente', lerFormulario(form)), 'Paciente salvo.').then(function (salvo) {
+          busca.value = salvo.prontuario;
+          buscar();
+          editar({});
+        }).catch(function () {});
+      });
+      formulario.appendChild(h('h2', null, p.id ? 'Editar paciente' : 'Novo paciente'));
+      formulario.appendChild(form);
+    }
+
+    var espera;
+    busca.addEventListener('input', function () { clearTimeout(espera); espera = setTimeout(buscar, 300); });
+    main.appendChild(h('div', { class: 'cartao' }, campo('Buscar', busca), resultado));
+    main.appendChild(h('div', { class: 'cartao' }, formulario));
+    editar({});
+    busca.focus();
+  }
+
+  // ---------- Cadastros (coordenação) ----------
+
+  function telaCadastros() {
+    var main = tela('Cadastros');
+    var abas = h('div', { class: 'abas' });
+    var corpo = h('div');
+    var secoes = { Profissionais: cadProfissionais, 'Setores e unidades': cadUnidades, Listas: cadListas };
+    var atual = 'Profissionais';
+
+    function mostrar(nome) {
+      atual = nome;
+      abas.querySelectorAll('button').forEach(function (b) { b.classList.toggle('ativo', b.textContent === nome); });
+      corpo.textContent = '';
+      secoes[nome](corpo, function (cad) { estado.cad = cad; mostrar(atual); });
+    }
+
+    Object.keys(secoes).forEach(function (nome) {
+      abas.appendChild(h('button', { type: 'button', onclick: function () { mostrar(nome); } }, nome));
+    });
+    main.appendChild(abas);
+    main.appendChild(corpo);
+    mostrar(atual);
+  }
+
+  /** Monta uma seção de cadastro: tabela à esquerda, formulário de edição abaixo. */
+  function secaoCadastro(alvo, cfg) {
+    var formArea = h('div', { class: 'cartao' });
+
+    function editar(item) {
+      formArea.textContent = '';
+      var form = h('form', { class: 'linha' }, h('input', { type: 'hidden', name: 'id', value: item.id || '' }));
+      cfg.campos(item).forEach(function (c) { form.appendChild(c); });
+      form.appendChild(campo('Ativo', seletor('ativo', ['SIM', 'NÃO'], item.ativo || 'SIM', false)));
+      var botao = h('button', { class: 'btn', type: 'submit' }, item.id ? 'Salvar' : 'Adicionar');
+      var novo = h('button', { class: 'btn sec', type: 'button', onclick: function () { editar({}); } }, 'Novo');
+      form.appendChild(botao);
+      form.appendChild(novo);
+      form.addEventListener('submit', function (ev) {
+        ev.preventDefault();
+        var dados = Object.assign(cfg.extra ? cfg.extra() : {}, lerFormulario(form));
+        enviar(botao, chamar(cfg.api, dados)).then(cfg.aoSalvar).catch(function () {});
+      });
+      formArea.appendChild(h('h2', null, item.id ? 'Editar' : 'Adicionar'));
+      formArea.appendChild(form);
+    }
+
+    alvo.appendChild(formArea);
+    alvo.appendChild(h('div', { class: 'cartao tabela-rolagem' }, h('table', null,
+      h('thead', null, h('tr', null, cfg.colunas.map(function (c) { return h('th', null, c[0]); }))),
+      h('tbody', null, cfg.itens.map(function (item) {
+        return h('tr', { class: 'clicavel' + (item.ativo === 'NÃO' ? ' inativo' : ''), onclick: function () { editar(item); } },
+          cfg.colunas.map(function (c) { return h('td', null, c[1](item)); }));
+      })))));
+    editar({});
+  }
+
+  function cadProfissionais(alvo, aoSalvar) {
+    secaoCadastro(alvo, {
+      api: 'apiSalvarProfissional',
+      aoSalvar: aoSalvar,
+      itens: estado.cad.profissionais,
+      colunas: [['Nome', function (p) { return p.nome; }], ['E-mail', function (p) { return p.email; }],
+        ['Categoria', function (p) { return p.categoria; }], ['Perfil', function (p) { return p.perfil; }]],
+      campos: function (p) {
+        return [
+          campo('Nome', h('input', { name: 'nome', value: p.nome || '', required: true })),
+          campo('E-mail Google', h('input', { name: 'email', type: 'email', value: p.email || '', required: true })),
+          campo('Categoria', seletor('categoria', estado.cad.categorias, p.categoria)),
+          campo('Perfil', seletor('perfil', estado.cad.perfis, p.perfil || 'PROFISSIONAL', false))
+        ];
+      }
+    });
+  }
+
+  function cadUnidades(alvo, aoSalvar) {
+    var setores = estado.cad.setores.map(function (s) { return { valor: s.id, rotulo: s.nome }; });
+    var blocoSetores = h('div');
+    var blocoUnidades = h('div');
+    alvo.appendChild(h('h2', null, 'Unidades'));
+    alvo.appendChild(blocoUnidades);
+    alvo.appendChild(h('h2', null, 'Setores'));
+    alvo.appendChild(blocoSetores);
+    secaoCadastro(blocoUnidades, {
+      api: 'apiSalvarUnidade',
+      aoSalvar: aoSalvar,
+      itens: estado.cad.unidades,
+      colunas: [['Unidade', function (u) { return u.nome; }], ['Setor', function (u) { return u.setor; }],
+        ['Ordem', function (u) { return u.ordem; }]],
+      campos: function (u) {
+        return [
+          campo('Unidade', h('input', { name: 'nome', value: u.nome || '', required: true })),
+          campo('Setor', seletor('setor_id', setores, u.setor_id)),
+          campo('Ordem', h('input', { name: 'ordem', type: 'number', value: u.ordem || '' }))
+        ];
+      }
+    });
+    secaoCadastro(blocoSetores, {
+      api: 'apiSalvarSetor',
+      aoSalvar: aoSalvar,
+      itens: estado.cad.setores,
+      colunas: [['Setor', function (s) { return s.nome; }], ['Ordem', function (s) { return s.ordem; }]],
+      campos: function (s) {
+        return [
+          campo('Setor', h('input', { name: 'nome', value: s.nome || '', required: true })),
+          campo('Ordem', h('input', { name: 'ordem', type: 'number', value: s.ordem || '' }))
+        ];
+      }
+    });
+  }
+
+  function cadListas(alvo, aoSalvar) {
+    var nomes = Object.keys(NOMES_LISTAS);
+    var escolha = seletor('lista', nomes.map(function (n) { return { valor: n, rotulo: NOMES_LISTAS[n] }; }),
+      cadListas.atual || nomes[0], false);
+    var bloco = h('div');
+    function desenhar() {
+      cadListas.atual = escolha.value;
+      bloco.textContent = '';
+      secaoCadastro(bloco, {
+        api: 'apiSalvarItemLista',
+        aoSalvar: aoSalvar,
+        extra: function () { return { lista: escolha.value }; },
+        itens: estado.cad.listas[escolha.value] || [],
+        colunas: [['Valor', function (i) { return i.valor; }], ['Ordem', function (i) { return i.ordem; }]],
+        campos: function (i) {
+          return [
+            campo('Valor', h('input', { name: 'valor', value: i.valor || '', required: true })),
+            campo('Ordem', h('input', { name: 'ordem', type: 'number', value: i.ordem || '' }))
+          ];
+        }
+      });
+    }
+    escolha.addEventListener('change', desenhar);
+    alvo.appendChild(h('div', { class: 'cartao' }, campo('Lista', escolha)));
+    alvo.appendChild(bloco);
+    desenhar();
+  }
+
+  // ---------- início ----------
+
+  document.getElementById('menu').addEventListener('click', function (ev) {
+    var b = ev.target.closest('button[data-tela]');
+    if (b) abrir(b.dataset.tela);
+  });
+
+  chamar('apiInicio').then(function (dados) {
+    estado.usuario = dados.usuario;
+    estado.cad = dados;
+    document.getElementById('usuario').textContent = dados.usuario.nome + ' · ' + dados.usuario.perfil.toLowerCase();
+    if (!ehCoordenacao()) document.querySelectorAll('[data-coordenacao]').forEach(function (b) { b.remove(); });
+    abrir('inicio');
+  }).catch(function (e) {
+    var main = tela('Sem acesso');
+    main.appendChild(h('div', { class: 'cartao' }, h('p', null, e.message)));
+  });
+</script>
