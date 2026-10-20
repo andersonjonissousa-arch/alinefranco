@@ -10,6 +10,8 @@ function configurar() {
   removerAbaPadrao(banco);
   semearSetoresEUnidades();
   semearListas();
+  semearJustificativas();
+  semearFeriados();
   semearCoordenacao();
   Logger.log('Banco pronto: ' + banco.getUrl());
   return banco.getUrl();
@@ -77,6 +79,18 @@ function semearListas() {
   });
 }
 
+function semearJustificativas() {
+  if (listar('JUSTIFICATIVAS').length) return;
+  JUSTIFICATIVAS_INICIAIS.forEach(function (nome, i) {
+    inserir('JUSTIFICATIVAS', { nome: nome, prazo_dias_uteis: '', ordem: i + 1, ativo: 'SIM' });
+  });
+}
+
+function semearFeriados() {
+  if (listar('FERIADOS').length) return;
+  FERIADOS_NACIONAIS.forEach(function (f) { inserir('FERIADOS', { data: f[0], descricao: f[1] }); });
+}
+
 /** Quem roda a configuração vira coordenação, para conseguir entrar no sistema. */
 function semearCoordenacao() {
   var email = Session.getActiveUser().getEmail();
@@ -84,7 +98,7 @@ function semearCoordenacao() {
   inserir('PROFISSIONAIS', {
     nome: email.split('@')[0].toUpperCase(),
     email: email.toLowerCase(),
-    categoria: 'PSICÓLOGA',
+    categoria: CATEGORIA_EMPRESA,
     perfil: 'COORDENAÇÃO',
     ativo: 'SIM'
   });

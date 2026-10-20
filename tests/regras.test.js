@@ -108,3 +108,49 @@ test('setores iniciais cobrem todas as unidades da planilha', () => {
   }
   assert.equal(new Set(unidades).size, unidades.length);
 });
+
+test('adicionarDiasUteis pula fim de semana e feriado', () => {
+  const feriados = r.conjuntoFeriados([{ data: '2026-10-12' }]); // segunda, feriado
+  assert.equal(r.adicionarDiasUteis('2026-10-08', 1), '2026-10-09'); // qui -> sex
+  assert.equal(r.adicionarDiasUteis('2026-10-09', 1), '2026-10-12'); // sex -> seg
+  assert.equal(r.adicionarDiasUteis('2026-10-09', 1, feriados), '2026-10-13'); // feriado pulado
+  assert.equal(r.adicionarDiasUteis('2026-10-09', 3, feriados), '2026-10-15');
+  assert.equal(r.adicionarDiasUteis('2026-10-09', 0), '2026-10-09');
+  assert.equal(r.adicionarDiasUteis('', 2), '');
+});
+
+test('calcularPrazos: cada atendimento é medido a partir do contato anterior', () => {
+  const prazos = { j1: 1, j3: 3 };
+  const caso = { data_avaliacao: '2026-10-05', justificativa_id: 'j3', necessidade_acompanhamento: 'PACIENTE', status: 'ABERTO' };
+  const atendimentos = [
+    { id: 'a1', data: '2026-10-08', justificativa_id: 'j3' }, // 3 dias úteis depois da avaliação: no prazo
+    { id: 'a2', data: '2026-10-08', justificativa_id: 'j3' }, // mesmo dia (família): mesmo resultado
+    { id: 'a3', data: '2026-10-14', justificativa_id: 'j1' }  // limite era 13/10 (3 úteis após 08/10): fora
+  ];
+  const r1 = r.calcularPrazos(caso, atendimentos, prazos, {});
+  assert.deepEqual({ ...r1.porAtendimento.a1 }, { prazo_limite: '2026-10-08', no_prazo: 'SIM' });
+  assert.deepEqual({ ...r1.porAtendimento.a2 }, { prazo_limite: '2026-10-08', no_prazo: 'SIM' });
+  assert.deepEqual({ ...r1.porAtendimento.a3 }, { prazo_limite: '2026-10-13', no_prazo: 'NÃO' });
+  assert.equal(r1.ultimo_contato, '2026-10-14');
+  assert.equal(r1.proximo_prazo, '2026-10-19'); // caso segue com j3: 3 úteis após 14/10
+});
+
+test('calcularPrazos: sem prazo quando não há acompanhamento, caso encerrado ou justificativa sem prazo', () => {
+  const prazos = { j1: 1, jx: '' };
+  const base = { data_avaliacao: '2026-10-05', justificativa_id: 'j1', necessidade_acompanhamento: 'PACIENTE', status: 'ABERTO' };
+  assert.equal(r.calcularPrazos(base, [], prazos, {}).proximo_prazo, '2026-10-06');
+  assert.equal(r.calcularPrazos({ ...base, necessidade_acompanhamento: 'NÃO' }, [], prazos, {}).proximo_prazo, '');
+  assert.equal(r.calcularPrazos({ ...base, status: 'ENCERRADO' }, [], prazos, {}).proximo_prazo, '');
+  assert.equal(r.calcularPrazos({ ...base, justificativa_id: 'jx' }, [], prazos, {}).proximo_prazo, '');
+  const semAvaliacao = r.calcularPrazos({ ...base, data_avaliacao: '' }, [{ id: 'a', data: '2026-10-07' }], prazos, {});
+  assert.deepEqual({ ...semAvaliacao.porAtendimento.a }, { prazo_limite: '', no_prazo: '' });
+});
+
+test('situacaoPrazo e contaParaEmpresa', () => {
+  assert.equal(r.situacaoPrazo('2026-10-19', '2026-10-20'), 'ATRASADO');
+  assert.equal(r.situacaoPrazo('2026-10-20', '2026-10-20'), 'VENCE HOJE');
+  assert.equal(r.situacaoPrazo('2026-10-21', '2026-10-20'), 'NO PRAZO');
+  assert.equal(r.situacaoPrazo('', '2026-10-20'), '');
+  assert.equal(r.contaParaEmpresa('PROFISSIONAL DA EMPRESA'), true);
+  assert.equal(r.contaParaEmpresa('RESIDENTE'), false);
+});

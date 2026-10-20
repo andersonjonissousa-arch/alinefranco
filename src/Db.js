@@ -62,6 +62,11 @@ function agoraIso() {
   return new Date().toISOString();
 }
 
+/** Data de hoje no fuso do hospital, 'AAAA-MM-DD'. */
+function hoje() {
+  return Utilities.formatDate(new Date(), APP.fusoHorario, 'yyyy-MM-dd');
+}
+
 /** Insere o registro (gera id se faltar) e devolve o registro gravado. */
 function inserir(nome, registro) {
   return comTrava(function () {
@@ -92,6 +97,33 @@ function atualizar(nome, id, campos) {
     aba.getRange(linha, 1, 1, colunas.length).setValues([linhaDe(colunas, obj)]);
     delete _cacheTabelas[nome];
     return obj;
+  });
+}
+
+/** Atualiza vários registros de uma vez: { id: { campo: valor } }. Lê e grava a aba uma vez só. */
+function atualizarVarios(nome, mudancas) {
+  var ids = Object.keys(mudancas);
+  if (!ids.length) return 0;
+  return comTrava(function () {
+    var colunas = TABELAS[nome];
+    var aba = abaDaTabela(nome);
+    var ultima = aba.getLastRow();
+    if (ultima < 2) return 0;
+    var intervalo = aba.getRange(2, 1, ultima - 1, colunas.length);
+    var valores = intervalo.getValues();
+    var alteradas = 0;
+    valores.forEach(function (linha) {
+      var campos = mudancas[String(linha[0])];
+      if (!campos) return;
+      Object.keys(campos).forEach(function (col) {
+        var i = colunas.indexOf(col);
+        if (i > 0) linha[i] = campos[col] === undefined || campos[col] === null ? '' : campos[col];
+      });
+      alteradas++;
+    });
+    if (alteradas) intervalo.setValues(valores);
+    delete _cacheTabelas[nome];
+    return alteradas;
   });
 }
 

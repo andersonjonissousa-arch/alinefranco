@@ -77,7 +77,10 @@ function criarGoogleFalso({ email = 'coordenacao@exemplo.com' } = {}) {
       },
       Session: { getActiveUser: () => ({ getEmail: () => sessao.email }) },
       LockService: { getScriptLock: () => ({ waitLock() {}, releaseLock() {} }) },
-      Utilities: { getUuid: () => crypto.randomUUID() }
+      Utilities: {
+        getUuid: () => crypto.randomUUID(),
+        formatDate: (d) => d.toISOString().slice(0, 10)
+      }
     }
   };
 }

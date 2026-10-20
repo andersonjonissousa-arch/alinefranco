@@ -35,8 +35,12 @@ function dadosDeCadastro(incluirInativos) {
     setores: setores,
     unidades: unidades,
     profissionais: profissionais,
+    justificativas: listar('JUSTIFICATIVAS').filter(ativo).sort(porOrdem),
+    feriados: listar('FERIADOS').slice().sort(function (a, b) { return a.data < b.data ? -1 : 1; }),
     categorias: CATEGORIAS_PROFISSIONAL,
-    perfis: PERFIS
+    perfis: PERFIS,
+    publicos: PUBLICOS_ATENDIMENTO,
+    hoje: hoje()
   };
 }
 
@@ -133,6 +137,48 @@ function apiSalvarItemLista(dados) {
     if (!item.valor) throw new Error('Informe o valor.');
     if (dados.id) atualizar('LISTAS', dados.id, item);
     else inserir('LISTAS', item);
+    return dadosDeCadastro(true);
+  });
+}
+
+function apiSalvarJustificativa(dados) {
+  return responder(function () {
+    exigirCoordenacao();
+    var prazo = String(dados.prazo_dias_uteis === undefined ? '' : dados.prazo_dias_uteis).trim();
+    if (prazo !== '' && !/^\d+$/.test(prazo)) throw new Error('O prazo deve ser um número inteiro de dias úteis.');
+    var item = {
+      nome: formatarNome(dados.nome),
+      prazo_dias_uteis: prazo,
+      ordem: Number(dados.ordem) || 99,
+      ativo: dados.ativo === 'NÃO' ? 'NÃO' : 'SIM'
+    };
+    if (!item.nome) throw new Error('Informe a justificativa.');
+    if (dados.id) atualizar('JUSTIFICATIVAS', dados.id, item);
+    else inserir('JUSTIFICATIVAS', item);
+    recalcularCasosAbertos();
+    return dadosDeCadastro(true);
+  });
+}
+
+function apiSalvarFeriado(dados) {
+  return responder(function () {
+    exigirCoordenacao();
+    var feriado = { data: normalizarData(dados.data), descricao: formatarNome(dados.descricao) };
+    if (!feriado.data) throw new Error('Informe a data do feriado.');
+    var repetido = listar('FERIADOS').filter(function (f) { return f.data === feriado.data && f.id !== dados.id; })[0];
+    if (repetido) throw new Error('Esta data já está cadastrada: ' + repetido.descricao + '.');
+    if (dados.id) atualizar('FERIADOS', dados.id, feriado);
+    else inserir('FERIADOS', feriado);
+    recalcularCasosAbertos();
+    return dadosDeCadastro(true);
+  });
+}
+
+function apiExcluirFeriado(id) {
+  return responder(function () {
+    exigirCoordenacao();
+    excluir('FERIADOS', id);
+    recalcularCasosAbertos();
     return dadosDeCadastro(true);
   });
 }

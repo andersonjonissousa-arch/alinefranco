@@ -84,5 +84,49 @@
   .aviso.erro { background: var(--perigo); }
   .aviso.ok { background: var(--ok); }
 
+  button.btn.perigo { background: #fff; color: var(--perigo); border-color: var(--perigo); }
+  button.link {
+    font: inherit; border: 0; background: none; padding: 0; cursor: pointer;
+    color: var(--primaria); text-decoration: underline;
+  }
+  button.link.perigo { color: var(--perigo); }
+  button.opcao {
+    display: block; width: 100%; text-align: left; font: inherit; padding: 8px 10px; margin-bottom: 4px;
+    border: 1px solid var(--borda); border-radius: 6px; background: #fff; cursor: pointer;
+  }
+  button.opcao:hover { border-color: var(--primaria); background: #f0f5fa; }
+  .voltar { margin-bottom: 12px; }
+
+  .selo {
+    display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 12px; font-weight: 600;
+    background: #eef2f6; color: var(--suave); white-space: nowrap;
+  }
+  .selo.atrasado { background: #fde8e7; color: var(--perigo); }
+  .selo.hoje { background: #fff4d6; color: #8a5a00; }
+  .selo.prazo { background: #e6f4ea; color: var(--ok); }
+
+  .indicadores { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 16px; }
+  .indicador { background: var(--cartao); border: 1px solid var(--borda); border-radius: var(--raio); padding: 14px 16px; color: var(--suave); }
+  .indicador .numero { font-size: 28px; font-weight: 700; color: var(--texto); }
+  .indicador.atrasado .numero { color: var(--perigo); }
+  .indicador.hoje .numero { color: #8a5a00; }
+  .indicador.prazo .numero { color: var(--ok); }
+
+  .cabecalho-caso { display: flex; flex-wrap: wrap; gap: 8px 24px; align-items: center; }
+  fieldset { border: 1px solid var(--borda); border-radius: var(--raio); padding: 12px 14px 14px; margin: 0 0 14px; }
+  legend { font-weight: 600; padding: 0 6px; }
+  details > summary { cursor: pointer; list-style: revert; }
+  details[open] > summary { margin-bottom: 12px; }
+  h2.inline { display: inline; }
+
   .em-breve { text-align: center; padding: 40px 16px; color: var(--suave); }
+
+  @media (max-width: 720px) {
+    .topo { padding: 8px 12px; }
+    .marca { flex: 1; }
+    .menu { order: 3; flex: 0 0 100%; flex-wrap: nowrap; overflow-x: auto; margin: 0 -12px; padding: 0 12px; }
+    .menu button { flex: 0 0 auto; }
+    .conteudo { padding: 12px; }
+    .campo { min-width: 100%; }
+  }
 </style>
