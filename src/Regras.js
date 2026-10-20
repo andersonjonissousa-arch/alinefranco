@@ -80,37 +80,30 @@ function formatarNome(valor) {
   return String(valor || '').toUpperCase().replace(/\s+/g, ' ').trim();
 }
 
-/** Campos que o sistema calcula ao salvar um caso. */
-function calcularCampos(caso) {
-  var encerrado = Boolean(caso.desfecho) && Boolean(normalizarData(caso.data_encerramento));
-  return {
-    status: encerrado ? 'ENCERRADO' : 'ABERTO',
-    dias_ate_solicitacao: diasEntre(caso.data_admissao, caso.data_solicitacao),
-    dias_resposta: diasEntre(caso.data_solicitacao, caso.data_avaliacao),
-    dias_acompanhamento: diasEntre(caso.data_avaliacao, caso.data_encerramento)
-  };
-}
+var ROTULOS_DATA_ADMISSAO = {
+  data_admissao: 'admissão', data_solicitacao: 'solicitação', data_desfecho: 'desfecho'
+};
 
-/** Lista de erros de preenchimento do caso. Vazia quando está tudo certo. */
-function validarCaso(caso) {
+/** Lista de erros de preenchimento da admissão. Vazia quando está tudo certo. */
+function validarAdmissao(adm, hojeIso) {
   var erros = [];
-  if (!caso.paciente_id) erros.push('Informe o paciente.');
-  if (!caso.unidade_id) erros.push('Informe a unidade.');
-  if (!normalizarData(caso.data_solicitacao)) erros.push('Informe a data da solicitação.');
+  if (!adm.paciente_id) erros.push('Informe o paciente.');
+  if (!normalizarData(adm.data_admissao)) erros.push('Informe a data de admissão no hospital.');
+  if (!adm.unidade_id) erros.push('Informe a unidade.');
 
-  var ordem = [
-    ['data_admissao', 'data_solicitacao', 'A data da solicitação não pode ser antes da admissão.'],
-    ['data_solicitacao', 'data_avaliacao', 'A data da avaliação não pode ser antes da solicitação.'],
-    ['data_avaliacao', 'data_encerramento', 'A data de encerramento não pode ser antes da avaliação.']
-  ];
-  ordem.forEach(function (regra) {
-    var dias = diasEntre(caso[regra[0]], caso[regra[1]]);
-    if (dias !== '' && dias < 0) erros.push(regra[2]);
+  Object.keys(ROTULOS_DATA_ADMISSAO).forEach(function (campo) {
+    var d = normalizarData(adm[campo]);
+    if (d && hojeIso && d > hojeIso) erros.push('A data de ' + ROTULOS_DATA_ADMISSAO[campo] + ' está no futuro.');
+    if (d && campo !== 'data_admissao' && diasEntre(adm.data_admissao, d) < 0) {
+      erros.push('A data de ' + ROTULOS_DATA_ADMISSAO[campo] + ' não pode ser antes da admissão.');
+    }
   });
 
-  var temData = Boolean(normalizarData(caso.data_encerramento));
-  if (caso.desfecho && !temData) erros.push('Informe a data de encerramento do desfecho.');
-  if (temData && !caso.desfecho) erros.push('Informe o desfecho.');
+  var temData = Boolean(normalizarData(adm.data_desfecho));
+  if (adm.desfecho_id && !temData) erros.push('Informe a data do desfecho.');
+  if (temData && !adm.desfecho_id) erros.push('Informe o desfecho.');
+  var acompanha = adm.necessidade_acompanhamento && SEM_ACOMPANHAMENTO.indexOf(adm.necessidade_acompanhamento) === -1;
+  if (acompanha && !adm.justificativa_id) erros.push('Informe a justificativa do acompanhamento.');
   return erros;
 }
 
@@ -173,52 +166,112 @@ function prazoDaJustificativa(prazos, justificativaId) {
   return p === '' || p === undefined || p === null || isNaN(Number(p)) ? null : Number(p);
 }
 
+/** Atendimento ao paciente sempre conta para os prazos; à família, só se o paciente estava impossibilitado. */
+function contaParaPrazo(atendimento) {
+  if (atendimento.publico === 'PACIENTE') return true;
+  return atendimento.publico === 'FAMÍLIA' && atendimento.paciente_impossibilitado === 'SIM';
+}
+
+var STATUS_ADMISSAO = {
+  aguardando: 'AGUARDANDO 1º ATENDIMENTO',
+  acompanhamento: 'EM ACOMPANHAMENTO',
+  acompanhamentoEncerrado: 'ACOMPANHAMENTO ENCERRADO',
+  encerrada: 'ENCERRADA'
+};
+
 /**
- * Prazos do acompanhamento de um caso.
- * Depois de cada contato (avaliação ou atendimento), o próximo tem que acontecer em até N dias úteis,
- * onde N é o prazo da justificativa vigente naquele contato.
+ * Tudo o que o sistema calcula numa admissão.
  *
- * @param caso o caso (data_avaliacao, justificativa_id, necessidade_acompanhamento, status)
- * @param atendimentos atendimentos do caso (id, data, justificativa_id)
- * @param prazos { justificativa_id: prazo em dias úteis }
- * @param feriados conjunto de feriados (conjuntoFeriados)
- * @return { porAtendimento: { id: { prazo_limite, no_prazo } }, ultimo_contato, proximo_prazo }
+ * - 1º atendimento (avaliação): o primeiro atendimento que conta para prazo tem que acontecer
+ *   em até `diasPrimeiro` dias úteis da admissão no hospital. Se o paciente teve desfecho dentro
+ *   desse prazo sem ter sido atendido, a admissão fica fora do indicador ("NÃO SE APLICA").
+ * - Retornos: depois de cada atendimento que conta, o próximo tem que acontecer em até N dias úteis,
+ *   onde N é o prazo da justificativa vigente naquele atendimento.
+ *
+ * @param adm a admissão
+ * @param atendimentos atendimentos da admissão
+ * @param op { prazos: {justificativa_id: dias}, feriados: conjunto, diasPrimeiro, desfechoEncerra, hoje }
  */
-function calcularPrazos(caso, atendimentos, prazos, feriados) {
-  var ordenados = atendimentos.filter(function (a) { return normalizarData(a.data); }).slice().sort(function (a, b) {
-    var da = normalizarData(a.data);
-    var db = normalizarData(b.data);
-    if (da !== db) return da < db ? -1 : 1;
-    var ca = String(a.criado_em || '');
-    var cb = String(b.criado_em || '');
-    return ca < cb ? -1 : ca > cb ? 1 : 0;
-  });
+function calcularAdmissao(adm, atendimentos, op) {
+  var feriados = op.feriados || {};
+  var hojeIso = normalizarData(op.hoje);
+  var prazoPrimeiro = adicionarDiasUteis(adm.data_admissao, op.diasPrimeiro, feriados);
+  var retomado = normalizarData(adm.retomado_em);
+
+  var contatos = atendimentos.filter(function (a) { return normalizarData(a.data) && contaParaPrazo(a); })
+    .slice().sort(function (a, b) {
+      var da = normalizarData(a.data);
+      var db = normalizarData(b.data);
+      if (da !== db) return da < db ? -1 : 1;
+      var ca = String(a.criado_em || '');
+      var cb = String(b.criado_em || '');
+      return ca < cb ? -1 : ca > cb ? 1 : 0;
+    });
 
   var porAtendimento = {};
-  var anterior = normalizarData(caso.data_avaliacao) ? { data: normalizarData(caso.data_avaliacao), justificativa_id: '' } : null;
-  var i = 0;
-  while (i < ordenados.length) {
-    var dia = normalizarData(ordenados[i].data);
-    var doDia = [];
-    while (i < ordenados.length && normalizarData(ordenados[i].data) === dia) doDia.push(ordenados[i++]);
+  atendimentos.forEach(function (a) { porAtendimento[a.id] = { prazo_limite: '', no_prazo: '', conta_prazo: contaParaPrazo(a) ? 'SIM' : 'NÃO' }; });
 
-    var temAnterior = anterior && anterior.data < dia;
-    var justificativa = (temAnterior && anterior.justificativa_id) || doDia[0].justificativa_id || caso.justificativa_id;
-    var prazo = prazoDaJustificativa(prazos, justificativa);
-    var limite = temAnterior && prazo !== null ? adicionarDiasUteis(anterior.data, prazo, feriados) : '';
+  var anterior = null;
+  var i = 0;
+  while (i < contatos.length) {
+    var dia = normalizarData(contatos[i].data);
+    var doDia = [];
+    while (i < contatos.length && normalizarData(contatos[i].data) === dia) doDia.push(contatos[i++]);
+
+    // Acompanhamento retomado depois de um desfecho psicológico: o prazo recomeça na retomada.
+    if (retomado && (!anterior || anterior.data < retomado) && retomado <= dia) {
+      anterior = { data: retomado, justificativa_id: doDia[0].justificativa_id || adm.justificativa_id };
+    }
+    var limite;
+    if (!anterior) {
+      limite = prazoPrimeiro;
+    } else {
+      var prazo = prazoDaJustificativa(op.prazos, anterior.justificativa_id || adm.justificativa_id);
+      limite = prazo === null || anterior.data >= dia ? '' : adicionarDiasUteis(anterior.data, prazo, feriados);
+    }
     doDia.forEach(function (a) {
-      porAtendimento[a.id] = { prazo_limite: limite, no_prazo: limite ? (dia <= limite ? 'SIM' : 'NÃO') : '' };
+      porAtendimento[a.id].prazo_limite = limite;
+      porAtendimento[a.id].no_prazo = limite ? (dia <= limite ? 'SIM' : 'NÃO') : '';
     });
-    anterior = { data: dia, justificativa_id: doDia[doDia.length - 1].justificativa_id || caso.justificativa_id };
+    anterior = { data: dia, justificativa_id: doDia[doDia.length - 1].justificativa_id || adm.justificativa_id };
   }
 
+  var primeiro = contatos.length ? normalizarData(contatos[0].data) : '';
+  var dataDesfecho = normalizarData(adm.data_desfecho);
+  var status;
+  if (adm.desfecho_id && dataDesfecho) status = op.desfechoEncerra ? STATUS_ADMISSAO.encerrada : STATUS_ADMISSAO.acompanhamentoEncerrado;
+  else status = primeiro ? STATUS_ADMISSAO.acompanhamento : STATUS_ADMISSAO.aguardando;
+
+  var primeiroNoPrazo;
+  if (primeiro) primeiroNoPrazo = primeiro <= prazoPrimeiro ? 'SIM' : 'NÃO';
+  else if (dataDesfecho && dataDesfecho <= prazoPrimeiro) primeiroNoPrazo = 'NÃO SE APLICA';
+  else if (dataDesfecho || (hojeIso && hojeIso > prazoPrimeiro)) primeiroNoPrazo = 'NÃO';
+  else primeiroNoPrazo = 'EM ANDAMENTO';
+
   var ultimo = anterior ? anterior.data : '';
-  var acompanha = SEM_ACOMPANHAMENTO.indexOf(caso.necessidade_acompanhamento) === -1 && caso.necessidade_acompanhamento;
-  var prazoAtual = prazoDaJustificativa(prazos, caso.justificativa_id);
-  var proximo = ultimo && acompanha && caso.status !== 'ENCERRADO' && prazoAtual !== null
-    ? adicionarDiasUteis(ultimo, prazoAtual, feriados)
-    : '';
-  return { porAtendimento: porAtendimento, ultimo_contato: ultimo, proximo_prazo: proximo };
+  if (retomado && retomado > ultimo) ultimo = retomado;
+  var proximo = '';
+  if (status === STATUS_ADMISSAO.aguardando) {
+    proximo = prazoPrimeiro;
+  } else if (status === STATUS_ADMISSAO.acompanhamento) {
+    var acompanha = adm.necessidade_acompanhamento && SEM_ACOMPANHAMENTO.indexOf(adm.necessidade_acompanhamento) === -1;
+    var prazoAtual = prazoDaJustificativa(op.prazos, adm.justificativa_id);
+    if (acompanha && prazoAtual !== null) proximo = adicionarDiasUteis(ultimo, prazoAtual, feriados);
+  }
+
+  return {
+    porAtendimento: porAtendimento,
+    campos: {
+      status: status,
+      prazo_primeiro_atendimento: prazoPrimeiro,
+      primeiro_atendimento: primeiro,
+      primeiro_no_prazo: primeiroNoPrazo,
+      dias_ate_primeiro_atendimento: diasEntre(adm.data_admissao, primeiro),
+      dias_resposta: diasEntre(adm.data_solicitacao, primeiro),
+      ultimo_contato: ultimo,
+      proximo_prazo: proximo
+    }
+  };
 }
 
 /** Como está o prazo do próximo atendimento em relação a hoje. */

@@ -53,34 +53,6 @@ test('normalizarTexto e formatarNome', () => {
   assert.equal(r.formatarNome('  josé   pedro '), 'JOSÉ PEDRO');
 });
 
-test('calcularCampos: tempos e status', () => {
-  const aberto = r.calcularCampos({
-    data_admissao: '2026-04-14', data_solicitacao: '2026-04-20', data_avaliacao: '2026-04-28'
-  });
-  assert.equal(aberto.status, 'ABERTO');
-  assert.equal(aberto.dias_ate_solicitacao, 6);
-  assert.equal(aberto.dias_resposta, 8);
-  assert.equal(aberto.dias_acompanhamento, '');
-
-  const encerrado = r.calcularCampos({
-    data_solicitacao: '2026-04-20', data_avaliacao: '2026-04-28', data_encerramento: '2026-05-10', desfecho: 'ALTA'
-  });
-  assert.equal(encerrado.status, 'ENCERRADO');
-  assert.equal(encerrado.dias_acompanhamento, 12);
-});
-
-test('validarCaso aponta campos obrigatórios e datas fora de ordem', () => {
-  assert.deepEqual(Array.from(r.validarCaso({ paciente_id: 'p', unidade_id: 'u', data_solicitacao: '2026-10-01' })), []);
-
-  const erros = Array.from(r.validarCaso({
-    data_solicitacao: '2026-10-05', data_avaliacao: '2026-10-01', desfecho: 'ALTA'
-  }));
-  assert.ok(erros.includes('Informe o paciente.'));
-  assert.ok(erros.includes('Informe a unidade.'));
-  assert.ok(erros.includes('A data da avaliação não pode ser antes da solicitação.'));
-  assert.ok(erros.includes('Informe a data de encerramento do desfecho.'));
-});
-
 test('filtrarPacientes por prontuário ou nome sem acento', () => {
   const lista = [
     { id: '1', prontuario: '152429', nome: 'JOSÉ PEDRO DE SOUZA SANTOS' },
@@ -100,7 +72,7 @@ test('acharDuplicado ignora o próprio registro', () => {
   assert.equal(r.acharDuplicado(lista, { prontuario: '' }), null);
 });
 
-test('setores iniciais cobrem todas as unidades da planilha', () => {
+test('setores iniciais cobrem todas as unidades', () => {
   const unidades = r.SETORES_INICIAIS.flatMap((s) => s.unidades);
   for (const u of ['PED 1', 'PED 2', 'UCE PED', 'UTI PED', 'UTIN', 'UCINCO', 'UTI 1', 'UTI 2', 'UTI 3',
     'UCE', 'AVC', 'CM 1', 'CM 2', 'CM 3', 'CM 4', 'CM 5', 'CM 6', 'CIRÚRGICA']) {
@@ -119,33 +91,6 @@ test('adicionarDiasUteis pula fim de semana e feriado', () => {
   assert.equal(r.adicionarDiasUteis('', 2), '');
 });
 
-test('calcularPrazos: cada atendimento é medido a partir do contato anterior', () => {
-  const prazos = { j1: 1, j3: 3 };
-  const caso = { data_avaliacao: '2026-10-05', justificativa_id: 'j3', necessidade_acompanhamento: 'PACIENTE', status: 'ABERTO' };
-  const atendimentos = [
-    { id: 'a1', data: '2026-10-08', justificativa_id: 'j3' }, // 3 dias úteis depois da avaliação: no prazo
-    { id: 'a2', data: '2026-10-08', justificativa_id: 'j3' }, // mesmo dia (família): mesmo resultado
-    { id: 'a3', data: '2026-10-14', justificativa_id: 'j1' }  // limite era 13/10 (3 úteis após 08/10): fora
-  ];
-  const r1 = r.calcularPrazos(caso, atendimentos, prazos, {});
-  assert.deepEqual({ ...r1.porAtendimento.a1 }, { prazo_limite: '2026-10-08', no_prazo: 'SIM' });
-  assert.deepEqual({ ...r1.porAtendimento.a2 }, { prazo_limite: '2026-10-08', no_prazo: 'SIM' });
-  assert.deepEqual({ ...r1.porAtendimento.a3 }, { prazo_limite: '2026-10-13', no_prazo: 'NÃO' });
-  assert.equal(r1.ultimo_contato, '2026-10-14');
-  assert.equal(r1.proximo_prazo, '2026-10-19'); // caso segue com j3: 3 úteis após 14/10
-});
-
-test('calcularPrazos: sem prazo quando não há acompanhamento, caso encerrado ou justificativa sem prazo', () => {
-  const prazos = { j1: 1, jx: '' };
-  const base = { data_avaliacao: '2026-10-05', justificativa_id: 'j1', necessidade_acompanhamento: 'PACIENTE', status: 'ABERTO' };
-  assert.equal(r.calcularPrazos(base, [], prazos, {}).proximo_prazo, '2026-10-06');
-  assert.equal(r.calcularPrazos({ ...base, necessidade_acompanhamento: 'NÃO' }, [], prazos, {}).proximo_prazo, '');
-  assert.equal(r.calcularPrazos({ ...base, status: 'ENCERRADO' }, [], prazos, {}).proximo_prazo, '');
-  assert.equal(r.calcularPrazos({ ...base, justificativa_id: 'jx' }, [], prazos, {}).proximo_prazo, '');
-  const semAvaliacao = r.calcularPrazos({ ...base, data_avaliacao: '' }, [{ id: 'a', data: '2026-10-07' }], prazos, {});
-  assert.deepEqual({ ...semAvaliacao.porAtendimento.a }, { prazo_limite: '', no_prazo: '' });
-});
-
 test('situacaoPrazo e contaParaEmpresa', () => {
   assert.equal(r.situacaoPrazo('2026-10-19', '2026-10-20'), 'ATRASADO');
   assert.equal(r.situacaoPrazo('2026-10-20', '2026-10-20'), 'VENCE HOJE');
@@ -153,4 +98,98 @@ test('situacaoPrazo e contaParaEmpresa', () => {
   assert.equal(r.situacaoPrazo('', '2026-10-20'), '');
   assert.equal(r.contaParaEmpresa('PROFISSIONAL DA EMPRESA'), true);
   assert.equal(r.contaParaEmpresa('RESIDENTE'), false);
+});
+
+test('validarAdmissao: obrigatórios, datas e desfecho', () => {
+  const ok = { paciente_id: 'p', unidade_id: 'u', data_admissao: '2026-10-10' };
+  assert.deepEqual(Array.from(r.validarAdmissao(ok, '2026-10-20')), []);
+  const erros = Array.from(r.validarAdmissao({
+    data_admissao: '2026-10-10', data_solicitacao: '2026-10-05', data_desfecho: '2026-10-25',
+    necessidade_acompanhamento: 'PACIENTE'
+  }, '2026-10-20'));
+  assert.ok(erros.includes('Informe o paciente.'));
+  assert.ok(erros.includes('Informe a unidade.'));
+  assert.ok(erros.includes('A data de solicitação não pode ser antes da admissão.'));
+  assert.ok(erros.includes('A data de desfecho está no futuro.'));
+  assert.ok(erros.includes('Informe o desfecho.'));
+  assert.ok(erros.includes('Informe a justificativa do acompanhamento.'));
+});
+
+test('contaParaPrazo: família só conta com o paciente impossibilitado', () => {
+  assert.equal(r.contaParaPrazo({ publico: 'PACIENTE' }), true);
+  assert.equal(r.contaParaPrazo({ publico: 'FAMÍLIA', paciente_impossibilitado: 'NÃO' }), false);
+  assert.equal(r.contaParaPrazo({ publico: 'FAMÍLIA', paciente_impossibilitado: 'SIM' }), true);
+});
+
+const OP = { prazos: { j2: 2, j1: 1 }, feriados: {}, diasPrimeiro: 3, desfechoEncerra: false, hoje: '2026-10-20' };
+// Admissão numa sexta (09/10/2026): 3 dias úteis = quarta 14/10.
+const ADM = { data_admissao: '2026-10-09', data_solicitacao: '2026-10-12', justificativa_id: 'j2', necessidade_acompanhamento: 'PACIENTE' };
+
+test('calcularAdmissao: aguardando o 1º atendimento', () => {
+  const dentro = r.calcularAdmissao(ADM, [], { ...OP, hoje: '2026-10-13' }).campos;
+  assert.equal(dentro.status, 'AGUARDANDO 1º ATENDIMENTO');
+  assert.equal(dentro.prazo_primeiro_atendimento, '2026-10-14');
+  assert.equal(dentro.primeiro_no_prazo, 'EM ANDAMENTO');
+  assert.equal(dentro.proximo_prazo, '2026-10-14');
+  const passou = r.calcularAdmissao(ADM, [], OP).campos;
+  assert.equal(passou.primeiro_no_prazo, 'NÃO');
+});
+
+test('calcularAdmissao: 1º atendimento e retornos, família sem impossibilidade não conta', () => {
+  const atend = [
+    { id: 'f1', data: '2026-10-13', publico: 'FAMÍLIA', paciente_impossibilitado: 'NÃO', justificativa_id: 'j2' },
+    { id: 'p1', data: '2026-10-14', publico: 'PACIENTE', justificativa_id: 'j2' },
+    { id: 'f2', data: '2026-10-16', publico: 'FAMÍLIA', paciente_impossibilitado: 'SIM', justificativa_id: 'j2' },
+    { id: 'p2', data: '2026-10-21', publico: 'PACIENTE', justificativa_id: 'j2' }
+  ];
+  const res = r.calcularAdmissao(ADM, atend, { ...OP, hoje: '2026-10-21' });
+  assert.deepEqual({ ...res.porAtendimento.f1 }, { prazo_limite: '', no_prazo: '', conta_prazo: 'NÃO' });
+  assert.deepEqual({ ...res.porAtendimento.p1 }, { prazo_limite: '2026-10-14', no_prazo: 'SIM', conta_prazo: 'SIM' });
+  assert.deepEqual({ ...res.porAtendimento.f2 }, { prazo_limite: '2026-10-16', no_prazo: 'SIM', conta_prazo: 'SIM' });
+  assert.deepEqual({ ...res.porAtendimento.p2 }, { prazo_limite: '2026-10-20', no_prazo: 'NÃO', conta_prazo: 'SIM' });
+  const c = res.campos;
+  assert.equal(c.status, 'EM ACOMPANHAMENTO');
+  assert.equal(c.primeiro_atendimento, '2026-10-14');
+  assert.equal(c.primeiro_no_prazo, 'SIM');
+  assert.equal(c.dias_ate_primeiro_atendimento, 5);
+  assert.equal(c.dias_resposta, 2);
+  assert.equal(c.ultimo_contato, '2026-10-21');
+  assert.equal(c.proximo_prazo, '2026-10-23');
+});
+
+test('calcularAdmissao: só familiar sem impossibilidade não vale como 1º atendimento', () => {
+  const atend = [{ id: 'f', data: '2026-10-12', publico: 'FAMÍLIA', paciente_impossibilitado: 'NÃO' }];
+  const c = r.calcularAdmissao(ADM, atend, OP).campos;
+  assert.equal(c.status, 'AGUARDANDO 1º ATENDIMENTO');
+  assert.equal(c.primeiro_no_prazo, 'NÃO');
+  const comImpossibilidade = r.calcularAdmissao(ADM, [{ ...atend[0], paciente_impossibilitado: 'SIM' }], OP).campos;
+  assert.equal(comImpossibilidade.primeiro_no_prazo, 'SIM');
+});
+
+test('calcularAdmissao: desfecho dentro do prazo sem atendimento fica fora do indicador', () => {
+  const saiu = { ...ADM, desfecho_id: 'd', data_desfecho: '2026-10-13' };
+  const c = r.calcularAdmissao(saiu, [], { ...OP, desfechoEncerra: true }).campos;
+  assert.equal(c.status, 'ENCERRADA');
+  assert.equal(c.primeiro_no_prazo, 'NÃO SE APLICA');
+  assert.equal(c.proximo_prazo, '');
+  const depois = r.calcularAdmissao({ ...saiu, data_desfecho: '2026-10-16' }, [], { ...OP, desfechoEncerra: true }).campos;
+  assert.equal(depois.primeiro_no_prazo, 'NÃO');
+});
+
+test('calcularAdmissao: desfecho psicológico para os prazos; retomada recomeça a contagem', () => {
+  const atend = [{ id: 'p1', data: '2026-10-13', publico: 'PACIENTE', justificativa_id: 'j2' }];
+  const encerrado = r.calcularAdmissao({ ...ADM, desfecho_id: 'ap', data_desfecho: '2026-10-14' }, atend, OP).campos;
+  assert.equal(encerrado.status, 'ACOMPANHAMENTO ENCERRADO');
+  assert.equal(encerrado.proximo_prazo, '');
+
+  const retomada = { ...ADM, retomado_em: '2026-10-26', justificativa_id: 'j1' };
+  const atend2 = atend.concat([{ id: 'p2', data: '2026-10-27', publico: 'PACIENTE', justificativa_id: 'j1' }]);
+  const res = r.calcularAdmissao(retomada, atend2, { ...OP, hoje: '2026-10-27' });
+  assert.equal(res.porAtendimento.p2.prazo_limite, '2026-10-27'); // 1 dia útil após a retomada
+  assert.equal(res.porAtendimento.p2.no_prazo, 'SIM');
+  assert.equal(res.campos.status, 'EM ACOMPANHAMENTO');
+  assert.equal(res.campos.proximo_prazo, '2026-10-28');
+  const semAtendimentoAinda = r.calcularAdmissao(retomada, atend, { ...OP, hoje: '2026-10-26' }).campos;
+  assert.equal(semAtendimentoAinda.ultimo_contato, '2026-10-26');
+  assert.equal(semAtendimentoAinda.proximo_prazo, '2026-10-27');
 });

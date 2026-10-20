@@ -29,7 +29,8 @@ test('configurar cria as abas, semeia dados e pode rodar de novo sem duplicar', 
   assert.deepEqual(nomes.sort(), Object.keys(ctx.TABELAS).sort());
   assert.equal(ctx.listar('SETORES').length, ctx.SETORES_INICIAIS.length);
   assert.equal(ctx.listar('UNIDADES').length, 18);
-  assert.equal(ctx.listar('LISTAS').filter((i) => i.lista === 'DESFECHO').length, 6);
+  assert.equal(ctx.listar('DESFECHOS').length, 6);
+  assert.equal(ctx.listar('PARAMETROS')[0].valor, '3');
   assert.equal(ctx.listar('JUSTIFICATIVAS').length, ctx.JUSTIFICATIVAS_INICIAIS.length);
   assert.equal(ctx.listar('FERIADOS').length, ctx.FERIADOS_NACIONAIS.length);
   const profs = ctx.listar('PROFISSIONAIS');
@@ -102,7 +103,7 @@ test('cadastros exigem coordenação e validam e-mail', () => {
   assert.match(negado.erro, /Somente a coordenação/);
 });
 
-function sistemaComCaso() {
+function sistemaComAdmissao() {
   const sis = carregarSistema();
   const { ctx } = sis;
   ctx.configurar();
@@ -114,98 +115,141 @@ function sistemaComCaso() {
   const paciente = ctx.apiSalvarPaciente({ prontuario: '161349', nome: 'Francisca Kelyane' }).dados;
   ctx.novaExecucao();
   const unidade = ctx.listar('UNIDADES').find((u) => u.nome === 'CM 2');
-  return { ...sis, j, paciente, unidade };
+  const desfecho = (nome) => ctx.listar('DESFECHOS').find((d) => d.nome === nome);
+  const admitir = (extra = {}) => {
+    ctx.novaExecucao();
+    const r = ctx.apiSalvarAdmissao({
+      paciente_id: paciente.id, unidade_id: unidade.id, data_admissao: '2026-10-09',
+      necessidade_acompanhamento: 'PACIENTE', justificativa_id: j.id, ...extra
+    });
+    ctx.novaExecucao();
+    return r;
+  };
+  const atender = (adm, extra) => {
+    ctx.novaExecucao();
+    const r = ctx.apiRegistrarAtendimento({ admissao_id: adm.id, data: '2026-10-14', publico: 'PACIENTE', ...extra });
+    ctx.novaExecucao();
+    return r;
+  };
+  return { ...sis, j, paciente, unidade, desfecho, admitir, atender };
 }
 
-test('caso: abre, calcula tempos e prazo, e impede segundo caso aberto do mesmo paciente', () => {
-  const { ctx, j, paciente, unidade } = sistemaComCaso();
-  const r1 = ctx.apiSalvarCaso({
-    paciente_id: paciente.id, unidade_id: unidade.id, data_admissao: '2026-10-10',
-    tipo_solicitacao: 'EQUIPE', data_solicitacao: '2026-10-13', data_avaliacao: '2026-10-14',
-    necessidade_acompanhamento: 'PACIENTE E FAMÍLIA', justificativa_id: j.id
-  });
+test('admissão: abre aguardando o 1º atendimento e impede outra admissão aberta do paciente', () => {
+  const { admitir } = sistemaComAdmissao();
+  const r1 = admitir();
   assert.equal(r1.ok, true, r1.erro);
-  const caso = r1.dados.caso;
-  assert.equal(caso.status, 'ABERTO');
-  assert.equal(Number(caso.dias_ate_solicitacao), 3);
-  assert.equal(Number(caso.dias_resposta), 1);
-  assert.equal(caso.proximo_prazo, '2026-10-16'); // 2 dias úteis após 14/10
-  assert.equal(caso.situacao, 'ATRASADO'); // hoje = 20/10
-  assert.equal(caso.avaliado_por, ctx.listar('PROFISSIONAIS')[0].id); // quem está logado
+  const adm = r1.dados.admissao;
+  assert.equal(adm.status, 'AGUARDANDO 1º ATENDIMENTO');
+  assert.equal(adm.prazo_primeiro_atendimento, '2026-10-15'); // 3 dias úteis após sex 09/10, pulando o feriado de 12/10
+  assert.equal(adm.primeiro_no_prazo, 'NÃO'); // hoje = 20/10 e ninguém atendeu
+  assert.equal(adm.situacao, 'ATRASADO');
 
-  ctx.novaExecucao();
-  const r2 = ctx.apiSalvarCaso({ paciente_id: paciente.id, unidade_id: unidade.id, data_solicitacao: '2026-10-15' });
+  const r2 = admitir({ data_admissao: '2026-10-15' });
   assert.equal(r2.ok, false);
-  assert.match(r2.erro, /já tem um caso aberto/);
-
-  ctx.novaExecucao();
-  const semJust = ctx.apiSalvarCaso({ id: caso.id, paciente_id: paciente.id, unidade_id: unidade.id,
-    data_solicitacao: '2026-10-13', data_avaliacao: '2026-10-14', necessidade_acompanhamento: 'PACIENTE' });
-  assert.equal(semJust.ok, false);
-  assert.match(semJust.erro, /justificativa/);
+  assert.match(r2.erro, /já tem uma admissão aberta/);
 });
 
-test('atendimentos: profissional do login, prazo no/fora, exclusão recalcula, desfecho encerra', () => {
-  const { ctx, j, paciente, unidade } = sistemaComCaso();
-  const caso = ctx.apiSalvarCaso({
-    paciente_id: paciente.id, unidade_id: unidade.id, data_solicitacao: '2026-10-13', data_avaliacao: '2026-10-14',
-    necessidade_acompanhamento: 'PACIENTE', justificativa_id: j.id
-  }).dados.caso;
+test('atendimentos: 1º no prazo, família com e sem impossibilidade, quantidade de familiares', () => {
+  const { ctx, admitir, atender } = sistemaComAdmissao();
+  const adm = admitir().dados.admissao;
 
-  ctx.novaExecucao();
-  const a1 = ctx.apiRegistrarAtendimento({ caso_id: caso.id, data: '2026-10-16', publico: 'PACIENTE' });
-  assert.equal(a1.ok, true, a1.erro);
-  const reg = a1.dados.atendimentos[0];
-  assert.equal(reg.profissional_id, ctx.listar('PROFISSIONAIS')[0].id);
-  assert.equal(reg.categoria, 'PROFISSIONAL DA EMPRESA');
-  assert.equal(reg.no_prazo, 'SIM');
-  assert.equal(a1.dados.caso.proximo_prazo, '2026-10-20');
-  assert.equal(a1.dados.caso.situacao, 'VENCE HOJE');
+  const fam = atender(adm, { data: '2026-10-13', publico: 'FAMÍLIA', quantidade: '3', paciente_impossibilitado: 'NÃO' });
+  assert.equal(fam.ok, true, fam.erro);
+  assert.equal(Number(fam.dados.atendimentos[0].quantidade), 3);
+  assert.equal(fam.dados.atendimentos[0].conta_prazo, 'NÃO');
+  assert.equal(fam.dados.admissao.status, 'AGUARDANDO 1º ATENDIMENTO');
 
-  ctx.novaExecucao();
-  const futuro = ctx.apiRegistrarAtendimento({ caso_id: caso.id, data: '2026-10-21', publico: 'FAMÍLIA' });
+  const pac = atender(adm, { data: '2026-10-14' });
+  assert.equal(pac.ok, true, pac.erro);
+  assert.equal(pac.dados.admissao.status, 'EM ACOMPANHAMENTO');
+  assert.equal(pac.dados.admissao.primeiro_no_prazo, 'SIM');
+  assert.equal(pac.dados.admissao.proximo_prazo, '2026-10-16');
+  assert.equal(pac.dados.atendimentos[0].categoria, 'PROFISSIONAL DA EMPRESA');
+
+  // Paciente impossibilitado: o atendimento à família renova o prazo.
+  const fam2 = atender(adm, { data: '2026-10-16', publico: 'FAMÍLIA', quantidade: '2', paciente_impossibilitado: 'SIM' });
+  assert.equal(fam2.dados.atendimentos[0].conta_prazo, 'SIM');
+  assert.equal(fam2.dados.atendimentos[0].no_prazo, 'SIM');
+  assert.equal(fam2.dados.admissao.proximo_prazo, '2026-10-20');
+  assert.equal(fam2.dados.admissao.situacao, 'VENCE HOJE');
+
+  const futuro = atender(adm, { data: '2026-10-21' });
   assert.equal(futuro.ok, false);
+  const antes = atender(adm, { data: '2026-10-08' });
+  assert.equal(antes.ok, false);
 
-  // Residente atende a família: categoria fica gravada no atendimento.
-  ctx.novaExecucao();
+  // Excluir o atendimento ao paciente faz o 1º atendimento passar a ser o da família de 16/10 (prazo era 15/10).
+  const excl = ctx.apiExcluirAtendimento(pac.dados.atendimentos[0].id);
+  assert.equal(excl.ok, true, excl.erro);
+  assert.equal(excl.dados.admissao.primeiro_atendimento, '2026-10-16');
+  assert.equal(excl.dados.admissao.primeiro_no_prazo, 'NÃO');
+});
+
+test('residente: categoria gravada no atendimento', () => {
+  const { ctx, admitir, atender } = sistemaComAdmissao();
+  const adm = admitir().dados.admissao;
   ctx.apiSalvarProfissional({ nome: 'Iohana', email: 'iohana@exemplo.com', categoria: 'RESIDENTE', perfil: 'PROFISSIONAL' });
   ctx.novaExecucao();
   const residente = ctx.listar('PROFISSIONAIS').find((p) => p.email === 'iohana@exemplo.com');
-  const a2 = ctx.apiRegistrarAtendimento({ caso_id: caso.id, data: '2026-10-20', publico: 'FAMÍLIA', profissional_id: residente.id });
-  assert.equal(a2.ok, true, a2.erro);
-  assert.equal(a2.dados.atendimentos[0].categoria, 'RESIDENTE');
-  assert.equal(a2.dados.atendimentos[0].no_prazo, 'SIM');
-
-  // Excluir o atendimento de 16/10 faz o de 20/10 ficar fora do prazo (limite 16/10 a partir da avaliação).
-  ctx.novaExecucao();
-  const excl = ctx.apiExcluirAtendimento(reg.id);
-  assert.equal(excl.ok, true, excl.erro);
-  assert.equal(excl.dados.atendimentos.length, 1);
-  assert.equal(excl.dados.atendimentos[0].no_prazo, 'NÃO');
-
-  ctx.novaExecucao();
-  const fim = ctx.apiSalvarCaso({
-    id: caso.id, paciente_id: paciente.id, unidade_id: unidade.id, data_solicitacao: '2026-10-13',
-    data_avaliacao: '2026-10-14', necessidade_acompanhamento: 'PACIENTE', justificativa_id: j.id,
-    data_encerramento: '2026-10-20', desfecho: 'ALTA'
-  });
-  assert.equal(fim.ok, true, fim.erro);
-  assert.equal(fim.dados.caso.status, 'ENCERRADO');
-  assert.equal(fim.dados.caso.proximo_prazo, '');
-  assert.equal(Number(fim.dados.caso.dias_acompanhamento), 6);
+  const r = atender(adm, { profissional_id: residente.id });
+  assert.equal(r.dados.atendimentos[0].categoria, 'RESIDENTE');
+  assert.equal(r.dados.atendimentos[0].profissional_nome, 'IOHANA');
 });
 
-test('mudar o prazo da justificativa recalcula os casos abertos', () => {
-  const { ctx, j, paciente, unidade } = sistemaComCaso();
-  const caso = ctx.apiSalvarCaso({
-    paciente_id: paciente.id, unidade_id: unidade.id, data_solicitacao: '2026-10-13', data_avaliacao: '2026-10-14',
-    necessidade_acompanhamento: 'PACIENTE', justificativa_id: j.id
-  }).dados.caso;
+test('desfecho psicológico mantém a admissão; retomada recomeça; saída do hospital encerra e libera nova admissão', () => {
+  const { ctx, desfecho, admitir, atender, paciente, unidade, j } = sistemaComAdmissao();
+  const adm = admitir().dados.admissao;
+  atender(adm, { data: '2026-10-13' });
+  const base = { id: adm.id, paciente_id: paciente.id, unidade_id: unidade.id, data_admissao: '2026-10-09',
+    necessidade_acompanhamento: 'PACIENTE', justificativa_id: j.id };
+
+  const alta = ctx.apiSalvarAdmissao({ ...base, desfecho_id: desfecho('ALTA PSICOLÓGICA').id, data_desfecho: '2026-10-15' });
+  assert.equal(alta.ok, true, alta.erro);
+  assert.equal(alta.dados.admissao.status, 'ACOMPANHAMENTO ENCERRADO');
+  assert.equal(alta.dados.admissao.aberta, true);
   ctx.novaExecucao();
+  assert.equal(atender(adm, { data: '2026-10-19' }).ok, false); // precisa retomar antes
+
+  ctx.novaExecucao();
+  assert.equal(admitir({ data_admissao: '2026-10-16' }).ok, false); // ainda internado: mesma admissão
+
+  ctx.novaExecucao();
+  const ret = ctx.apiRetomarAcompanhamento({ id: adm.id, data: '2026-10-19' });
+  assert.equal(ret.ok, true, ret.erro);
+  assert.equal(ret.dados.admissao.status, 'EM ACOMPANHAMENTO');
+  assert.equal(ret.dados.admissao.proximo_prazo, '2026-10-21');
+  assert.match(ret.dados.admissao.observacoes, /retomado em 19\/10\/2026/);
+
+  const r2 = atender(adm, { data: '2026-10-20' });
+  assert.equal(r2.dados.atendimentos[0].no_prazo, 'SIM');
+
+  ctx.novaExecucao();
+  const saiu = ctx.apiSalvarAdmissao({ ...base, desfecho_id: desfecho('ALTA').id, data_desfecho: '2026-10-20' });
+  assert.equal(saiu.ok, true, saiu.erro);
+  assert.equal(saiu.dados.admissao.status, 'ENCERRADA');
+  assert.equal(saiu.dados.admissao.proximo_prazo, '');
+
+  const nova = admitir({ data_admissao: '2026-10-20' });
+  assert.equal(nova.ok, true, nova.erro);
+  assert.equal(nova.dados.admissao.prazo_primeiro_atendimento, '2026-10-23');
+  assert.equal(nova.dados.outras_admissoes.length, 1);
+});
+
+test('parâmetro do prazo do 1º atendimento e prazo de justificativa recalculam as admissões abertas', () => {
+  const { ctx, admitir, atender, j } = sistemaComAdmissao();
+  const adm = admitir().dados.admissao;
+  const p = ctx.listar('PARAMETROS')[0];
+  const r = ctx.apiSalvarParametro({ id: p.id, valor: '5' });
+  assert.equal(r.ok, true, r.erro);
+  ctx.novaExecucao();
+  assert.equal(ctx.buscarPorId('ADMISSOES', adm.id).prazo_primeiro_atendimento, '2026-10-19'); // 5 úteis, sem 12/10
+  assert.equal(ctx.apiSalvarParametro({ id: p.id, valor: 'três' }).ok, false);
+
+  atender(adm, { data: '2026-10-14' });
   ctx.apiSalvarJustificativa({ id: j.id, nome: j.nome, prazo_dias_uteis: '5', ordem: j.ordem });
   ctx.novaExecucao();
-  assert.equal(ctx.buscarPorId('CASOS', caso.id).proximo_prazo, '2026-10-21');
+  assert.equal(ctx.buscarPorId('ADMISSOES', adm.id).proximo_prazo, '2026-10-21');
   ctx.novaExecucao();
-  const lista = ctx.apiListarCasos({ status: 'ABERTO' });
+  const lista = ctx.apiListarAdmissoes({ abertas: 'SIM' });
   assert.equal(lista.dados[0].situacao, 'NO PRAZO');
 });

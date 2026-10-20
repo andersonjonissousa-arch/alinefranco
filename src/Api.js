@@ -36,6 +36,9 @@ function dadosDeCadastro(incluirInativos) {
     unidades: unidades,
     profissionais: profissionais,
     justificativas: listar('JUSTIFICATIVAS').filter(ativo).sort(porOrdem),
+    desfechos: listar('DESFECHOS').filter(ativo).sort(porOrdem),
+    parametros: listar('PARAMETROS'),
+    status_admissao: STATUS_ADMISSAO,
     feriados: listar('FERIADOS').slice().sort(function (a, b) { return a.data < b.data ? -1 : 1; }),
     categorias: CATEGORIAS_PROFISSIONAL,
     perfis: PERFIS,
@@ -155,7 +158,7 @@ function apiSalvarJustificativa(dados) {
     if (!item.nome) throw new Error('Informe a justificativa.');
     if (dados.id) atualizar('JUSTIFICATIVAS', dados.id, item);
     else inserir('JUSTIFICATIVAS', item);
-    recalcularCasosAbertos();
+    recalcularAdmissoesAbertas();
     return dadosDeCadastro(true);
   });
 }
@@ -169,7 +172,7 @@ function apiSalvarFeriado(dados) {
     if (repetido) throw new Error('Esta data já está cadastrada: ' + repetido.descricao + '.');
     if (dados.id) atualizar('FERIADOS', dados.id, feriado);
     else inserir('FERIADOS', feriado);
-    recalcularCasosAbertos();
+    recalcularAdmissoesAbertas();
     return dadosDeCadastro(true);
   });
 }
@@ -178,7 +181,39 @@ function apiExcluirFeriado(id) {
   return responder(function () {
     exigirCoordenacao();
     excluir('FERIADOS', id);
-    recalcularCasosAbertos();
+    recalcularAdmissoesAbertas();
+    return dadosDeCadastro(true);
+  });
+}
+
+function apiSalvarDesfecho(dados) {
+  return responder(function () {
+    exigirCoordenacao();
+    var item = {
+      nome: formatarNome(dados.nome),
+      encerra_admissao: dados.encerra_admissao === 'SIM' ? 'SIM' : 'NÃO',
+      ordem: Number(dados.ordem) || 99,
+      ativo: dados.ativo === 'NÃO' ? 'NÃO' : 'SIM'
+    };
+    if (!item.nome) throw new Error('Informe o desfecho.');
+    if (dados.id) atualizar('DESFECHOS', dados.id, item);
+    else inserir('DESFECHOS', item);
+    recalcularAdmissoes(listar('ADMISSOES').filter(function (a) { return a.desfecho_id; }).map(function (a) { return a.id; }));
+    return dadosDeCadastro(true);
+  });
+}
+
+function apiSalvarParametro(dados) {
+  return responder(function () {
+    exigirCoordenacao();
+    var param = listar('PARAMETROS').filter(function (p) { return p.id === dados.id; })[0];
+    if (!param) throw new Error('Parâmetro não encontrado.');
+    var valor = String(dados.valor === undefined ? '' : dados.valor).trim();
+    if (param.chave === 'PRAZO_PRIMEIRO_ATENDIMENTO_DIAS_UTEIS' && !/^\d+$/.test(valor)) {
+      throw new Error('O prazo deve ser um número inteiro de dias úteis.');
+    }
+    atualizar('PARAMETROS', param.id, { valor: valor });
+    recalcularAdmissoesAbertas();
     return dadosDeCadastro(true);
   });
 }

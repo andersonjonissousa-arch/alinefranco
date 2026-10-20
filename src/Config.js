@@ -22,26 +22,34 @@ var TABELAS = {
   JUSTIFICATIVAS: ['id', 'nome', 'prazo_dias_uteis', 'ordem', 'ativo'],
   // Feriados não contam como dia útil no cálculo dos prazos.
   FERIADOS: ['id', 'data', 'descricao'],
+  // Desfechos e se cada um encerra a admissão (saída do hospital) ou só o acompanhamento psicológico.
+  DESFECHOS: ['id', 'nome', 'encerra_admissao', 'ordem', 'ativo'],
+  // Parâmetros do sistema, como o prazo do 1º atendimento após a admissão.
+  PARAMETROS: ['id', 'chave', 'valor', 'descricao'],
   PACIENTES: ['id', 'prontuario', 'nome', 'criado_em', 'atualizado_em'],
-  CASOS: [
-    'id', 'paciente_id', 'unidade_id', 'data_admissao',
+  // Cada entrada do paciente no hospital. Uma nova admissão só depois que a anterior foi encerrada.
+  ADMISSOES: [
+    'id', 'paciente_id', 'data_admissao', 'unidade_id',
     // Solicitação
-    'tipo_solicitacao', 'descricao_solicitacao', 'prioridade_solicitacao', 'data_solicitacao', 'atendido',
-    // Avaliação
-    'descricao_demanda', 'prioridade_demanda', 'data_avaliacao', 'avaliado_por',
+    'tipo_solicitacao', 'descricao_solicitacao', 'prioridade_solicitacao', 'data_solicitacao',
+    // Avaliação (o 1º atendimento)
+    'descricao_demanda', 'prioridade_demanda',
     // Acompanhamento e desfecho
-    'necessidade_acompanhamento', 'justificativa_id', 'data_encerramento', 'desfecho', 'observacoes',
+    'necessidade_acompanhamento', 'justificativa_id', 'desfecho_id', 'data_desfecho', 'retomado_em', 'observacoes',
     // Calculados pelo sistema ao salvar
-    'status', 'dias_ate_solicitacao', 'dias_resposta', 'dias_acompanhamento', 'ultimo_contato', 'proximo_prazo',
+    'status', 'prazo_primeiro_atendimento', 'primeiro_atendimento', 'primeiro_no_prazo',
+    'dias_ate_primeiro_atendimento', 'dias_resposta', 'ultimo_contato', 'proximo_prazo',
     'criado_por', 'criado_em', 'atualizado_em'
   ],
-  // Cada atendimento: com quem (paciente ou família), por quem, e se foi dentro do prazo da justificativa.
+  // Cada atendimento: ao paciente ou à família (com quantas pessoas), por quem e se foi no prazo.
+  // Atendimento à família só conta para os prazos quando o paciente estava impossibilitado.
   ATENDIMENTOS: [
-    'id', 'caso_id', 'data', 'publico', 'quantidade', 'profissional_id', 'categoria', 'justificativa_id',
-    'prazo_limite', 'no_prazo', 'observacao', 'criado_por', 'criado_em'
+    'id', 'admissao_id', 'data', 'publico', 'quantidade', 'paciente_impossibilitado', 'conta_prazo',
+    'profissional_id', 'categoria', 'justificativa_id', 'prazo_limite', 'no_prazo', 'observacao',
+    'criado_por', 'criado_em'
   ],
-  // Atividades assistenciais do caso (ficha de admissão, discussão de caso, visitas...).
-  ATIVIDADES: ['id', 'caso_id', 'data', 'tipo', 'quantidade', 'profissional_id', 'categoria', 'criado_em'],
+  // Atividades assistenciais da admissão (ficha de admissão, discussão de caso, visitas...).
+  ATIVIDADES: ['id', 'admissao_id', 'data', 'tipo', 'quantidade', 'profissional_id', 'categoria', 'criado_em'],
   // Reuniões de equipe por unidade.
   REUNIOES: ['id', 'data', 'unidade_id', 'tipo', 'quantidade', 'profissional_id', 'categoria', 'criado_em'],
   // Atividades gerenciais do serviço.
@@ -53,7 +61,7 @@ var CATEGORIAS_PROFISSIONAL = ['PROFISSIONAL DA EMPRESA', 'RESIDENTE', 'ESTAGIÁ
 var CATEGORIA_EMPRESA = 'PROFISSIONAL DA EMPRESA';
 var PERFIS = ['COORDENAÇÃO', 'PROFISSIONAL'];
 var PUBLICOS_ATENDIMENTO = ['PACIENTE', 'FAMÍLIA'];
-/** Com estas respostas em "necessidade de acompanhamento", o caso não tem prazo de retorno. */
+/** Com estas respostas em "necessidade de acompanhamento", a admissão não tem prazo de retorno. */
 var SEM_ACOMPANHAMENTO = ['NÃO', 'N / A'];
 
 var DESCRICOES_BASE = [
@@ -71,7 +79,6 @@ var LISTAS_INICIAIS = {
   DESCRICAO_DEMANDA: DESCRICOES_BASE.concat(['SEM CONDIÇÕES CLÍNICAS E/OU SOCIAIS', 'RECUSA', 'SEM DEMANDA']),
   PRIORIDADE_DEMANDA: ['ALTA', 'MODERADA', 'BAIXA', 'RECUSA', 'SEM DEMANDA', 'SEM CONDIÇÕES CLÍNICAS E/OU SOCIAIS'],
   NECESSIDADE_ACOMPANHAMENTO: ['PACIENTE', 'PACIENTE E FAMÍLIA', 'FAMÍLIA', 'NÃO', 'N / A'],
-  DESFECHO: ['ALTA', 'ÓBITO', 'TRANSFERÊNCIA', 'SEM CONDIÇÕES CLÍNICAS E/OU SOCIAIS', 'ALTA PSICOLÓGICA', 'RECUSA'],
   ATIVIDADE_ASSISTENCIAL: [
     'FICHA DE ADMISSÃO', 'DISCUSSÃO DE CASO', 'REUNIÃO FAMILIAR', 'VISITA DE CRIANÇA', 'VISITA ESTENDIDA',
     'VISITA VIRTUAL', 'PRONTUÁRIO AFETIVO', 'INTERVENÇÃO CONJUNTA', 'ACOLHIMENTO AO ÓBITO',
@@ -84,6 +91,17 @@ var LISTAS_INICIAIS = {
     'TIME JORNADA DO CUIDADO', 'REABILITA SEPSE', 'PSI ISGH', 'VISITA TÉCNICA', 'ESTUDO DE CASO PSI + SS'
   ]
 };
+
+/** Desfechos: os que encerram a admissão (paciente saiu do hospital) e os que encerram só o acompanhamento. */
+var DESFECHOS_INICIAIS = [
+  ['ALTA', 'SIM'], ['ÓBITO', 'SIM'], ['TRANSFERÊNCIA', 'SIM'],
+  ['SEM CONDIÇÕES CLÍNICAS E/OU SOCIAIS', 'NÃO'], ['ALTA PSICOLÓGICA', 'NÃO'], ['RECUSA', 'NÃO']
+];
+
+/** Parâmetros editáveis pela coordenação. */
+var PARAMETROS_INICIAIS = [
+  ['PRAZO_PRIMEIRO_ATENDIMENTO_DIAS_UTEIS', '3', 'Dias úteis, a partir da admissão no hospital, para o 1º atendimento (avaliação).']
+];
 
 /** Justificativas de acompanhamento. O prazo em dias úteis é preenchido pela coordenação. */
 var JUSTIFICATIVAS_INICIAIS = [

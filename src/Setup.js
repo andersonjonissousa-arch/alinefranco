@@ -12,6 +12,8 @@ function configurar() {
   semearListas();
   semearJustificativas();
   semearFeriados();
+  semearDesfechos();
+  semearParametros();
   semearCoordenacao();
   Logger.log('Banco pronto: ' + banco.getUrl());
   return banco.getUrl();
@@ -89,6 +91,21 @@ function semearJustificativas() {
 function semearFeriados() {
   if (listar('FERIADOS').length) return;
   FERIADOS_NACIONAIS.forEach(function (f) { inserir('FERIADOS', { data: f[0], descricao: f[1] }); });
+}
+
+function semearDesfechos() {
+  if (listar('DESFECHOS').length) return;
+  DESFECHOS_INICIAIS.forEach(function (d, i) {
+    inserir('DESFECHOS', { nome: d[0], encerra_admissao: d[1], ordem: i + 1, ativo: 'SIM' });
+  });
+}
+
+/** Parâmetros que faltam são criados; os existentes não são alterados. */
+function semearParametros() {
+  PARAMETROS_INICIAIS.forEach(function (p) {
+    var existe = listar('PARAMETROS').some(function (x) { return x.chave === p[0]; });
+    if (!existe) inserir('PARAMETROS', { chave: p[0], valor: p[1], descricao: p[2] });
+  });
 }
 
 /** Quem roda a configuração vira coordenação, para conseguir entrar no sistema. */
