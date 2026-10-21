@@ -5,12 +5,18 @@
 
 var _cacheTabelas = {};
 
+var _banco = null;
+// Usado só pelo autoteste: aponta o sistema para uma planilha de teste durante a execução.
+var _bancoTeste = null;
+
+/** Planilha do banco, aberta uma vez por execução. */
 function abrirBanco() {
+  if (_bancoTeste) return _bancoTeste;
+  if (_banco) return _banco;
   var id = PropertiesService.getScriptProperties().getProperty(APP.propDbId);
-  if (id) return SpreadsheetApp.openById(id);
-  var ativa = SpreadsheetApp.getActiveSpreadsheet();
-  if (!ativa) throw new Error('Banco não configurado. Rode a função "configurar" no editor do Apps Script.');
-  return ativa;
+  _banco = id ? SpreadsheetApp.openById(id) : SpreadsheetApp.getActiveSpreadsheet();
+  if (!_banco) throw new Error('Banco não configurado. Rode a função "configurar" no editor do Apps Script.');
+  return _banco;
 }
 
 function abaDaTabela(nome) {

@@ -426,3 +426,16 @@ test('motivo sem prioridade fica sem prazo até a coordenação definir; tipos c
   assert.equal(ctx.buscarPorId('ADMISSOES', adm.id).resposta_no_prazo, 'SEM PRAZO'); // EQUIPE saiu da lista
   void paciente;
 });
+
+test('autoteste (testarSistema) passa e não mexe no banco real', () => {
+  const { ctx, google } = carregarSistema();
+  ctx.configurar();
+  ctx.novaExecucao();
+  const abasAntes = google.planilha.getSheets().map((a) => a.linhas.length).join(',');
+  ctx.HtmlService = { createTemplateFromFile: () => ({ evaluate: () => ({ getContent: () => 'Gestão da Psicologia telaAdmissoes' }) }) };
+  vm.runInContext('HtmlService = this.HtmlService', ctx);
+  const saida = ctx.testarSistema();
+  assert.match(saida, /RESULTADO: TUDO OK/, saida);
+  assert.equal(google.planilha.getSheets().map((a) => a.linhas.length).join(','), abasAntes);
+  assert.equal(google.criadas.length, 2); // planilha de teste + exportação de teste
+});

@@ -85,6 +85,7 @@ src/
   Api.js            funções da tela: início, pacientes e cadastros
   Admissoes.js      admissões, atendimentos, atividades, retomada e recálculo dos prazos
   Compilado.js      compilado, exportação, reuniões e atividades gerenciais
+  Autoteste.js      testarSistema: teste do fluxo inteiro no Google de verdade
   ui/               tela (HTML, CSS e JavaScript, sem bibliotecas externas)
 dist/               o mesmo código em 4 arquivos, para instalar copiando e colando (npm run empacotar)
 tests/              testes com Node, com os serviços do Google simulados
@@ -148,6 +149,14 @@ Também dá para rodar manualmente em **Actions > Publicar no Apps Script > Run 
 Cole de novo os arquivos de `dist/` (ou `clasp push`) e, em **Implantar > Gerenciar implantações**,
 edite a implantação e escolha **Nova versão**. Rode `configurar` de novo: ela só acrescenta o que
 falta e não apaga dados.
+
+## Autoteste no Google
+
+No editor do Apps Script, escolha a função `testarSistema` e clique em **Executar**. Ela cria uma
+planilha de teste (não mexe no banco real), passa pelo fluxo inteiro (configuração, paciente, admissão
+com solicitação, atendimentos, desfechos, retomada, registro do dia, compilado, exportação e tela) e
+mostra no **registro de execução** o que passou e o que falhou. No fim, apague do Drive as duas
+planilhas de teste listadas no registro.
 
 ## Testes
 

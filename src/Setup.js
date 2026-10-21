@@ -20,6 +20,7 @@ function configurar() {
 }
 
 function obterOuCriarBanco() {
+  if (_bancoTeste) return _bancoTeste;
   var props = PropertiesService.getScriptProperties();
   var id = props.getProperty(APP.propDbId);
   if (id) return SpreadsheetApp.openById(id);
