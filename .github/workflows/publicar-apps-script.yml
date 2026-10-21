@@ -1,0 +1,57 @@
+# Publica o sistema no Apps Script a cada atualização do código.
+# Precisa do secret CLASPRC_JSON (conteúdo do arquivo .clasprc.json gerado pelo "clasp login").
+# Sem o secret, só roda os testes.
+name: Publicar no Apps Script
+
+on:
+  push:
+    branches: [main, claude/adoring-bell-q834ri]
+    paths: ['src/**', 'tests/**', '.clasp.json', '.github/workflows/publicar-apps-script.yml']
+  workflow_dispatch:
+
+concurrency:
+  group: apps-script
+  cancel-in-progress: false
+
+env:
+  CLASP: '@google/clasp@3.4.1'
+  # ID da implantação do app da Web (Implantar > Gerenciar implantações). Vazio = só envia o código.
+  DEPLOYMENT_ID: ''
+
+jobs:
+  publicar:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Testes
+        run: npm test
+
+      - name: Conferir credencial
+        id: credencial
+        env:
+          CLASPRC_JSON: ${{ secrets.CLASPRC_JSON }}
+        run: |
+          if [ -z "$CLASPRC_JSON" ]; then
+            echo "::warning::Secret CLASPRC_JSON não configurado: o código não foi enviado ao Apps Script."
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+          else
+            printf '%s' "$CLASPRC_JSON" > "$HOME/.clasprc.json"
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Enviar o código (clasp push)
+        if: steps.credencial.outputs.ok == 'true'
+        run: npx --yes "$CLASP" push --force
+
+      - name: Atualizar a implantação (mesmo link do sistema)
+        if: steps.credencial.outputs.ok == 'true' && env.DEPLOYMENT_ID != ''
+        run: npx --yes "$CLASP" update-deployment "$DEPLOYMENT_ID" --description "GitHub ${GITHUB_SHA::7}"
+
+      - name: Apagar a credencial do runner
+        if: always()
+        run: rm -f "$HOME/.clasprc.json"

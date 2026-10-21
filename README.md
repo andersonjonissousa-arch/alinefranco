@@ -113,12 +113,26 @@ com os dados dos pacientes fica no Drive dessa conta.
    Ela cria a planilha "Gestão da Psicologia — Banco de dados" e cadastra quem rodou como coordenação.
 6. Siga os passos de "Depois de instalar".
 
+### Publicação automática pelo GitHub (já configurada)
+
+O arquivo `.clasp.json` liga este repositório ao projeto do Apps Script (ID do script). A automação
+`.github/workflows/publicar-apps-script.yml` roda os testes a cada atualização em `src/` e, se
+passarem, envia o código ao Apps Script (`clasp push`). Para funcionar:
+
+1. Ativar a API do Apps Script em script.google.com/home/usersettings, na conta que vai publicar.
+2. Essa conta precisa ser dona ou editora do projeto do Apps Script.
+3. Rodar `clasp login` no computador e guardar o conteúdo de `~/.clasprc.json` no GitHub em
+   **Settings > Secrets and variables > Actions** com o nome `CLASPRC_JSON`.
+4. Depois da primeira implantação do app da Web, colocar o ID da implantação em `DEPLOYMENT_ID`
+   no arquivo da automação: a cada atualização, a mesma implantação (mesmo link) recebe a versão nova.
+
+Também dá para rodar manualmente em **Actions > Publicar no Apps Script > Run workflow**.
+
 ### Pelo clasp (linha de comando)
 
 1. `npm install -g @google/clasp` e `clasp login`.
-2. `clasp create --type standalone --title "Gestão da Psicologia" --rootDir src`
-   (ou copie `.clasp.json.example` para `.clasp.json` com o id de um projeto existente).
-3. `clasp push` e, no editor, rode a função `configurar`.
+2. O `.clasp.json` já aponta para o projeto. Para outro projeto, troque o `scriptId`.
+3. `clasp push --force` e, no editor, rode a função `configurar`.
 
 ### Depois de instalar
 
