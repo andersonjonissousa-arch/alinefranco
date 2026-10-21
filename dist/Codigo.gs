@@ -1300,12 +1300,13 @@ function exigirCoordenacao() {
   return u;
 }
 
+// Ligado só pelo autoteste, que provoca erros de propósito.
+var _semRegistroDeErros = false;
+
 /**
  * Envolve cada chamada da tela: devolve { ok: true, dados } ou { ok: false, erro }.
  * Assim a tela sempre mostra uma mensagem clara em vez de um erro técnico.
  */
-var _semRegistroDeErros = false;
-
 function responder(fn) {
   try {
     return { ok: true, dados: fn() };
