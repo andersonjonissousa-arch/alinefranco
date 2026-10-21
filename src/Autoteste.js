@@ -19,6 +19,8 @@ function testarSistema() {
   criadas.push(teste.getUrl());
   _bancoTeste = teste;
   _cacheTabelas = {};
+  // O teste provoca erros de propósito (ex.: prontuário repetido); não precisam aparecer no registro.
+  _semRegistroDeErros = true;
   try {
     configurar();
     _cacheTabelas = {};
@@ -97,6 +99,7 @@ function testarSistema() {
   } catch (e) {
     verificar(false, 'Execução interrompida', e.message);
   } finally {
+    _semRegistroDeErros = false;
     _bancoTeste = null;
     _cacheTabelas = {};
   }

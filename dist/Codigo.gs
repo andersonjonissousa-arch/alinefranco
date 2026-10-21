@@ -1304,11 +1304,13 @@ function exigirCoordenacao() {
  * Envolve cada chamada da tela: devolve { ok: true, dados } ou { ok: false, erro }.
  * Assim a tela sempre mostra uma mensagem clara em vez de um erro técnico.
  */
+var _semRegistroDeErros = false;
+
 function responder(fn) {
   try {
     return { ok: true, dados: fn() };
   } catch (e) {
-    console.error(e);
+    if (!_semRegistroDeErros) console.error(e);
     return { ok: false, erro: e.message || String(e) };
   }
 }
@@ -2228,6 +2230,8 @@ function testarSistema() {
   criadas.push(teste.getUrl());
   _bancoTeste = teste;
   _cacheTabelas = {};
+  // O teste provoca erros de propósito (ex.: prontuário repetido); não precisam aparecer no registro.
+  _semRegistroDeErros = true;
   try {
     configurar();
     _cacheTabelas = {};
@@ -2306,6 +2310,7 @@ function testarSistema() {
   } catch (e) {
     verificar(false, 'Execução interrompida', e.message);
   } finally {
+    _semRegistroDeErros = false;
     _bancoTeste = null;
     _cacheTabelas = {};
   }
