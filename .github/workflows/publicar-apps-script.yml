@@ -16,7 +16,7 @@ concurrency:
 env:
   CLASP: '@google/clasp@3.4.1'
   # ID da implantação do app da Web (Implantar > Gerenciar implantações). Vazio = só envia o código.
-  DEPLOYMENT_ID: ''
+  DEPLOYMENT_ID: 'AKfycbyXHX6bzOzMsxnUOZAaWhHFYP7SSb9R2NR2BjMraoNFzJ3mJa9ZkhQSo3sU51sb92OpxQ'
 
 jobs:
   publicar:
