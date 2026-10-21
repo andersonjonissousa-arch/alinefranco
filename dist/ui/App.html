@@ -28,13 +28,13 @@
     });
   }
 
-  /** Erro de armazenamento do Google (código INTERNAL): quase sempre mais de uma conta Google no navegador. */
+  /** Erro de armazenamento do Google (código INTERNAL): instabilidade do Google ou mais de uma conta no navegador. */
   function erroDoGoogle(e) {
     var msg = String((e && e.message) || e || '');
     if (/INTERNAL|armazenamento|storage/i.test(msg)) {
-      return new Error('O Google não conseguiu identificar sua conta (código INTERNAL). Isso acontece quando há mais de ' +
-        'uma conta Google aberta no navegador. Abra o sistema numa janela anônima, ou num perfil do Chrome só com a ' +
-        'conta cadastrada, ou saia das outras contas Google e tente de novo.');
+      return new Error('O Google não respondeu (código INTERNAL). Espere alguns minutos e atualize a página. ' +
+        'Se continuar, pode ser mais de uma conta Google aberta no navegador: abra o sistema numa janela anônima ' +
+        'ou num perfil do Chrome só com a conta cadastrada.');
     }
     return e;
   }
