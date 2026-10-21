@@ -24,8 +24,19 @@
     return new Promise(function (resolve, reject) {
       google.script.run
         .withSuccessHandler(function (r) { r && r.ok ? resolve(r.dados) : reject(new Error(r ? r.erro : 'Sem resposta.')); })
-        .withFailureHandler(reject)[nome].apply(null, args);
+        .withFailureHandler(function (e) { reject(erroDoGoogle(e)); })[nome].apply(null, args);
     });
+  }
+
+  /** Erro de armazenamento do Google (código INTERNAL): quase sempre mais de uma conta Google no navegador. */
+  function erroDoGoogle(e) {
+    var msg = String((e && e.message) || e || '');
+    if (/INTERNAL|armazenamento|storage/i.test(msg)) {
+      return new Error('O Google não conseguiu identificar sua conta (código INTERNAL). Isso acontece quando há mais de ' +
+        'uma conta Google aberta no navegador. Abra o sistema numa janela anônima, ou num perfil do Chrome só com a ' +
+        'conta cadastrada, ou saia das outras contas Google e tente de novo.');
+    }
+    return e;
   }
 
   /** Cria elementos sem usar innerHTML: h('td', { class: 'x' }, 'texto', filho...). */
