@@ -236,6 +236,13 @@ function normalizarDataUtc(d) {
   return [d.getUTCFullYear(), doisDigitos(d.getUTCMonth() + 1), doisDigitos(d.getUTCDate())].join('-');
 }
 
+/** Soma (ou subtrai) dias corridos a uma data 'AAAA-MM-DD'. */
+function adicionarDias(data, dias) {
+  var d = normalizarData(data);
+  if (!d) return '';
+  return normalizarDataUtc(new Date(paraUtc(d) + Number(dias) * MS_DIA));
+}
+
 /** 'AAAA-MM' da data, usado para agrupar o compilado mensal. */
 function mesReferencia(data) {
   var d = normalizarData(data);
@@ -584,6 +591,70 @@ var GRAVIDADE_SITUACAO = { 'ATRASADO': 3, 'VENCE HOJE': 2, 'NO PRAZO': 1, '': 0 
 /** A mais urgente de duas situações. */
 function situacaoMaisUrgente(a, b) {
   return (GRAVIDADE_SITUACAO[a || ''] || 0) >= (GRAVIDADE_SITUACAO[b || ''] || 0) ? (a || '') : (b || '');
+}
+
+// ---------- Gestão: os três prazos de uma admissão ----------
+
+/**
+ * Situação de cada prazo da admissão, para as telas de gestão:
+ * 1º atendimento após a admissão, resposta à interconsulta e próximo retorno do seguimento.
+ * Cada um: { estado: PENDENTE | CUMPRIDO | NÃO REALIZADO | NÃO SE APLICA | SEM PRAZO | '', prazo,
+ *            situacao (se pendente): ATRASADO | VENCE HOJE | NO PRAZO, resultado (se cumprido): NO PRAZO | FORA DO PRAZO }
+ * proximo: o prazo pendente mais urgente ({ tipo, prazo, situacao }) ou null.
+ */
+function prazosDaAdmissao(adm, hojeIso, agoraDh) {
+  var ativa = adm.status !== STATUS_ADMISSAO.encerrada && !adm.desfecho_id;
+
+  var primeiro = { prazo: adm.prazo_primeiro_atendimento || '' };
+  if (adm.primeiro_no_prazo === 'NÃO SE APLICA') primeiro.estado = 'NÃO SE APLICA';
+  else if (adm.primeiro_atendimento) {
+    primeiro.estado = 'CUMPRIDO';
+    primeiro.realizado = adm.primeiro_atendimento;
+    primeiro.resultado = adm.primeiro_no_prazo === 'SIM' ? 'NO PRAZO' : 'FORA DO PRAZO';
+  } else if (ativa) {
+    primeiro.estado = 'PENDENTE';
+    primeiro.situacao = situacaoPrazo(primeiro.prazo, hojeIso);
+  } else {
+    primeiro.estado = 'NÃO REALIZADO';
+    primeiro.resultado = 'FORA DO PRAZO';
+  }
+
+  var interconsulta = { prazo: adm.prazo_resposta || '', prioridade: adm.prioridade_solicitacao || '' };
+  var r = adm.resposta_no_prazo;
+  if (!r) interconsulta.estado = '';
+  else if (r === 'SEM PRAZO') interconsulta.estado = 'SEM PRAZO';
+  else if (r === 'NÃO SE APLICA') interconsulta.estado = 'NÃO SE APLICA';
+  else if (adm.momento_resposta) {
+    interconsulta.estado = 'CUMPRIDO';
+    interconsulta.realizado = adm.momento_resposta;
+    interconsulta.horas = adm.horas_resposta;
+    interconsulta.resultado = r === 'SIM' ? 'NO PRAZO' : 'FORA DO PRAZO';
+  } else if (ativa) {
+    interconsulta.estado = 'PENDENTE';
+    interconsulta.situacao = situacaoPrazoHora(interconsulta.prazo, agoraDh);
+    interconsulta.horas_restantes = horasEntre(agoraDh, interconsulta.prazo);
+  } else {
+    interconsulta.estado = 'NÃO REALIZADO';
+    interconsulta.resultado = 'FORA DO PRAZO';
+  }
+
+  var retorno = { prazo: '', prioridade: adm.prioridade_demanda || '', ultimo: adm.ultimo_contato || '' };
+  if (adm.status !== STATUS_ADMISSAO.acompanhamento || adm.desfecho_id) retorno.estado = '';
+  else if (adm.proximo_prazo) {
+    retorno.estado = 'PENDENTE';
+    retorno.prazo = adm.proximo_prazo;
+    retorno.situacao = situacaoPrazo(retorno.prazo, hojeIso);
+  } else retorno.estado = 'SEM PRAZO';
+
+  var pendentes = [['1º ATENDIMENTO', primeiro], ['INTERCONSULTA', interconsulta], ['RETORNO', retorno]]
+    .filter(function (p) { return p[1].estado === 'PENDENTE'; });
+  pendentes.sort(function (a, b) {
+    var g = GRAVIDADE_SITUACAO[b[1].situacao] - GRAVIDADE_SITUACAO[a[1].situacao];
+    if (g) return g;
+    return a[1].prazo < b[1].prazo ? -1 : a[1].prazo > b[1].prazo ? 1 : 0;
+  });
+  var proximo = pendentes.length ? { tipo: pendentes[0][0], prazo: pendentes[0][1].prazo, situacao: pendentes[0][1].situacao } : null;
+  return { primeiro: primeiro, interconsulta: interconsulta, retorno: retorno, proximo: proximo };
 }
 
 // ===== Indicadores.js =====
@@ -2209,6 +2280,117 @@ function apiExcluirGerencial(id) {
   });
 }
 
+// ===== Gestao.js =====
+/**
+ * Telas de gestão: pacientes ativos por setor e unidade, interconsultas e os três prazos de cada admissão.
+ */
+
+/** Admissão resumida com os três prazos e os dias de internação. */
+function itemDeGestao(adm, aux) {
+  var r = resumoAdmissao(adm, aux);
+  var justificativa = aux.justificativas[adm.justificativa_id] || {};
+  var prioridade = justificativa.prioridade_id ? (aux.prioridades[justificativa.prioridade_id] || {}) : {};
+  return Object.assign(r, {
+    prazos: prazosDaAdmissao(adm, aux.hoje, aux.agora),
+    dias_internado: diasEntre(adm.data_admissao, aux.hoje),
+    periodicidade: prioridade.periodicidade || ''
+  });
+}
+
+function auxiliaresGestao() {
+  return Object.assign(auxiliares(), { prioridades: mapaPorId('PRIORIDADES') });
+}
+
+function ordemUrgencia(a, b) {
+  var pa = a.prazos.proximo;
+  var pb = b.prazos.proximo;
+  var g = (pb ? GRAVIDADE_SITUACAO[pb.situacao] : -1) - (pa ? GRAVIDADE_SITUACAO[pa.situacao] : -1);
+  if (g) return g;
+  var xa = pa ? pa.prazo : '9999';
+  var xb = pb ? pb.prazo : '9999';
+  if (xa !== xb) return xa < xb ? -1 : 1;
+  return String(a.paciente_nome).localeCompare(String(b.paciente_nome));
+}
+
+/**
+ * Pacientes internados acompanhados pela psicologia (admissões não encerradas).
+ * filtros: { setor_id, unidade_id, termo, incluir_encerrados: 'SIM' para incluir quem teve desfecho
+ *            psicológico e segue internado, pendencia: 'ATRASADOS' | 'PENDENTES' | '' }
+ */
+function apiGestao(filtros) {
+  return responder(function () {
+    usuarioAtual();
+    var f = filtros || {};
+    var aux = auxiliaresGestao();
+    var termo = normalizarTexto(f.termo);
+    var prontuario = normalizarProntuario(f.termo);
+    var itens = listar('ADMISSOES').filter(function (a) {
+      if (a.status === STATUS_ADMISSAO.encerrada) return false;
+      if (a.status === STATUS_ADMISSAO.acompanhamentoEncerrado && f.incluir_encerrados !== 'SIM') return false;
+      return true;
+    }).map(function (a) { return itemDeGestao(a, aux); }).filter(function (a) {
+      if (f.setor_id && a.setor_id !== f.setor_id) return false;
+      if (f.unidade_id && a.unidade_id !== f.unidade_id) return false;
+      if (f.pendencia === 'ATRASADOS' && !(a.prazos.proximo && a.prazos.proximo.situacao === 'ATRASADO')) return false;
+      if (f.pendencia === 'PENDENTES' && !a.prazos.proximo) return false;
+      if (termo && normalizarTexto(a.paciente_nome).indexOf(termo) === -1 &&
+        !(prontuario && normalizarProntuario(a.prontuario) === prontuario)) return false;
+      return true;
+    });
+    itens.sort(ordemUrgencia);
+
+    var resumo = { pacientes: itens.length, aguardando_primeiro: 0, interconsultas_pendentes: 0, atrasados: 0, vencem_hoje: 0 };
+    itens.forEach(function (a) {
+      if (a.prazos.primeiro.estado === 'PENDENTE') resumo.aguardando_primeiro++;
+      if (a.prazos.interconsulta.estado === 'PENDENTE') resumo.interconsultas_pendentes++;
+      if (a.prazos.proximo && a.prazos.proximo.situacao === 'ATRASADO') resumo.atrasados++;
+      if (a.prazos.proximo && a.prazos.proximo.situacao === 'VENCE HOJE') resumo.vencem_hoje++;
+    });
+    return { itens: itens, resumo: resumo, hoje: aux.hoje, agora: aux.agora };
+  });
+}
+
+/**
+ * Interconsultas (solicitações com prazo de resposta).
+ * filtros: { situacao: 'PENDENTES' | 'RESPONDIDAS' | 'TODAS', dias (período das respondidas, padrão 30),
+ *            setor_id, unidade_id, prioridade }
+ */
+function apiInterconsultas(filtros) {
+  return responder(function () {
+    usuarioAtual();
+    var f = filtros || {};
+    var aux = auxiliaresGestao();
+    var dias = Number(f.dias) || 30;
+    var desde = adicionarDias(aux.hoje, -dias);
+    var itens = listar('ADMISSOES').filter(function (a) {
+      return a.resposta_no_prazo && a.resposta_no_prazo !== 'SEM PRAZO';
+    }).map(function (a) { return itemDeGestao(a, aux); }).filter(function (a) {
+      var pendente = a.prazos.interconsulta.estado === 'PENDENTE';
+      if (f.situacao === 'PENDENTES' && !pendente) return false;
+      if (f.situacao === 'RESPONDIDAS' && pendente) return false;
+      if (!pendente && normalizarData(a.data_solicitacao) < desde) return false;
+      if (f.setor_id && a.setor_id !== f.setor_id) return false;
+      if (f.unidade_id && a.unidade_id !== f.unidade_id) return false;
+      if (f.prioridade && a.prioridade_solicitacao !== f.prioridade) return false;
+      return true;
+    });
+    itens.sort(function (a, b) {
+      var pa = a.prazos.interconsulta.estado === 'PENDENTE' ? 0 : 1;
+      var pb = b.prazos.interconsulta.estado === 'PENDENTE' ? 0 : 1;
+      if (pa !== pb) return pa - pb;
+      if (!pa) return a.prazo_resposta < b.prazo_resposta ? -1 : 1;
+      return String(b.data_solicitacao + b.hora_solicitacao).localeCompare(String(a.data_solicitacao + a.hora_solicitacao));
+    });
+    var resumo = { pendentes: 0, atrasadas: 0, respondidas: 0, no_prazo: 0 };
+    itens.forEach(function (a) {
+      var i = a.prazos.interconsulta;
+      if (i.estado === 'PENDENTE') { resumo.pendentes++; if (i.situacao === 'ATRASADO') resumo.atrasadas++; }
+      if (i.estado === 'CUMPRIDO') { resumo.respondidas++; if (i.resultado === 'NO PRAZO') resumo.no_prazo++; }
+    });
+    return { itens: itens, resumo: resumo, dias: dias, agora: aux.agora };
+  });
+}
+
 // ===== Autoteste.js =====
 /**
  * Autoteste no Google de verdade. Rode "testarSistema" no editor do Apps Script.
@@ -2259,11 +2441,22 @@ function testarSistema() {
     verificar(adm && adm.prioridade_solicitacao === 'ALTA', 'Admissão: prioridade da solicitação pela matriz', adm && adm.prioridade_solicitacao);
     verificar(adm && adm.status === STATUS_ADMISSAO.aguardando, 'Admissão: aguardando 1º atendimento', adm && adm.status);
 
+    var daAdmissao = function (lista) { return lista && lista.itens.filter(function (i) { return i.id === adm.id; })[0]; };
+    var item = daAdmissao(dados(apiGestao({ unidade_id: unidade.id }), 'Gestão: pacientes da unidade'));
+    verificar(item && item.prazos.primeiro.estado === 'PENDENTE', 'Gestão: paciente aparece aguardando o 1º atendimento');
+    item = daAdmissao(dados(apiInterconsultas({ situacao: 'PENDENTES' }), 'Gestão: interconsultas pendentes'));
+    verificar(item && item.prazos.interconsulta.estado === 'PENDENTE', 'Gestão: interconsulta aparece aguardando resposta');
+
     det = dados(apiRegistrarAtendimento({ admissao_id: adm.id, data: hojeIso, hora: horaAgora, publico: 'PACIENTE' }), 'Atendimento: registro ao paciente');
     adm = det && det.admissao;
     verificar(adm && adm.primeiro_no_prazo === 'SIM', '1º atendimento dentro do prazo da admissão', adm && adm.primeiro_no_prazo);
     verificar(adm && adm.resposta_no_prazo === 'SIM', 'Resposta à solicitação dentro de 24h', adm && adm.resposta_no_prazo);
     verificar(adm && adm.proximo_prazo > hojeIso, 'Próximo retorno calculado', adm && adm.proximo_prazo);
+    item = daAdmissao(dados(apiInterconsultas({ situacao: 'RESPONDIDAS' }), 'Gestão: interconsultas respondidas'));
+    verificar(item && item.prazos.interconsulta.resultado === 'NO PRAZO', 'Gestão: interconsulta respondida no prazo');
+    item = daAdmissao(dados(apiGestao({}), 'Gestão: prazos dos pacientes'));
+    verificar(item && item.prazos.retorno.estado === 'PENDENTE' && item.prazos.retorno.prazo === adm.proximo_prazo,
+      'Gestão: próximo retorno pela matriz de seguimento');
 
     det = dados(apiRegistrarAtendimento({
       admissao_id: adm.id, data: hojeIso, hora: horaAgora, publico: 'FAMÍLIA', quantidade: 2, paciente_impossibilitado: 'NÃO'

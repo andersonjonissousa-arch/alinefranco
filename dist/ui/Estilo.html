@@ -112,6 +112,9 @@
   .indicador.atrasado .numero { color: var(--perigo); }
   .indicador.hoje .numero { color: #8a5a00; }
   .indicador.prazo .numero { color: var(--ok); }
+  button.indicador { font: inherit; text-align: left; cursor: pointer; }
+  button.indicador:hover { border-color: var(--primaria); background: #f7fafd; }
+  .selo.espaco { margin-left: 8px; vertical-align: middle; }
 
   .cabecalho-caso { display: flex; flex-wrap: wrap; gap: 8px 24px; align-items: center; }
   fieldset { border: 1px solid var(--borda); border-radius: var(--raio); padding: 12px 14px 14px; margin: 0 0 14px; }
@@ -159,5 +162,6 @@
     .menu button { flex: 0 0 auto; }
     .conteudo { padding: 12px; }
     .campo { min-width: 100%; }
+    .tabela-rolagem table { min-width: 600px; }
   }
 </style>

@@ -55,6 +55,13 @@ function normalizarDataUtc(d) {
   return [d.getUTCFullYear(), doisDigitos(d.getUTCMonth() + 1), doisDigitos(d.getUTCDate())].join('-');
 }
 
+/** Soma (ou subtrai) dias corridos a uma data 'AAAA-MM-DD'. */
+function adicionarDias(data, dias) {
+  var d = normalizarData(data);
+  if (!d) return '';
+  return normalizarDataUtc(new Date(paraUtc(d) + Number(dias) * MS_DIA));
+}
+
 /** 'AAAA-MM' da data, usado para agrupar o compilado mensal. */
 function mesReferencia(data) {
   var d = normalizarData(data);
@@ -403,4 +410,68 @@ var GRAVIDADE_SITUACAO = { 'ATRASADO': 3, 'VENCE HOJE': 2, 'NO PRAZO': 1, '': 0 
 /** A mais urgente de duas situações. */
 function situacaoMaisUrgente(a, b) {
   return (GRAVIDADE_SITUACAO[a || ''] || 0) >= (GRAVIDADE_SITUACAO[b || ''] || 0) ? (a || '') : (b || '');
+}
+
+// ---------- Gestão: os três prazos de uma admissão ----------
+
+/**
+ * Situação de cada prazo da admissão, para as telas de gestão:
+ * 1º atendimento após a admissão, resposta à interconsulta e próximo retorno do seguimento.
+ * Cada um: { estado: PENDENTE | CUMPRIDO | NÃO REALIZADO | NÃO SE APLICA | SEM PRAZO | '', prazo,
+ *            situacao (se pendente): ATRASADO | VENCE HOJE | NO PRAZO, resultado (se cumprido): NO PRAZO | FORA DO PRAZO }
+ * proximo: o prazo pendente mais urgente ({ tipo, prazo, situacao }) ou null.
+ */
+function prazosDaAdmissao(adm, hojeIso, agoraDh) {
+  var ativa = adm.status !== STATUS_ADMISSAO.encerrada && !adm.desfecho_id;
+
+  var primeiro = { prazo: adm.prazo_primeiro_atendimento || '' };
+  if (adm.primeiro_no_prazo === 'NÃO SE APLICA') primeiro.estado = 'NÃO SE APLICA';
+  else if (adm.primeiro_atendimento) {
+    primeiro.estado = 'CUMPRIDO';
+    primeiro.realizado = adm.primeiro_atendimento;
+    primeiro.resultado = adm.primeiro_no_prazo === 'SIM' ? 'NO PRAZO' : 'FORA DO PRAZO';
+  } else if (ativa) {
+    primeiro.estado = 'PENDENTE';
+    primeiro.situacao = situacaoPrazo(primeiro.prazo, hojeIso);
+  } else {
+    primeiro.estado = 'NÃO REALIZADO';
+    primeiro.resultado = 'FORA DO PRAZO';
+  }
+
+  var interconsulta = { prazo: adm.prazo_resposta || '', prioridade: adm.prioridade_solicitacao || '' };
+  var r = adm.resposta_no_prazo;
+  if (!r) interconsulta.estado = '';
+  else if (r === 'SEM PRAZO') interconsulta.estado = 'SEM PRAZO';
+  else if (r === 'NÃO SE APLICA') interconsulta.estado = 'NÃO SE APLICA';
+  else if (adm.momento_resposta) {
+    interconsulta.estado = 'CUMPRIDO';
+    interconsulta.realizado = adm.momento_resposta;
+    interconsulta.horas = adm.horas_resposta;
+    interconsulta.resultado = r === 'SIM' ? 'NO PRAZO' : 'FORA DO PRAZO';
+  } else if (ativa) {
+    interconsulta.estado = 'PENDENTE';
+    interconsulta.situacao = situacaoPrazoHora(interconsulta.prazo, agoraDh);
+    interconsulta.horas_restantes = horasEntre(agoraDh, interconsulta.prazo);
+  } else {
+    interconsulta.estado = 'NÃO REALIZADO';
+    interconsulta.resultado = 'FORA DO PRAZO';
+  }
+
+  var retorno = { prazo: '', prioridade: adm.prioridade_demanda || '', ultimo: adm.ultimo_contato || '' };
+  if (adm.status !== STATUS_ADMISSAO.acompanhamento || adm.desfecho_id) retorno.estado = '';
+  else if (adm.proximo_prazo) {
+    retorno.estado = 'PENDENTE';
+    retorno.prazo = adm.proximo_prazo;
+    retorno.situacao = situacaoPrazo(retorno.prazo, hojeIso);
+  } else retorno.estado = 'SEM PRAZO';
+
+  var pendentes = [['1º ATENDIMENTO', primeiro], ['INTERCONSULTA', interconsulta], ['RETORNO', retorno]]
+    .filter(function (p) { return p[1].estado === 'PENDENTE'; });
+  pendentes.sort(function (a, b) {
+    var g = GRAVIDADE_SITUACAO[b[1].situacao] - GRAVIDADE_SITUACAO[a[1].situacao];
+    if (g) return g;
+    return a[1].prazo < b[1].prazo ? -1 : a[1].prazo > b[1].prazo ? 1 : 0;
+  });
+  var proximo = pendentes.length ? { tipo: pendentes[0][0], prazo: pendentes[0][1].prazo, situacao: pendentes[0][1].situacao } : null;
+  return { primeiro: primeiro, interconsulta: interconsulta, retorno: retorno, proximo: proximo };
 }

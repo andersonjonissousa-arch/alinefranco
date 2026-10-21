@@ -359,3 +359,45 @@ test('calcularResposta: prazo em horas pela prioridade, paciente x familiar, sem
   assert.equal(semPrioridade.horas_resposta, 7.5); // o tempo é medido mesmo sem prazo
   assert.equal(r.calcularResposta({ ...sol, hora_solicitacao: '' }, [pac], op).resposta_no_prazo, '');
 });
+
+test('prazosDaAdmissao: os três prazos e o mais urgente', () => {
+  const H = '2026-10-20';
+  const A = '2026-10-20 12:00';
+  const aguardando = {
+    status: 'AGUARDANDO 1º ATENDIMENTO', prazo_primeiro_atendimento: '2026-10-22', primeiro_no_prazo: 'EM ANDAMENTO',
+    resposta_no_prazo: 'EM ANDAMENTO', prazo_resposta: '2026-10-20 16:00', prioridade_solicitacao: 'ALTA'
+  };
+  const p = r.prazosDaAdmissao(aguardando, H, A);
+  assert.equal(p.primeiro.estado, 'PENDENTE');
+  assert.equal(p.primeiro.situacao, 'NO PRAZO');
+  assert.equal(p.interconsulta.estado, 'PENDENTE');
+  assert.equal(p.interconsulta.situacao, 'VENCE HOJE');
+  assert.equal(p.interconsulta.horas_restantes, 4);
+  assert.equal(p.retorno.estado, '');
+  assert.equal(p.proximo.tipo, 'INTERCONSULTA'); // vence hoje é mais urgente que no prazo
+
+  const acompanhando = {
+    status: 'EM ACOMPANHAMENTO', primeiro_atendimento: '2026-10-15', primeiro_no_prazo: 'SIM', prazo_primeiro_atendimento: '2026-10-16',
+    resposta_no_prazo: 'NÃO', momento_resposta: '2026-10-16 10:00', horas_resposta: 30, prazo_resposta: '2026-10-15 08:00',
+    proximo_prazo: '2026-10-19', ultimo_contato: '2026-10-16', prioridade_demanda: 'MODERADA'
+  };
+  const q = r.prazosDaAdmissao(acompanhando, H, A);
+  assert.equal(q.primeiro.estado, 'CUMPRIDO');
+  assert.equal(q.primeiro.resultado, 'NO PRAZO');
+  assert.equal(q.interconsulta.estado, 'CUMPRIDO');
+  assert.equal(q.interconsulta.resultado, 'FORA DO PRAZO');
+  assert.equal(q.retorno.estado, 'PENDENTE');
+  assert.equal(q.retorno.situacao, 'ATRASADO');
+  assert.deepEqual({ ...q.proximo }, { tipo: 'RETORNO', prazo: '2026-10-19', situacao: 'ATRASADO' });
+
+  const semSolicitacao = r.prazosDaAdmissao({ ...acompanhando, resposta_no_prazo: '', proximo_prazo: '' }, H, A);
+  assert.equal(semSolicitacao.interconsulta.estado, '');
+  assert.equal(semSolicitacao.retorno.estado, 'SEM PRAZO');
+  assert.equal(semSolicitacao.proximo, null);
+
+  const saiu = r.prazosDaAdmissao({ ...aguardando, status: 'ENCERRADA', desfecho_id: 'd', primeiro_no_prazo: 'NÃO', resposta_no_prazo: 'NÃO' }, H, A);
+  assert.equal(saiu.primeiro.estado, 'NÃO REALIZADO');
+  assert.equal(saiu.interconsulta.estado, 'NÃO REALIZADO');
+  assert.equal(saiu.proximo, null);
+  assert.equal(r.adicionarDias('2026-10-01', -30), '2026-09-01');
+});

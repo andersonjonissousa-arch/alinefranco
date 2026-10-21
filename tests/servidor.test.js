@@ -439,3 +439,54 @@ test('autoteste (testarSistema) passa e não mexe no banco real', () => {
   assert.equal(google.planilha.getSheets().map((a) => a.linhas.length).join(','), abasAntes);
   assert.equal(google.criadas.length, 2); // planilha de teste + exportação de teste
 });
+
+test('gestão: pacientes ativos por unidade, interconsultas pendentes e respondidas', () => {
+  const { ctx, admitir, atender, unidade } = sistemaComAdmissao();
+  const motivo = (nome) => ctx.listar('MOTIVOS_SOLICITACAO').find((m) => m.nome === nome);
+  const adm = admitir({ data_admissao: '2026-10-19', tipo_solicitacao: 'EQUIPE', motivo_solicitacao_id: motivo('RISCO DE SUICÍDIO').id,
+    data_solicitacao: '2026-10-20', hora_solicitacao: '08:00' }).dados.admissao;
+
+  // Segundo paciente, sem solicitação, já em acompanhamento.
+  ctx.novaExecucao();
+  const p2 = ctx.apiSalvarPaciente({ prontuario: '222', nome: 'Segundo Paciente' }).dados;
+  ctx.novaExecucao();
+  const outra = ctx.listar('UNIDADES').find((u) => u.nome === 'UTI 1');
+  const j = ctx.listar('JUSTIFICATIVAS').find((x) => x.nome === 'RISCO DE SUICÍDIO');
+  const adm2 = ctx.apiSalvarAdmissao({ paciente_id: p2.id, unidade_id: outra.id, data_admissao: '2026-10-15',
+    necessidade_acompanhamento: 'PACIENTE', justificativa_id: j.id }).dados.admissao;
+  atender(adm2, { data: '2026-10-16', hora: '09:00' });
+
+  ctx.novaExecucao();
+  const g = ctx.apiGestao({});
+  assert.equal(g.ok, true, g.erro);
+  assert.equal(g.dados.itens.length, 2);
+  assert.equal(g.dados.resumo.aguardando_primeiro, 1);
+  assert.equal(g.dados.resumo.interconsultas_pendentes, 1);
+  // 2º paciente: risco de suicídio = prioridade ALTA, retorno em até 2 dias úteis após sex 16/10 → ter 20/10 (hoje).
+  assert.equal(g.dados.resumo.atrasados, 0);
+  assert.equal(g.dados.resumo.vencem_hoje, 1);
+  const primeiro = g.dados.itens[0];
+  assert.equal(primeiro.paciente_nome, 'SEGUNDO PACIENTE'); // o mais urgente vem primeiro
+  assert.deepEqual({ ...primeiro.prazos.proximo }, { tipo: 'RETORNO', prazo: '2026-10-20', situacao: 'VENCE HOJE' });
+  assert.equal(primeiro.periodicidade, '3x por semana ou mais');
+  // 1º paciente: interconsulta alta (24h) solicitada 20/10 08:00 → vence 21/10 08:00; agora 20/10 12:00 → faltam 20h.
+  const doCm2 = g.dados.itens.find((i) => i.unidade_id === unidade.id);
+  assert.equal(doCm2.dias_internado, 1);
+  assert.equal(doCm2.prazos.interconsulta.horas_restantes, 20);
+  assert.equal(doCm2.prazos.proximo.tipo, 'INTERCONSULTA');
+  ctx.novaExecucao();
+  assert.equal(ctx.apiGestao({ unidade_id: outra.id }).dados.itens.length, 1);
+  ctx.novaExecucao();
+  assert.equal(ctx.apiGestao({ termo: '222' }).dados.itens[0].paciente_nome, 'SEGUNDO PACIENTE');
+
+  ctx.novaExecucao();
+  const pend = ctx.apiInterconsultas({ situacao: 'PENDENTES' });
+  assert.equal(pend.ok, true, pend.erro);
+  assert.equal(pend.dados.itens.length, 1);
+  atender(adm, { data: '2026-10-20', hora: '11:00' });
+  ctx.novaExecucao();
+  const resp = ctx.apiInterconsultas({ situacao: 'RESPONDIDAS' });
+  assert.equal(resp.dados.itens.length, 1);
+  assert.equal(resp.dados.resumo.no_prazo, 1);
+  assert.equal(Number(resp.dados.itens[0].prazos.interconsulta.horas), 3);
+});

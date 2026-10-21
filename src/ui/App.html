@@ -173,6 +173,7 @@
 
   var TELAS = {
     inicio: telaInicio,
+    gestao: telaGestao,
     pacientes: telaPacientes,
     admissoes: telaAdmissoes,
     registro: telaRegistro,
@@ -190,6 +191,13 @@
 
   // ---------- Início: painel do dia ----------
 
+  var ROTULO_TIPO_PRAZO = { '1º ATENDIMENTO': '1º atendimento', 'INTERCONSULTA': 'Interconsulta', 'RETORNO': 'Retorno' };
+
+  function cartaoIndicador(numero, rotulo, classe, aoClicar) {
+    return h('button', { type: 'button', class: 'indicador clicavel ' + (classe || ''), onclick: aoClicar },
+      h('div', { class: 'numero' }, numero), h('div', null, rotulo));
+  }
+
   function telaInicio() {
     var primeiro = estado.usuario.nome.split(' ')[0].toLowerCase().replace(/^./, function (c) { return c.toUpperCase(); });
     var main = tela('Olá, ' + primeiro);
@@ -197,28 +205,236 @@
     var lista = h('div', { class: 'cartao tabela-rolagem' });
     main.appendChild(resumo);
     main.appendChild(lista);
-    chamar('apiListarAdmissoes', { abertas: 'SIM' }).then(function (adms) {
-      var conta = { 'ATRASADO': 0, 'VENCE HOJE': 0, 'NO PRAZO': 0 };
-      var aguardando = 0;
-      adms.forEach(function (a) {
-        if (a.situacao in conta) conta[a.situacao]++;
-        if (a.status === estado.cad.status_admissao.aguardando) aguardando++;
-      });
+    chamar('apiGestao', {}).then(function (g) {
+      var r = g.resumo;
       resumo.textContent = '';
-      [['Admissões abertas', adms.length, ''], ['Aguardando 1º atendimento', aguardando, ''],
-        ['Atrasados', conta['ATRASADO'], 'atrasado'], ['Vencem hoje', conta['VENCE HOJE'], 'hoje'],
-        ['No prazo', conta['NO PRAZO'], 'prazo']].forEach(function (i) {
-        resumo.appendChild(h('div', { class: 'indicador ' + i[2] }, h('div', { class: 'numero' }, i[1]), h('div', null, i[0])));
-      });
-      var urgentes = adms.filter(function (a) { return a.situacao === 'ATRASADO' || a.situacao === 'VENCE HOJE'; });
+      resumo.appendChild(cartaoIndicador(r.pacientes, 'Pacientes em acompanhamento', '', function () { abrir('gestao', { aba: 'unidades' }); }));
+      resumo.appendChild(cartaoIndicador(r.aguardando_primeiro, 'Aguardando 1º atendimento', '', function () { abrir('gestao', { aba: 'prazos' }); }));
+      resumo.appendChild(cartaoIndicador(r.interconsultas_pendentes, 'Interconsultas pendentes', '', function () { abrir('gestao', { aba: 'interconsultas' }); }));
+      resumo.appendChild(cartaoIndicador(r.atrasados, 'Com prazo atrasado', 'atrasado', function () { abrir('gestao', { aba: 'prazos', pendencia: 'ATRASADOS' }); }));
+      resumo.appendChild(cartaoIndicador(r.vencem_hoje, 'Vencem hoje', 'hoje', function () { abrir('gestao', { aba: 'prazos', pendencia: 'PENDENTES' }); }));
+      var urgentes = g.itens.filter(function (a) { return a.prazos.proximo && a.prazos.proximo.situacao !== 'NO PRAZO'; });
       lista.textContent = '';
       lista.appendChild(h('h2', null, 'Para atender hoje'));
       if (!urgentes.length) {
-        lista.appendChild(h('p', { class: 'suave' }, 'Nenhum paciente atrasado ou com prazo para hoje.'));
+        lista.appendChild(h('p', { class: 'suave' }, 'Nenhum paciente com prazo atrasado ou vencendo hoje.'));
         return;
       }
-      lista.appendChild(tabelaAdmissoes(urgentes));
+      lista.appendChild(h('table', null,
+        h('thead', null, h('tr', null, ['Paciente', 'Unidade', 'O que vence', 'Prazo', 'Situação'].map(function (t) { return h('th', null, t); }))),
+        h('tbody', null, urgentes.map(function (a) {
+          var p = a.prazos.proximo;
+          return h('tr', { class: 'clicavel', onclick: function () { abrir('admissoes', { id: a.id }); } },
+            h('td', null, h('strong', null, a.paciente_nome), h('div', { class: 'suave' }, 'Pront. ' + a.prontuario)),
+            h('td', null, a.unidade_nome),
+            h('td', null, ROTULO_TIPO_PRAZO[p.tipo] || p.tipo),
+            h('td', null, p.prazo.length > 10 ? dataHoraBr(p.prazo) : dataBr(p.prazo)),
+            h('td', null, selo(p.situacao)));
+        }))));
     }).catch(function (e) { avisar(e.message, 'erro'); });
+  }
+
+  // ---------- Gestão: por unidade, interconsultas e prazos ----------
+
+  var filtrosGestao = { setor_id: '', unidade_id: '', termo: '', incluir_encerrados: '', pendencia: '' };
+  var filtrosInterconsultas = { situacao: 'PENDENTES', dias: '30', setor_id: '', prioridade: '' };
+
+  /** "faltam 5h", "atrasada há 1d 3h" etc. */
+  function textoHoras(horas) {
+    var h0 = Math.abs(Number(horas) || 0);
+    var dias = Math.floor(h0 / 24);
+    var resto = Math.round(h0 - dias * 24);
+    if (resto === 24) { dias++; resto = 0; }
+    return (dias ? dias + 'd ' : '') + resto + 'h';
+  }
+
+  /** Célula de um prazo: data e selo da situação (pendente) ou do resultado (cumprido). */
+  function celulaPrazo(p, comHora) {
+    var data = function (v) { return comHora ? dataHoraBr(v) : dataBr(v); };
+    if (!p.estado) return h('span', { class: 'suave' }, '—');
+    if (p.estado === 'SEM PRAZO') return h('span', { class: 'suave' }, 'sem prazo');
+    if (p.estado === 'NÃO SE APLICA') return h('span', { class: 'suave' }, 'não se aplica');
+    if (p.estado === 'PENDENTE') {
+      return h('div', null, data(p.prazo), ' ', selo(p.situacao),
+        p.horas_restantes !== undefined && p.horas_restantes !== ''
+          ? h('div', { class: 'suave' }, p.horas_restantes >= 0 ? 'faltam ' + textoHoras(p.horas_restantes) : 'atrasada há ' + textoHoras(p.horas_restantes))
+          : '');
+    }
+    var classe = p.resultado === 'NO PRAZO' ? 'selo prazo' : 'selo atrasado';
+    var quando = p.realizado ? (comHora ? dataHoraBr(p.realizado) : dataBr(p.realizado)) : 'não realizado';
+    return h('div', null, quando, ' ', h('span', { class: classe }, p.resultado.toLowerCase()),
+      p.horas !== undefined && p.horas !== '' ? h('div', { class: 'suave' }, 'em ' + String(p.horas).replace('.', ',') + 'h') : '');
+  }
+
+  function telaGestao(arg) {
+    var main = tela('Gestão');
+    var abas = h('div', { class: 'abas' });
+    var corpo = h('div');
+    var secoes = { unidades: ['Pacientes por unidade', gestaoUnidades], interconsultas: ['Interconsultas', gestaoInterconsultas], prazos: ['Prazos', gestaoPrazos] };
+    if (arg && arg.pendencia) filtrosGestao.pendencia = arg.pendencia;
+    function mostrar(chave) {
+      telaGestao.aba = chave;
+      abas.querySelectorAll('button').forEach(function (b) { b.classList.toggle('ativo', b.dataset.aba === chave); });
+      corpo.textContent = '';
+      secoes[chave][1](corpo);
+    }
+    Object.keys(secoes).forEach(function (k) {
+      abas.appendChild(h('button', { type: 'button', 'data-aba': k, onclick: function () { mostrar(k); } }, secoes[k][0]));
+    });
+    main.appendChild(abas);
+    main.appendChild(corpo);
+    mostrar((arg && arg.aba) || telaGestao.aba || 'unidades');
+  }
+
+  /** Filtros comuns: setor, unidade, busca e pendência. Chama aoMudar com os valores. */
+  function filtrosDeGestao(alvo, extras, aoMudar) {
+    var setores = estado.cad.setores.map(function (x) { return { valor: x.id, rotulo: x.nome }; });
+    var form = h('form', { class: 'linha' },
+      campo('Paciente', h('input', { name: 'termo', type: 'search', placeholder: 'Nome ou prontuário', value: filtrosGestao.termo })),
+      campo('Setor', seletor('setor_id', setores, filtrosGestao.setor_id, 'Todos')),
+      campo('Unidade', seletor('unidade_id', opcoesUnidades(), filtrosGestao.unidade_id, 'Todas')),
+      campo('Mostrar', seletor('pendencia', [{ valor: 'PENDENTES', rotulo: 'Só com prazo pendente' }, { valor: 'ATRASADOS', rotulo: 'Só atrasados' }],
+        filtrosGestao.pendencia, 'Todos os pacientes')),
+      extras || null);
+    var espera;
+    var mudar = function () { filtrosGestao = Object.assign(filtrosGestao, lerFormulario(form)); aoMudar(); };
+    form.addEventListener('input', function () { clearTimeout(espera); espera = setTimeout(mudar, 350); });
+    form.addEventListener('change', mudar);
+    form.addEventListener('submit', function (ev) { ev.preventDefault(); mudar(); });
+    alvo.appendChild(h('div', { class: 'cartao' }, form));
+    return form;
+  }
+
+  function gestaoUnidades(alvo) {
+    var incluir = h('label', { class: 'marcacao' },
+      h('input', { type: 'checkbox', checked: filtrosGestao.incluir_encerrados === 'SIM' }), ' Incluir quem teve desfecho psicológico e segue internado');
+    var lista = h('div', null, h('p', { class: 'carregando' }, 'Carregando…'));
+    function carregar() {
+      filtrosGestao.incluir_encerrados = incluir.querySelector('input').checked ? 'SIM' : '';
+      chamar('apiGestao', filtrosGestao).then(function (g) {
+        lista.textContent = '';
+        lista.appendChild(h('p', { class: 'suave' }, g.itens.length + ' paciente(s) em acompanhamento, sem desfecho.'));
+        if (!g.itens.length) return;
+        // Agrupa por setor e unidade, na ordem dos cadastros.
+        var porUnidade = {};
+        g.itens.forEach(function (a) { (porUnidade[a.unidade_id] = porUnidade[a.unidade_id] || []).push(a); });
+        estado.cad.setores.forEach(function (s) {
+          var unidades = estado.cad.unidades.filter(function (u) { return u.setor_id === s.id && porUnidade[u.id]; });
+          if (!unidades.length) return;
+          var total = unidades.reduce(function (n, u) { return n + porUnidade[u.id].length; }, 0);
+          lista.appendChild(h('h2', { class: 'subtitulo-secao' }, s.nome, h('span', { class: 'suave' }, ' · ' + total + ' paciente(s)')));
+          unidades.forEach(function (u) {
+            var itens = porUnidade[u.id];
+            var atrasados = itens.filter(function (a) { return a.prazos.proximo && a.prazos.proximo.situacao === 'ATRASADO'; }).length;
+            lista.appendChild(h('div', { class: 'cartao tabela-rolagem' },
+              h('h2', null, u.nome, h('span', { class: 'suave' }, ' · ' + itens.length + ' paciente(s)'),
+                atrasados ? h('span', { class: 'selo atrasado espaco' }, atrasados + ' atrasado(s)') : ''),
+              h('table', null,
+                h('thead', null, h('tr', null, ['Paciente', 'Situação', 'Justificativa e prioridade', 'Último atendimento', 'Próximo prazo']
+                  .map(function (t) { return h('th', null, t); }))),
+                h('tbody', null, itens.map(function (a) {
+                  var p = a.prazos.proximo;
+                  return h('tr', { class: 'clicavel', onclick: function () { abrir('admissoes', { id: a.id }); } },
+                    h('td', null, h('strong', null, a.paciente_nome),
+                      h('div', { class: 'suave' }, 'Pront. ' + a.prontuario + ' · internado há ' + a.dias_internado + ' dia(s)')),
+                    h('td', null, seloStatus(a)),
+                    h('td', null, a.justificativa_nome || h('span', { class: 'suave' }, '—'),
+                      a.prioridade_demanda ? h('div', { class: 'suave' }, a.prioridade_demanda.toLowerCase() + (a.periodicidade ? ' · ' + a.periodicidade : '')) : ''),
+                    h('td', null, dataBr(a.ultimo_contato) || h('span', { class: 'suave' }, 'nenhum')),
+                    h('td', null, p ? h('div', null, h('div', { class: 'suave' }, ROTULO_TIPO_PRAZO[p.tipo]),
+                      p.prazo.length > 10 ? dataHoraBr(p.prazo) : dataBr(p.prazo), ' ', selo(p.situacao)) : h('span', { class: 'suave' }, '—')));
+                })))));
+          });
+        });
+      }).catch(function (e) { avisar(e.message, 'erro'); });
+    }
+    var form = filtrosDeGestao(alvo, h('div', { class: 'campo' }, h('label', null, ' '), incluir), carregar);
+    void form;
+    alvo.appendChild(lista);
+    carregar();
+  }
+
+  function gestaoPrazos(alvo) {
+    var lista = h('div', { class: 'cartao tabela-rolagem' }, h('p', { class: 'carregando' }, 'Carregando…'));
+    function carregar() {
+      chamar('apiGestao', Object.assign({}, filtrosGestao, { incluir_encerrados: '' })).then(function (g) {
+        lista.textContent = '';
+        lista.appendChild(h('p', { class: 'suave' },
+          'Prazos de cada paciente: 1º atendimento em até ' + parametroPrazoPrimeiro() + ' dia(s) útil(eis) da admissão, ' +
+          'resposta à interconsulta em horas pela prioridade do motivo, e retorno em dias úteis pela prioridade da justificativa.'));
+        if (!g.itens.length) { lista.appendChild(h('p', { class: 'suave' }, 'Nenhum paciente encontrado.')); return; }
+        lista.appendChild(h('table', null,
+          h('thead', null, h('tr', null, ['Paciente', '1º atendimento', 'Interconsulta', 'Retorno (seguimento)']
+            .map(function (t) { return h('th', null, t); }))),
+          h('tbody', null, g.itens.map(function (a) {
+            return h('tr', { class: 'clicavel', onclick: function () { abrir('admissoes', { id: a.id }); } },
+              h('td', null, h('strong', null, a.paciente_nome), h('div', { class: 'suave' }, a.unidade_nome + ' · admissão ' + dataBr(a.data_admissao))),
+              h('td', null, celulaPrazo(a.prazos.primeiro, false)),
+              h('td', null, a.prazos.interconsulta.prioridade ? h('div', { class: 'suave' }, a.prazos.interconsulta.prioridade.toLowerCase()) : '',
+                celulaPrazo(a.prazos.interconsulta, true)),
+              h('td', null, a.prazos.retorno.prioridade ? h('div', { class: 'suave' }, a.prazos.retorno.prioridade.toLowerCase() + (a.periodicidade ? ' · ' + a.periodicidade : '')) : '',
+                celulaPrazo(a.prazos.retorno, false)));
+          }))));
+      }).catch(function (e) { avisar(e.message, 'erro'); });
+    }
+    filtrosDeGestao(alvo, null, carregar);
+    alvo.appendChild(lista);
+    carregar();
+  }
+
+  function parametroPrazoPrimeiro() {
+    var p = estado.cad.parametros.filter(function (x) { return x.chave === 'PRAZO_PRIMEIRO_ATENDIMENTO_DIAS_UTEIS'; })[0];
+    return p ? p.valor : '3';
+  }
+
+  function gestaoInterconsultas(alvo) {
+    var setores = estado.cad.setores.map(function (x) { return { valor: x.id, rotulo: x.nome }; });
+    var prioridades = prioridadesDoTipo(estado.cad.tipos_prioridade.solicitacao).map(function (p) { return { valor: p.nome, rotulo: rotuloPrioridade(p) }; });
+    var f = filtrosInterconsultas;
+    var form = h('form', { class: 'linha' },
+      campo('Mostrar', seletor('situacao', [{ valor: 'PENDENTES', rotulo: 'Aguardando resposta' }, { valor: 'RESPONDIDAS', rotulo: 'Respondidas' },
+        { valor: 'TODAS', rotulo: 'Todas' }], f.situacao, false)),
+      campo('Período (respondidas)', seletor('dias', [{ valor: '7', rotulo: 'Últimos 7 dias' }, { valor: '30', rotulo: 'Últimos 30 dias' },
+        { valor: '90', rotulo: 'Últimos 90 dias' }], f.dias, false)),
+      campo('Prioridade', seletor('prioridade', prioridades, f.prioridade, 'Todas')),
+      campo('Setor', seletor('setor_id', setores, f.setor_id, 'Todos')));
+    var resumo = h('div', { class: 'indicadores' });
+    var lista = h('div', { class: 'cartao tabela-rolagem' }, h('p', { class: 'carregando' }, 'Carregando…'));
+    function carregar() {
+      filtrosInterconsultas = lerFormulario(form);
+      chamar('apiInterconsultas', filtrosInterconsultas).then(function (d) {
+        var r = d.resumo;
+        resumo.textContent = '';
+        resumo.appendChild(h('div', { class: 'indicador' }, h('div', { class: 'numero' }, r.pendentes), h('div', null, 'Aguardando resposta')));
+        resumo.appendChild(h('div', { class: 'indicador atrasado' }, h('div', { class: 'numero' }, r.atrasadas), h('div', null, 'Atrasadas')));
+        resumo.appendChild(h('div', { class: 'indicador' }, h('div', { class: 'numero' }, r.respondidas), h('div', null, 'Respondidas (' + d.dias + ' dias)')));
+        resumo.appendChild(h('div', { class: 'indicador prazo' }, h('div', { class: 'numero' },
+          r.respondidas ? Math.round(r.no_prazo / r.respondidas * 100) + '%' : '—'), h('div', null, 'Respondidas no prazo')));
+        lista.textContent = '';
+        if (!d.itens.length) { lista.appendChild(h('p', { class: 'suave' }, 'Nenhuma interconsulta encontrada.')); return; }
+        lista.appendChild(h('table', null,
+          h('thead', null, h('tr', null, ['Paciente', 'Motivo e prioridade', 'Solicitada em', 'Prazo e resposta']
+            .map(function (t) { return h('th', null, t); }))),
+          h('tbody', null, d.itens.map(function (a) {
+            var i = a.prazos.interconsulta;
+            return h('tr', { class: 'clicavel', onclick: function () { abrir('admissoes', { id: a.id }); } },
+              h('td', null, h('strong', null, a.paciente_nome), h('div', { class: 'suave' }, a.unidade_nome + ' · Pront. ' + a.prontuario),
+                a.para_quem === 'FAMILIAR' ? h('div', { class: 'suave' }, 'para ' + [a.familiar_parentesco, a.familiar_nome].filter(Boolean).join(' ').toLowerCase()) : ''),
+              h('td', null, a.motivo_nome || '—', h('div', { class: 'suave' }, (i.prioridade || '').toLowerCase())),
+              h('td', null, dataHoraBr(dataHoraSolicitacao(a))),
+              h('td', null, h('div', { class: 'suave' }, 'até ' + dataHoraBr(i.prazo)), celulaPrazo(i, true)));
+          }))));
+      }).catch(function (e) { avisar(e.message, 'erro'); });
+    }
+    form.addEventListener('change', carregar);
+    alvo.appendChild(h('div', { class: 'cartao' }, form));
+    alvo.appendChild(resumo);
+    alvo.appendChild(lista);
+    carregar();
+  }
+
+  function dataHoraSolicitacao(a) {
+    return a.data_solicitacao ? a.data_solicitacao + ' ' + (a.hora_solicitacao || '00:00') : '';
   }
 
   // ---------- Pacientes ----------

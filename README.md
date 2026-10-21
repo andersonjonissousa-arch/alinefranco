@@ -18,7 +18,8 @@ gerado automaticamente. Base de dados nova, começando do zero.
 | Retomada do acompanhamento na mesma admissão após desfecho psicológico | pronto |
 | Atividades assistenciais | pronto |
 | Registro do dia: reuniões de equipe por unidade e atividades gerenciais | pronto |
-| Painel do dia: aguardando 1º atendimento, atrasados e com prazo para hoje | pronto |
+| Início: indicadores do dia e lista "Para atender hoje" | pronto |
+| Gestão: pacientes por setor e unidade, interconsultas e os três prazos de cada paciente | pronto |
 | Compilado mensal por unidade e anual por mês, por grupo de profissionais, com exportação e impressão | pronto |
 | Cadastros da coordenação | pronto |
 
@@ -51,6 +52,25 @@ gerado automaticamente. Base de dados nova, começando do zero.
 - **Profissional:** o atendimento já vem com quem está logado; dá para escolher outra pessoa.
 - **Categoria:** profissional da empresa, residente ou estagiário. A categoria e a unidade ficam
   gravadas em cada atendimento, atividade e reunião.
+
+## Gestão
+
+Menu **Gestão**, com três abas (todas com filtro de setor, unidade e paciente):
+
+- **Pacientes por unidade:** os pacientes internados em acompanhamento, sem desfecho, agrupados por
+  setor e unidade. Mostra a situação (aguardando 1º atendimento ou em acompanhamento), a justificativa
+  com a prioridade e a frequência da matriz, o último atendimento e o próximo prazo. Dá para incluir
+  quem teve desfecho psicológico e segue internado, e mostrar só os atrasados ou só quem tem prazo.
+- **Interconsultas:** para a coordenação acompanhar as solicitações com prazo de resposta (de início,
+  tipo EQUIPE). Aguardando resposta (com o tempo que falta ou o atraso em horas) e respondidas no
+  período escolhido (no prazo ou fora, com o tempo de resposta), com totais e % no prazo.
+- **Prazos:** uma linha por paciente com os três prazos lado a lado: 1º atendimento (dias úteis da
+  admissão), interconsulta (horas pela prioridade do motivo) e retorno (dias úteis pela prioridade da
+  justificativa).
+
+A tela **Início** mostra os totais (em acompanhamento, aguardando 1º atendimento, interconsultas
+pendentes, atrasados, vencem hoje), que levam à aba certa da Gestão, e a lista do que vence hoje ou
+está atrasado.
 
 ## Compilado
 
@@ -85,6 +105,7 @@ src/
   Api.js            funções da tela: início, pacientes e cadastros
   Admissoes.js      admissões, atendimentos, atividades, retomada e recálculo dos prazos
   Compilado.js      compilado, exportação, reuniões e atividades gerenciais
+  Gestao.js         telas de gestão: pacientes por unidade, interconsultas e prazos
   Autoteste.js      testarSistema: teste do fluxo inteiro no Google de verdade
   ui/               tela (HTML, CSS e JavaScript, sem bibliotecas externas)
 dist/               o mesmo código em 4 arquivos, para instalar copiando e colando (npm run empacotar)
@@ -154,7 +175,8 @@ falta e não apaga dados.
 
 No editor do Apps Script, escolha a função `testarSistema` e clique em **Executar**. Ela cria uma
 planilha de teste (não mexe no banco real), passa pelo fluxo inteiro (configuração, paciente, admissão
-com solicitação, atendimentos, desfechos, retomada, registro do dia, compilado, exportação e tela) e
+com solicitação, telas de gestão, atendimentos, desfechos, retomada, registro do dia, compilado,
+exportação e tela) e
 mostra no **registro de execução** o que passou e o que falhou. No fim, apague do Drive as duas
 planilhas de teste listadas no registro.
 
@@ -165,4 +187,4 @@ npm test
 ```
 
 Roda as regras, o compilado e o servidor (configuração, banco, admissões, atendimentos, prazos,
-exportação e registro do dia) com os serviços do Google simulados em memória.
+gestão, exportação e registro do dia) com os serviços do Google simulados em memória.
