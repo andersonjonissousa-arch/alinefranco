@@ -93,7 +93,7 @@ function criarGoogleFalso({ email = 'coordenacao@exemplo.com' } = {}) {
       LockService: { getScriptLock: () => ({ waitLock() {}, releaseLock() {} }) },
       Utilities: {
         getUuid: () => crypto.randomUUID(),
-        formatDate: (d) => d.toISOString().slice(0, 10)
+        formatDate: (d, tz, formato) => (/HH:mm/.test(formato) ? d.toISOString().slice(0, 16).replace('T', ' ') : d.toISOString().slice(0, 10))
       }
     }
   };

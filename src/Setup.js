@@ -10,7 +10,7 @@ function configurar() {
   removerAbaPadrao(banco);
   semearSetoresEUnidades();
   semearListas();
-  semearJustificativas();
+  semearMatrizes();
   semearFeriados();
   semearDesfechos();
   semearParametros();
@@ -81,11 +81,27 @@ function semearListas() {
   });
 }
 
-function semearJustificativas() {
-  if (listar('JUSTIFICATIVAS').length) return;
-  JUSTIFICATIVAS_INICIAIS.forEach(function (nome, i) {
-    inserir('JUSTIFICATIVAS', { nome: nome, prazo_dias_uteis: '', ordem: i + 1, ativo: 'SIM' });
-  });
+/** Prioridades das duas matrizes, e os motivos e justificativas ligados a elas. */
+function semearMatrizes() {
+  if (!listar('PRIORIDADES').length) {
+    PRIORIDADES_INICIAIS.forEach(function (p, i) {
+      inserir('PRIORIDADES', { tipo: p[0], nome: p[1], prazo: p[2], periodicidade: p[3], ordem: i + 1, ativo: 'SIM' });
+    });
+  }
+  var idPrioridade = function (tipo, nome) {
+    var p = listar('PRIORIDADES').filter(function (x) { return x.tipo === tipo && x.nome === nome; })[0];
+    return p ? p.id : '';
+  };
+  if (!listar('MOTIVOS_SOLICITACAO').length) {
+    MOTIVOS_SOLICITACAO_INICIAIS.forEach(function (m, i) {
+      inserir('MOTIVOS_SOLICITACAO', { nome: m[0], prioridade_id: idPrioridade(TIPOS_PRIORIDADE.solicitacao, m[1]), ordem: i + 1, ativo: 'SIM' });
+    });
+  }
+  if (!listar('JUSTIFICATIVAS').length) {
+    JUSTIFICATIVAS_INICIAIS.forEach(function (j, i) {
+      inserir('JUSTIFICATIVAS', { nome: j[0], prioridade_id: idPrioridade(TIPOS_PRIORIDADE.seguimento, j[1]), ordem: i + 1, ativo: 'SIM' });
+    });
+  }
 }
 
 function semearFeriados() {

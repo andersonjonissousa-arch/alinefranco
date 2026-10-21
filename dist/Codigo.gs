@@ -21,8 +21,14 @@ var TABELAS = {
   UNIDADES: ['id', 'nome', 'setor_id', 'ordem', 'ativo'],
   PROFISSIONAIS: ['id', 'nome', 'email', 'categoria', 'perfil', 'ativo'],
   LISTAS: ['id', 'lista', 'valor', 'ordem', 'ativo'],
-  // Justificativa de acompanhamento e em quantos dias úteis o paciente tem que ser visto de novo.
-  JUSTIFICATIVAS: ['id', 'nome', 'prazo_dias_uteis', 'ordem', 'ativo'],
+  // Prioridades das duas matrizes, cada uma com seu prazo:
+  // tipo SOLICITAÇÃO → prazo em horas corridas para responder à solicitação;
+  // tipo SEGUIMENTO → prazo em dias úteis entre um atendimento e o próximo.
+  PRIORIDADES: ['id', 'tipo', 'nome', 'prazo', 'periodicidade', 'ordem', 'ativo'],
+  // Motivos da solicitação (matriz de atendimento). Sem prioridade = sem prazo de resposta.
+  MOTIVOS_SOLICITACAO: ['id', 'nome', 'prioridade_id', 'ordem', 'ativo'],
+  // Justificativas de acompanhamento (matriz de seguimento). Sem prioridade = sem prazo de retorno.
+  JUSTIFICATIVAS: ['id', 'nome', 'prioridade_id', 'ordem', 'ativo'],
   // Feriados não contam como dia útil no cálculo dos prazos.
   FERIADOS: ['id', 'data', 'descricao'],
   // Desfechos e se cada um encerra a admissão (saída do hospital) ou só o acompanhamento psicológico.
@@ -33,28 +39,31 @@ var TABELAS = {
     'id', 'admissao_id', 'unidade_id', 'desfecho_id', 'data', 'encerra_admissao', 'vigente',
     'criado_por', 'criado_em', 'atualizado_em'
   ],
-  // Parâmetros do sistema, como o prazo do 1º atendimento após a admissão.
+  // Parâmetros do sistema, como o prazo do 1º atendimento após a admissão e os tipos de solicitação com prazo.
   PARAMETROS: ['id', 'chave', 'valor', 'descricao'],
   PACIENTES: ['id', 'prontuario', 'nome', 'criado_em', 'atualizado_em'],
   // Cada entrada do paciente no hospital. Uma nova admissão só depois que a anterior foi encerrada.
   ADMISSOES: [
     'id', 'paciente_id', 'data_admissao', 'unidade_id',
-    // Solicitação
-    'tipo_solicitacao', 'descricao_solicitacao', 'prioridade_solicitacao', 'data_solicitacao',
+    // Solicitação (para o paciente ou para um familiar, com nome e parentesco)
+    'tipo_solicitacao', 'motivo_solicitacao_id', 'data_solicitacao', 'hora_solicitacao',
+    'para_quem', 'familiar_nome', 'familiar_parentesco',
     // Avaliação (o 1º atendimento)
-    'descricao_demanda', 'prioridade_demanda',
+    'descricao_demanda',
     // Acompanhamento e desfecho
     'necessidade_acompanhamento', 'justificativa_id', 'desfecho_id', 'data_desfecho', 'retomado_em', 'observacoes',
     // Calculados pelo sistema ao salvar
     'status', 'prazo_primeiro_atendimento', 'primeiro_atendimento', 'primeiro_no_prazo',
-    'dias_ate_primeiro_atendimento', 'dias_resposta', 'ultimo_contato', 'proximo_prazo',
+    'dias_ate_primeiro_atendimento', 'ultimo_contato', 'proximo_prazo', 'prioridade_demanda',
+    // Resposta à solicitação, em horas corridas, pela prioridade do motivo
+    'prioridade_solicitacao', 'prazo_resposta', 'momento_resposta', 'horas_resposta', 'resposta_no_prazo',
     'criado_por', 'criado_em', 'atualizado_em'
   ],
   // Cada atendimento: ao paciente ou à família (com quantas pessoas), por quem, em que unidade e se foi no prazo.
   // tipo_prazo: PRIMEIRO (1º atendimento da admissão) ou RETORNO.
   // Atendimento à família só conta para os prazos quando o paciente estava impossibilitado.
   ATENDIMENTOS: [
-    'id', 'admissao_id', 'unidade_id', 'data', 'publico', 'quantidade', 'paciente_impossibilitado', 'conta_prazo',
+    'id', 'admissao_id', 'unidade_id', 'data', 'hora', 'publico', 'quantidade', 'paciente_impossibilitado', 'conta_prazo',
     'profissional_id', 'categoria', 'justificativa_id', 'tipo_prazo', 'prazo_limite', 'no_prazo', 'observacao',
     'criado_por', 'criado_em'
   ],
@@ -71,6 +80,8 @@ var CATEGORIAS_PROFISSIONAL = ['PROFISSIONAL DA EMPRESA', 'RESIDENTE', 'ESTAGIÁ
 var CATEGORIA_EMPRESA = 'PROFISSIONAL DA EMPRESA';
 var PERFIS = ['COORDENAÇÃO', 'PROFISSIONAL'];
 var PUBLICOS_ATENDIMENTO = ['PACIENTE', 'FAMÍLIA'];
+var PARA_QUEM_SOLICITACAO = ['PACIENTE', 'FAMILIAR'];
+var TIPOS_PRIORIDADE = { solicitacao: 'SOLICITAÇÃO', seguimento: 'SEGUIMENTO' };
 /** Com estas respostas em "necessidade de acompanhamento", a admissão não tem prazo de retorno. */
 var SEM_ACOMPANHAMENTO = ['NÃO', 'N / A'];
 
@@ -83,11 +94,7 @@ var DESCRICOES_BASE = [
 /** Listas usadas nos campos de seleção. Editáveis pela coordenação na tela de cadastros. */
 var LISTAS_INICIAIS = {
   TIPO_SOLICITACAO: ['EQUIPE', 'BUSCA ATIVA', 'ESPONTÂNEA', 'SEGUIMENTO PSICOLÓGICO'],
-  ATENDIDO: ['SIM', 'NÃO', 'PENDENTE'],
-  DESCRICAO_SOLICITACAO: DESCRICOES_BASE.concat(['TRIAGEM PSICOLÓGICA', 'REABILITA SEPSE']),
-  PRIORIDADE_SOLICITACAO: ['ALTA', 'MODERADA', 'BAIXA', 'TRIAGEM', 'SEPSE'],
   DESCRICAO_DEMANDA: DESCRICOES_BASE.concat(['SEM CONDIÇÕES CLÍNICAS E/OU SOCIAIS', 'RECUSA', 'SEM DEMANDA']),
-  PRIORIDADE_DEMANDA: ['ALTA', 'MODERADA', 'BAIXA', 'RECUSA', 'SEM DEMANDA', 'SEM CONDIÇÕES CLÍNICAS E/OU SOCIAIS'],
   NECESSIDADE_ACOMPANHAMENTO: ['PACIENTE', 'PACIENTE E FAMÍLIA', 'FAMÍLIA', 'NÃO', 'N / A'],
   ATIVIDADE_ASSISTENCIAL: [
     'FICHA DE ADMISSÃO', 'DISCUSSÃO DE CASO', 'REUNIÃO FAMILIAR', 'VISITA DE CRIANÇA', 'VISITA ESTENDIDA',
@@ -110,14 +117,38 @@ var DESFECHOS_INICIAIS = [
 
 /** Parâmetros editáveis pela coordenação. */
 var PARAMETROS_INICIAIS = [
-  ['PRAZO_PRIMEIRO_ATENDIMENTO_DIAS_UTEIS', '3', 'Dias úteis, a partir da admissão no hospital, para o 1º atendimento (avaliação).']
+  ['PRAZO_PRIMEIRO_ATENDIMENTO_DIAS_UTEIS', '3', 'Dias úteis, a partir da admissão no hospital, para o 1º atendimento (avaliação).'],
+  ['TIPOS_SOLICITACAO_COM_PRAZO', 'EQUIPE', 'Tipos de solicitação que têm prazo de resposta pela matriz de atendimento (separados por vírgula).']
 ];
 
-/** Justificativas de acompanhamento. O prazo em dias úteis é preenchido pela coordenação. */
+/** Prioridades das matrizes do HGWA: [tipo, nome, prazo, periodicidade]. */
+var PRIORIDADES_INICIAIS = [
+  ['SOLICITAÇÃO', 'ALTA', '24', 'Atender em até 24h'],
+  ['SOLICITAÇÃO', 'MODERADA', '48', 'Atender em até 48h'],
+  ['SOLICITAÇÃO', 'BAIXA', '72', 'Atender em até 72h'],
+  ['SEGUIMENTO', 'ALTA', '2', '3x por semana ou mais'],
+  ['SEGUIMENTO', 'MODERADA', '3', '2x por semana ou mais'],
+  ['SEGUIMENTO', 'BAIXA', '5', '1x por semana ou mais'],
+  ['SEGUIMENTO', 'MONITORAMENTO', '10', '1x a cada 15 dias']
+];
+
+/** Matriz de prioridade para atendimento psicológico: [motivo da solicitação, prioridade]. */
+var MOTIVOS_SOLICITACAO_INICIAIS = [
+  ['ACOLHIMENTO A ÓBITO', 'ALTA'], ['RISCO DE SUICÍDIO', 'ALTA'], ['CUIDADOS DE FIM DE VIDA', 'ALTA'],
+  ['CUIDADOS PALIATIVOS', 'MODERADA'], ['HISTÓRICO DE TRANSTORNO MENTAL', 'MODERADA'],
+  ['HISTÓRICO DE VIOLÊNCIA', 'MODERADA'], ['COMUNICAÇÃO', 'MODERADA'], ['ADESÃO AO TRATAMENTO', 'MODERADA'],
+  ['INTERNAÇÃO PROLONGADA', 'BAIXA'], ['HUMOR DEPRIMIDO OU ANSIOSO', 'BAIXA'],
+  ['VISITA DE CRIANÇA / VISITA ESTENDIDA', 'BAIXA'],
+  ['TRIAGEM PSICOLÓGICA', ''], ['REABILITA SEPSE', '']
+];
+
+/** Matriz de prioridade para seguimento psicológico: [justificativa de acompanhamento, prioridade]. */
 var JUSTIFICATIVAS_INICIAIS = [
-  'RISCO DE SUICÍDIO', 'INST. PSIQ. COM RISCO A SI OU A TERCEIROS', 'INST. PSIQ. SEM RISCO A SI OU A TERCEIROS',
-  'CUIDADOS PALIATIVOS OU FIM DE VIDA', 'ADESÃO AO TRATAMENTO', 'POUCOS RECURSOS DE ENFRENTAMENTO',
-  'BONS A PARCIAIS RECURSOS DE ENFRENTAMENTO', 'INTERNAÇÃO PROLONGADA', 'SEM CONDIÇÕES CLÍNICAS / SOCIAIS'
+  ['RISCO DE SUICÍDIO', 'ALTA'], ['INST. PSIQ. COM RISCO A SI OU A TERCEIROS', 'ALTA'],
+  ['INST. PSIQ. SEM RISCO A SI OU A TERCEIROS', 'MODERADA'], ['CUIDADOS PALIATIVOS OU FIM DE VIDA', 'MODERADA'],
+  ['ADESÃO AO TRATAMENTO', 'MODERADA'], ['POUCOS RECURSOS DE ENFRENTAMENTO', 'MODERADA'],
+  ['BONS A PARCIAIS RECURSOS DE ENFRENTAMENTO', 'BAIXA'], ['INTERNAÇÃO PROLONGADA', 'MONITORAMENTO'],
+  ['SEM CONDIÇÕES CLÍNICAS / SOCIAIS', '']
 ];
 
 /** Feriados nacionais. Estaduais, municipais e pontos facultativos são incluídos pela coordenação. */
@@ -248,6 +279,13 @@ function validarAdmissao(adm, hojeIso) {
       erros.push('A data de ' + ROTULOS_DATA_ADMISSAO[campo] + ' não pode ser antes da admissão.');
     }
   });
+
+  if (normalizarData(adm.data_solicitacao) && !normalizarHora(adm.hora_solicitacao)) {
+    erros.push('Informe a hora da solicitação.');
+  }
+  if (adm.para_quem === 'FAMILIAR' && !String(adm.familiar_nome || '').trim() && !String(adm.familiar_parentesco || '').trim()) {
+    erros.push('Informe o nome ou o parentesco do familiar.');
+  }
 
   var temData = Boolean(normalizarData(adm.data_desfecho));
   if (adm.desfecho_id && !temData) erros.push('Informe a data do desfecho.');
@@ -421,7 +459,6 @@ function calcularAdmissao(adm, atendimentos, op) {
       primeiro_atendimento: primeiro,
       primeiro_no_prazo: primeiroNoPrazo,
       dias_ate_primeiro_atendimento: diasEntre(adm.data_admissao, primeiro),
-      dias_resposta: diasEntre(adm.data_solicitacao, primeiro),
       ultimo_contato: ultimo,
       proximo_prazo: proximo
     }
@@ -441,6 +478,112 @@ function situacaoPrazo(proximoPrazo, hoje) {
 /** Atendimentos de residentes e estagiários não entram nos números da empresa. */
 function contaParaEmpresa(categoria) {
   return categoria === CATEGORIA_EMPRESA;
+}
+
+// ---------- Horas: prazo de resposta à solicitação ----------
+
+/** 'H:MM' ou 'HH:MM' → 'HH:MM'. Retorna '' se vazio ou inválido. */
+function normalizarHora(valor) {
+  if (valor === null || valor === undefined || valor === '') return '';
+  if (Object.prototype.toString.call(valor) === '[object Date]') {
+    return isNaN(valor.getTime()) ? '' : doisDigitos(valor.getHours()) + ':' + doisDigitos(valor.getMinutes());
+  }
+  var m = /^(\d{1,2}):(\d{2})(?::\d{2})?$/.exec(String(valor).trim());
+  if (!m || Number(m[1]) > 23 || Number(m[2]) > 59) return '';
+  return doisDigitos(Number(m[1])) + ':' + m[2];
+}
+
+/** Data e hora juntas, 'AAAA-MM-DD HH:MM'. Sem hora vale 00:00. '' se não houver data. */
+function dataHora(data, hora) {
+  var d = normalizarData(data);
+  if (!d) return '';
+  return d + ' ' + (normalizarHora(hora) || '00:00');
+}
+
+function dataHoraParaUtc(dh) {
+  var m = /^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2})$/.exec(dh || '');
+  return m ? Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5]) : NaN;
+}
+
+/** Soma horas corridas a 'AAAA-MM-DD HH:MM'. */
+function adicionarHoras(dh, horas) {
+  var t = dataHoraParaUtc(dh);
+  if (isNaN(t)) return '';
+  var d = new Date(t + Number(horas) * 60 * 60 * 1000);
+  return normalizarDataUtc(d) + ' ' + doisDigitos(d.getUTCHours()) + ':' + doisDigitos(d.getUTCMinutes());
+}
+
+/** Horas corridas entre dois 'AAAA-MM-DD HH:MM', com uma casa decimal. */
+function horasEntre(inicio, fim) {
+  var a = dataHoraParaUtc(inicio);
+  var b = dataHoraParaUtc(fim);
+  if (isNaN(a) || isNaN(b)) return '';
+  return Math.round((b - a) / 360000) / 10;
+}
+
+/**
+ * Resposta à solicitação (matriz de atendimento): o primeiro atendimento depois da solicitação
+ * tem que acontecer em até N horas corridas, conforme a prioridade do motivo.
+ * Solicitação para o paciente: vale atendimento ao paciente, ou à família com o paciente impossibilitado.
+ * Solicitação para um familiar: vale atendimento ao paciente ou à família.
+ *
+ * @param adm a admissão
+ * @param atendimentos atendimentos da admissão (data, hora, publico, paciente_impossibilitado)
+ * @param op { prioridade: { nome, prazo } ou null, tiposComPrazo: [tipos], agora: 'AAAA-MM-DD HH:MM' }
+ * @return { prioridade_solicitacao, prazo_resposta, momento_resposta, horas_resposta, resposta_no_prazo }
+ *   resposta_no_prazo: SIM, NÃO, EM ANDAMENTO, NÃO SE APLICA (desfecho antes do prazo sem resposta),
+ *   SEM PRAZO (tipo ou motivo sem prazo) ou '' (sem solicitação).
+ */
+function calcularResposta(adm, atendimentos, op) {
+  var vazio = { prioridade_solicitacao: '', prazo_resposta: '', momento_resposta: '', horas_resposta: '', resposta_no_prazo: '' };
+  var inicio = normalizarHora(adm.hora_solicitacao) ? dataHora(adm.data_solicitacao, adm.hora_solicitacao) : '';
+  if (!inicio) return vazio;
+
+  var prioridade = op.prioridade;
+  var horasPrazo = prioridade && prioridade.prazo !== '' && !isNaN(Number(prioridade.prazo)) ? Number(prioridade.prazo) : null;
+  var temPrazo = horasPrazo !== null && (op.tiposComPrazo || []).indexOf(adm.tipo_solicitacao) !== -1;
+  var paraFamiliar = adm.para_quem === 'FAMILIAR';
+
+  var resposta = '';
+  atendimentos.forEach(function (a) {
+    var dh = dataHora(a.data, a.hora);
+    if (!dh || dh < inicio) return;
+    var vale = paraFamiliar ? (a.publico === 'PACIENTE' || a.publico === 'FAMÍLIA') : contaParaPrazo(a);
+    if (vale && (!resposta || dh < resposta)) resposta = dh;
+  });
+
+  var prazo = temPrazo ? adicionarHoras(inicio, horasPrazo) : '';
+  var situacao;
+  if (!temPrazo) situacao = 'SEM PRAZO';
+  else if (resposta) situacao = resposta <= prazo ? 'SIM' : 'NÃO';
+  else {
+    var desfecho = normalizarData(adm.data_desfecho);
+    if (desfecho && desfecho <= prazo.slice(0, 10)) situacao = 'NÃO SE APLICA';
+    else if (desfecho || (op.agora && op.agora > prazo)) situacao = 'NÃO';
+    else situacao = 'EM ANDAMENTO';
+  }
+  return {
+    prioridade_solicitacao: prioridade ? prioridade.nome : '',
+    prazo_resposta: prazo,
+    momento_resposta: resposta,
+    horas_resposta: resposta ? horasEntre(inicio, resposta) : '',
+    resposta_no_prazo: situacao
+  };
+}
+
+/** Situação de um prazo com hora ('AAAA-MM-DD HH:MM') em relação a agora. */
+function situacaoPrazoHora(prazo, agora) {
+  if (!prazo || !agora) return '';
+  if (prazo < agora) return 'ATRASADO';
+  if (prazo.slice(0, 10) === agora.slice(0, 10)) return 'VENCE HOJE';
+  return 'NO PRAZO';
+}
+
+var GRAVIDADE_SITUACAO = { 'ATRASADO': 3, 'VENCE HOJE': 2, 'NO PRAZO': 1, '': 0 };
+
+/** A mais urgente de duas situações. */
+function situacaoMaisUrgente(a, b) {
+  return (GRAVIDADE_SITUACAO[a || ''] || 0) >= (GRAVIDADE_SITUACAO[b || ''] || 0) ? (a || '') : (b || '');
 }
 
 // ===== Indicadores.js =====
@@ -480,6 +623,7 @@ function acumular(linha, chave, valor) {
  * Monta o compilado.
  *
  * @param dados { unidades, admissoes, atendimentos, atividades, reunioes, gerenciais, desfechosRegistrados,
+ *                motivos: [{ id, nome }], prioridades: [{ tipo, nome }],
  *                listas: { NOME_DA_LISTA: [valores] }, desfechos: [{ id, nome }] }
  * @param op { ano, mes (1 a 12, só no mensal), eixo: 'UNIDADE' | 'MES', grupo, setor_id, unidade_id, diasPrimeiro }
  * @return { titulo, subtitulo, colunas: [{ chave, nome }], secoes: [{ titulo, nota, semColunas, linhas }] }
@@ -580,15 +724,25 @@ function montarCompilado(dados, op) {
   lAdm.destaque = true;
   adms.forEach(function (a) { acumular(lAdm, chaveAdm(a), 1); });
   secao('Admissões', [lAdm], { nota: notaServico });
+  var motivos = porId(dados.motivos || []);
+  var prioridades = dados.prioridades || [];
+  var nomesPrioridade = function (tipo) {
+    return prioridades.filter(function (p) { return p.tipo === tipo; }).map(function (p) { return p.nome; });
+  };
+  var comSolicitacao = function (a) { return Boolean(a.motivo_solicitacao_id || a.data_solicitacao); };
   [
-    ['Tipo de solicitação', 'tipo_solicitacao', 'TIPO_SOLICITACAO'],
-    ['Descrição da solicitação', 'descricao_solicitacao', 'DESCRICAO_SOLICITACAO'],
-    ['Prioridade da solicitação', 'prioridade_solicitacao', 'PRIORIDADE_SOLICITACAO'],
-    ['Descrição da demanda', 'descricao_demanda', 'DESCRICAO_DEMANDA'],
-    ['Prioridade da demanda', 'prioridade_demanda', 'PRIORIDADE_DEMANDA'],
-    ['Necessidade de acompanhamento', 'necessidade_acompanhamento', 'NECESSIDADE_ACOMPANHAMENTO']
+    ['Tipo de solicitação', function (a) { return a.tipo_solicitacao; }, listas.TIPO_SOLICITACAO, adms],
+    ['Motivo da solicitação', function (a) { return (motivos[a.motivo_solicitacao_id] || {}).nome; },
+      (dados.motivos || []).map(function (m) { return m.nome; }), adms.filter(comSolicitacao)],
+    ['Prioridade da solicitação', function (a) { return a.prioridade_solicitacao || 'SEM PRIORIDADE'; },
+      nomesPrioridade(TIPOS_PRIORIDADE.solicitacao), adms.filter(comSolicitacao)],
+    ['Solicitação para', function (a) { return a.para_quem; }, PARA_QUEM_SOLICITACAO, adms.filter(comSolicitacao)],
+    ['Descrição da demanda', function (a) { return a.descricao_demanda; }, listas.DESCRICAO_DEMANDA, adms],
+    ['Prioridade da demanda (seguimento)', function (a) { return a.prioridade_demanda || 'SEM PRIORIDADE'; },
+      nomesPrioridade(TIPOS_PRIORIDADE.seguimento), adms],
+    ['Necessidade de acompanhamento', function (a) { return a.necessidade_acompanhamento; }, listas.NECESSIDADE_ACOMPANHAMENTO, adms]
   ].forEach(function (d) {
-    secao(d[0], distribuicao(adms, function (a) { return a[d[1]]; }, listas[d[2]], chaveAdm), { nota: notaServico });
+    secao(d[0], distribuicao(d[3], d[1], d[2], chaveAdm), { nota: notaServico });
   });
 
   // 3. 1º atendimento em até N dias úteis da admissão
@@ -611,6 +765,47 @@ function montarCompilado(dados, op) {
   });
   secao('1º atendimento em até ' + op.diasPrimeiro + ' dia(s) útil(eis) da admissão', [lSim, lNao, lAnd, lNsa, lPct, lMedia], {
     nota: [notaServico, '% no prazo = no prazo ÷ (no prazo + fora do prazo). Em andamento e não se aplica ficam fora da conta.']
+      .filter(Boolean).join(' ')
+  });
+
+  // 3b. Resposta à solicitação no prazo da prioridade (matriz de atendimento), pela data da solicitação.
+  var sols = dados.admissoes.filter(function (a) { return a.resposta_no_prazo && aceita(a.data_solicitacao, a.unidade_id); });
+  var chaveSol = function (a) { return chave(a.data_solicitacao, a.unidade_id); };
+  var rSim = linhaCompilado('NO PRAZO');
+  var rNao = linhaCompilado('FORA DO PRAZO');
+  var rAnd = linhaCompilado('EM ANDAMENTO');
+  var rNsa = linhaCompilado('NÃO SE APLICA (desfecho antes do prazo)');
+  var rSem = linhaCompilado('SEM PRAZO (motivo sem prioridade ou tipo sem prazo)');
+  var rPct = linhaCompilado('% NO PRAZO', 'pct');
+  rPct.num = rSim;
+  rPct.den = [rSim, rNao];
+  rPct.destaque = true;
+  var rMedia = linhaCompilado('MÉDIA DE HORAS ATÉ A RESPOSTA', 'media');
+  var mapaResp = { 'SIM': rSim, 'NÃO': rNao, 'EM ANDAMENTO': rAnd, 'NÃO SE APLICA': rNsa, 'SEM PRAZO': rSem };
+  // % no prazo por prioridade
+  var porPrioridade = {};
+  var ordemPrioridade = nomesPrioridade(TIPOS_PRIORIDADE.solicitacao);
+  ordemPrioridade.forEach(function (n) {
+    var sim = linhaCompilado('');
+    var nao = linhaCompilado('');
+    var pct = linhaCompilado('% NO PRAZO — ' + n, 'pct');
+    pct.num = sim;
+    pct.den = [sim, nao];
+    porPrioridade[n] = { sim: sim, nao: nao, pct: pct };
+  });
+  sols.forEach(function (a) {
+    var c = chaveSol(a);
+    if (mapaResp[a.resposta_no_prazo]) acumular(mapaResp[a.resposta_no_prazo], c, 1);
+    if (a.horas_resposta !== '' && a.horas_resposta !== undefined && a.resposta_no_prazo !== 'SEM PRAZO') {
+      acumular(rMedia, c, Number(a.horas_resposta));
+    }
+    var pp = porPrioridade[a.prioridade_solicitacao];
+    if (pp && a.resposta_no_prazo === 'SIM') acumular(pp.sim, c, 1);
+    if (pp && a.resposta_no_prazo === 'NÃO') acumular(pp.nao, c, 1);
+  });
+  var linhasPorPrioridade = ordemPrioridade.map(function (n) { return porPrioridade[n].pct; });
+  secao('Resposta à solicitação no prazo da prioridade', [rSim, rNao, rAnd, rNsa, rSem, rPct].concat(linhasPorPrioridade).concat([rMedia]), {
+    nota: [notaServico, 'Horas corridas entre a solicitação e o primeiro atendimento depois dela, pela data da solicitação.']
       .filter(Boolean).join(' ')
   });
 
@@ -789,6 +984,7 @@ function listar(nome) {
 /** Datas lidas da planilha voltam como texto: 'AAAA-MM-DD' ou data e hora ISO nos carimbos *_em. */
 function normalizarDataHora(coluna, valor) {
   if (/_em$/.test(coluna)) return valor.toISOString();
+  if (/^hora/.test(coluna)) return normalizarHora(valor);
   return normalizarData(valor);
 }
 
@@ -806,6 +1002,11 @@ function novoId() {
 
 function agoraIso() {
   return new Date().toISOString();
+}
+
+/** Data e hora de agora no fuso do hospital, 'AAAA-MM-DD HH:MM'. */
+function agora() {
+  return Utilities.formatDate(new Date(), APP.fusoHorario, 'yyyy-MM-dd HH:mm');
 }
 
 /** Data de hoje no fuso do hospital, 'AAAA-MM-DD'. */
@@ -925,7 +1126,7 @@ function configurar() {
   removerAbaPadrao(banco);
   semearSetoresEUnidades();
   semearListas();
-  semearJustificativas();
+  semearMatrizes();
   semearFeriados();
   semearDesfechos();
   semearParametros();
@@ -996,11 +1197,27 @@ function semearListas() {
   });
 }
 
-function semearJustificativas() {
-  if (listar('JUSTIFICATIVAS').length) return;
-  JUSTIFICATIVAS_INICIAIS.forEach(function (nome, i) {
-    inserir('JUSTIFICATIVAS', { nome: nome, prazo_dias_uteis: '', ordem: i + 1, ativo: 'SIM' });
-  });
+/** Prioridades das duas matrizes, e os motivos e justificativas ligados a elas. */
+function semearMatrizes() {
+  if (!listar('PRIORIDADES').length) {
+    PRIORIDADES_INICIAIS.forEach(function (p, i) {
+      inserir('PRIORIDADES', { tipo: p[0], nome: p[1], prazo: p[2], periodicidade: p[3], ordem: i + 1, ativo: 'SIM' });
+    });
+  }
+  var idPrioridade = function (tipo, nome) {
+    var p = listar('PRIORIDADES').filter(function (x) { return x.tipo === tipo && x.nome === nome; })[0];
+    return p ? p.id : '';
+  };
+  if (!listar('MOTIVOS_SOLICITACAO').length) {
+    MOTIVOS_SOLICITACAO_INICIAIS.forEach(function (m, i) {
+      inserir('MOTIVOS_SOLICITACAO', { nome: m[0], prioridade_id: idPrioridade(TIPOS_PRIORIDADE.solicitacao, m[1]), ordem: i + 1, ativo: 'SIM' });
+    });
+  }
+  if (!listar('JUSTIFICATIVAS').length) {
+    JUSTIFICATIVAS_INICIAIS.forEach(function (j, i) {
+      inserir('JUSTIFICATIVAS', { nome: j[0], prioridade_id: idPrioridade(TIPOS_PRIORIDADE.seguimento, j[1]), ordem: i + 1, ativo: 'SIM' });
+    });
+  }
 }
 
 function semearFeriados() {
@@ -1128,6 +1345,11 @@ function dadosDeCadastro(incluirInativos) {
     unidades: unidades,
     profissionais: profissionais,
     justificativas: listar('JUSTIFICATIVAS').filter(ativo).sort(porOrdem),
+    motivos: listar('MOTIVOS_SOLICITACAO').filter(ativo).sort(porOrdem),
+    prioridades: listar('PRIORIDADES').filter(ativo).sort(porOrdem),
+    tipos_prioridade: TIPOS_PRIORIDADE,
+    para_quem: PARA_QUEM_SOLICITACAO,
+    agora: agora(),
     desfechos: listar('DESFECHOS').filter(ativo).sort(porOrdem),
     parametros: listar('PARAMETROS'),
     status_admissao: STATUS_ADMISSAO,
@@ -1237,20 +1459,72 @@ function apiSalvarItemLista(dados) {
   });
 }
 
+function validarPrioridadeDoTipo(prioridadeId, tipo) {
+  if (!prioridadeId) return '';
+  var p = buscarPorId('PRIORIDADES', prioridadeId);
+  if (!p || p.tipo !== tipo) throw new Error('Prioridade inválida.');
+  return p.id;
+}
+
+/** Justificativa de acompanhamento ligada a uma prioridade de seguimento (sem prioridade = sem prazo). */
 function apiSalvarJustificativa(dados) {
   return responder(function () {
     exigirCoordenacao();
-    var prazo = String(dados.prazo_dias_uteis === undefined ? '' : dados.prazo_dias_uteis).trim();
-    if (prazo !== '' && !/^\d+$/.test(prazo)) throw new Error('O prazo deve ser um número inteiro de dias úteis.');
     var item = {
       nome: formatarNome(dados.nome),
-      prazo_dias_uteis: prazo,
+      prioridade_id: validarPrioridadeDoTipo(dados.prioridade_id, TIPOS_PRIORIDADE.seguimento),
       ordem: Number(dados.ordem) || 99,
       ativo: dados.ativo === 'NÃO' ? 'NÃO' : 'SIM'
     };
     if (!item.nome) throw new Error('Informe a justificativa.');
     if (dados.id) atualizar('JUSTIFICATIVAS', dados.id, item);
     else inserir('JUSTIFICATIVAS', item);
+    recalcularAdmissoesAbertas();
+    return dadosDeCadastro(true);
+  });
+}
+
+/** Motivo da solicitação ligado a uma prioridade de solicitação (sem prioridade = sem prazo). */
+function apiSalvarMotivo(dados) {
+  return responder(function () {
+    exigirCoordenacao();
+    var item = {
+      nome: formatarNome(dados.nome),
+      prioridade_id: validarPrioridadeDoTipo(dados.prioridade_id, TIPOS_PRIORIDADE.solicitacao),
+      ordem: Number(dados.ordem) || 99,
+      ativo: dados.ativo === 'NÃO' ? 'NÃO' : 'SIM'
+    };
+    if (!item.nome) throw new Error('Informe o motivo.');
+    if (dados.id) atualizar('MOTIVOS_SOLICITACAO', dados.id, item);
+    else inserir('MOTIVOS_SOLICITACAO', item);
+    recalcularAdmissoesAbertas();
+    return dadosDeCadastro(true);
+  });
+}
+
+/** Prioridade de solicitação (prazo em horas) ou de seguimento (prazo em dias úteis). */
+function apiSalvarPrioridade(dados) {
+  return responder(function () {
+    exigirCoordenacao();
+    var tipos = [TIPOS_PRIORIDADE.solicitacao, TIPOS_PRIORIDADE.seguimento];
+    var atual = dados.id ? buscarPorId('PRIORIDADES', dados.id) : null;
+    var tipo = atual ? atual.tipo : dados.tipo;
+    if (tipos.indexOf(tipo) === -1) throw new Error('Escolha se a prioridade é de solicitação ou de seguimento.');
+    var prazo = String(dados.prazo === undefined ? '' : dados.prazo).trim();
+    if (!/^\d+$/.test(prazo) || Number(prazo) < 1) {
+      throw new Error(tipo === TIPOS_PRIORIDADE.solicitacao ? 'O prazo deve ser um número inteiro de horas.' : 'O prazo deve ser um número inteiro de dias úteis.');
+    }
+    var item = {
+      tipo: tipo,
+      nome: formatarNome(dados.nome),
+      prazo: prazo,
+      periodicidade: String(dados.periodicidade || '').trim(),
+      ordem: Number(dados.ordem) || 99,
+      ativo: dados.ativo === 'NÃO' ? 'NÃO' : 'SIM'
+    };
+    if (!item.nome) throw new Error('Informe o nome da prioridade.');
+    if (atual) atualizar('PRIORIDADES', atual.id, item);
+    else inserir('PRIORIDADES', item);
     recalcularAdmissoesAbertas();
     return dadosDeCadastro(true);
   });
@@ -1311,6 +1585,12 @@ function apiSalvarParametro(dados) {
     if (param.chave === 'PRAZO_PRIMEIRO_ATENDIMENTO_DIAS_UTEIS' && !/^\d+$/.test(valor)) {
       throw new Error('O prazo deve ser um número inteiro de dias úteis.');
     }
+    if (param.chave === 'TIPOS_SOLICITACAO_COM_PRAZO') {
+      var tipos = listar('LISTAS').filter(function (i) { return i.lista === 'TIPO_SOLICITACAO'; }).map(function (i) { return i.valor; });
+      var escolhidos = valor.split(',').map(function (t) { return t.trim(); }).filter(Boolean);
+      escolhidos.forEach(function (t) { if (tipos.indexOf(t) === -1) throw new Error('Tipo de solicitação desconhecido: ' + t + '.'); });
+      valor = escolhidos.join(',');
+    }
     atualizar('PARAMETROS', param.id, { valor: valor });
     recalcularAdmissoesAbertas();
     return dadosDeCadastro(true);
@@ -1323,8 +1603,8 @@ function apiSalvarParametro(dados) {
  */
 
 var CAMPOS_ADMISSAO_EDITAVEIS = [
-  'paciente_id', 'data_admissao', 'unidade_id', 'tipo_solicitacao', 'descricao_solicitacao',
-  'prioridade_solicitacao', 'data_solicitacao', 'descricao_demanda', 'prioridade_demanda',
+  'paciente_id', 'data_admissao', 'unidade_id', 'tipo_solicitacao', 'motivo_solicitacao_id', 'data_solicitacao',
+  'hora_solicitacao', 'para_quem', 'familiar_nome', 'familiar_parentesco', 'descricao_demanda',
   'necessidade_acompanhamento', 'justificativa_id', 'desfecho_id', 'data_desfecho', 'observacoes'
 ];
 var CAMPOS_DATA_ADMISSAO = ['data_admissao', 'data_solicitacao', 'data_desfecho'];
@@ -1335,10 +1615,26 @@ function mapaPorId(nome) {
   return mapa;
 }
 
+/** Prioridade ativa ligada a um motivo ou justificativa (ou null). */
+function prioridadeDe(registro) {
+  if (!registro || !registro.prioridade_id) return null;
+  var p = buscarPorId('PRIORIDADES', registro.prioridade_id);
+  return p && p.ativo !== 'NÃO' ? p : null;
+}
+
+/** { justificativa_id: dias úteis } pela prioridade de seguimento de cada justificativa. */
 function prazosPorJustificativa() {
   var prazos = {};
-  listar('JUSTIFICATIVAS').forEach(function (j) { prazos[j.id] = j.prazo_dias_uteis; });
+  listar('JUSTIFICATIVAS').forEach(function (j) {
+    var p = prioridadeDe(j);
+    prazos[j.id] = p ? p.prazo : '';
+  });
   return prazos;
+}
+
+function tiposSolicitacaoComPrazo() {
+  return String(parametro('TIPOS_SOLICITACAO_COM_PRAZO', 'EQUIPE')).split(',')
+    .map(function (t) { return t.trim(); }).filter(Boolean);
 }
 
 /** Valor de um parâmetro (aba PARAMETROS), com valor padrão se não existir. */
@@ -1370,6 +1666,8 @@ function recalcularAdmissoes(ids) {
     diasPrimeiro: diasPrimeiroAtendimento(),
     hoje: hoje()
   };
+  var tipos = tiposSolicitacaoComPrazo();
+  var momento = agora();
   var atendimentos = listar('ATENDIMENTOS');
   var mudancasAdm = {};
   var mudancasAtend = {};
@@ -1378,6 +1676,14 @@ function recalcularAdmissoes(ids) {
     if (!adm) return;
     var daAdmissao = atendimentos.filter(function (a) { return a.admissao_id === id; });
     var r = calcularAdmissao(adm, daAdmissao, Object.assign({ desfechoEncerra: desfechoEncerraAdmissao(adm.desfecho_id) }, op));
+    var resposta = calcularResposta(adm, daAdmissao, {
+      prioridade: prioridadeDe(buscarPorId('MOTIVOS_SOLICITACAO', adm.motivo_solicitacao_id)),
+      tiposComPrazo: tipos,
+      agora: momento
+    });
+    Object.assign(r.campos, resposta);
+    var prioridadeSeguimento = prioridadeDe(buscarPorId('JUSTIFICATIVAS', adm.justificativa_id));
+    r.campos.prioridade_demanda = prioridadeSeguimento ? prioridadeSeguimento.nome : '';
     if (Object.keys(r.campos).some(function (c) { return String(adm[c]) !== String(r.campos[c]); })) mudancasAdm[id] = r.campos;
     daAdmissao.forEach(function (a) {
       var novo = r.porAtendimento[a.id];
@@ -1402,9 +1708,11 @@ function auxiliares() {
     pacientes: mapaPorId('PACIENTES'),
     unidades: mapaPorId('UNIDADES'),
     justificativas: mapaPorId('JUSTIFICATIVAS'),
+    motivos: mapaPorId('MOTIVOS_SOLICITACAO'),
     desfechos: mapaPorId('DESFECHOS'),
     profissionais: mapaPorId('PROFISSIONAIS'),
-    hoje: hoje()
+    hoje: hoje(),
+    agora: agora()
   };
 }
 
@@ -1414,6 +1722,12 @@ function resumoAdmissao(adm, aux) {
   var unidade = aux.unidades[adm.unidade_id] || {};
   var justificativa = aux.justificativas[adm.justificativa_id] || {};
   var desfecho = aux.desfechos[adm.desfecho_id] || {};
+  var motivo = aux.motivos[adm.motivo_solicitacao_id] || {};
+  // Aguardando resposta à solicitação: o prazo em horas também entra na situação.
+  var aguardandoResposta = adm.resposta_no_prazo === 'EM ANDAMENTO' ||
+    (adm.resposta_no_prazo === 'NÃO' && !adm.momento_resposta && !adm.desfecho_id);
+  var situacaoResposta = aguardandoResposta ? situacaoPrazoHora(adm.prazo_resposta, aux.agora) : '';
+  var situacaoRetorno = adm.proximo_prazo ? situacaoPrazo(adm.proximo_prazo, aux.hoje) : '';
   return Object.assign({}, adm, {
     paciente_nome: paciente.nome || '',
     prontuario: paciente.prontuario || '',
@@ -1421,8 +1735,10 @@ function resumoAdmissao(adm, aux) {
     setor_id: unidade.setor_id || '',
     justificativa_nome: justificativa.nome || '',
     desfecho_nome: desfecho.nome || '',
+    motivo_nome: motivo.nome || '',
+    aguardando_resposta: aguardandoResposta,
     aberta: adm.status !== STATUS_ADMISSAO.encerrada,
-    situacao: adm.proximo_prazo ? situacaoPrazo(adm.proximo_prazo, aux.hoje) : ''
+    situacao: situacaoMaisUrgente(situacaoResposta, situacaoRetorno)
   });
 }
 
@@ -1475,7 +1791,8 @@ function detalheAdmissao(adm) {
   var aux = auxiliares();
   var nomeProf = function (pid) { return (aux.profissionais[pid] || {}).nome || ''; };
   var porData = function (a, b) {
-    return String(b.data).localeCompare(String(a.data)) || String(b.criado_em).localeCompare(String(a.criado_em));
+    return String(b.data).localeCompare(String(a.data)) || String(b.hora || '').localeCompare(String(a.hora || '')) ||
+      String(b.criado_em).localeCompare(String(a.criado_em));
   };
   var daAdmissao = function (tabela) {
     return listar(tabela).filter(function (a) { return a.admissao_id === adm.id; }).sort(porData)
@@ -1506,10 +1823,22 @@ function apiSalvarAdmissao(dados) {
       var v = dados[c] === undefined || dados[c] === null ? '' : String(dados[c]).trim();
       adm[c] = CAMPOS_DATA_ADMISSAO.indexOf(c) !== -1 ? normalizarData(v) : v;
     });
+    adm.hora_solicitacao = normalizarHora(adm.hora_solicitacao);
+    adm.para_quem = adm.para_quem === 'FAMILIAR' ? 'FAMILIAR' : 'PACIENTE';
+    if (adm.para_quem === 'PACIENTE') { adm.familiar_nome = ''; adm.familiar_parentesco = ''; }
+    adm.familiar_nome = formatarNome(adm.familiar_nome);
+    adm.familiar_parentesco = formatarNome(adm.familiar_parentesco);
     var atual = dados.id ? buscarPorId('ADMISSOES', dados.id) : null;
     if (dados.id && !atual) throw new Error('Admissão não encontrada.');
 
     var erros = validarAdmissao(adm, hoje());
+    if (dados.hora_solicitacao && !adm.hora_solicitacao) erros.push('Hora da solicitação inválida.');
+    if (adm.hora_solicitacao && dataHora(adm.data_solicitacao, adm.hora_solicitacao) > agora()) {
+      erros.push('A solicitação não pode estar no futuro.');
+    }
+    if (adm.motivo_solicitacao_id && !buscarPorId('MOTIVOS_SOLICITACAO', adm.motivo_solicitacao_id)) {
+      erros.push('Motivo da solicitação não encontrado.');
+    }
     if (adm.paciente_id && !buscarPorId('PACIENTES', adm.paciente_id)) erros.unshift('Paciente não encontrado.');
     if (adm.unidade_id && !buscarPorId('UNIDADES', adm.unidade_id)) erros.push('Unidade não encontrada.');
     if (adm.desfecho_id && !buscarPorId('DESFECHOS', adm.desfecho_id)) erros.push('Desfecho não encontrado.');
@@ -1638,6 +1967,9 @@ function apiRegistrarAtendimento(dados) {
     var adm = admissaoParaRegistro(dados.admissao_id);
     var data = normalizarData(dados.data);
     validarDataRegistro(data, adm);
+    var hora = normalizarHora(dados.hora);
+    if (!hora) throw new Error('Informe a hora do atendimento.');
+    if (dataHora(data, hora) > agora()) throw new Error('O atendimento não pode estar no futuro.');
     if (PUBLICOS_ATENDIMENTO.indexOf(dados.publico) === -1) throw new Error('Escolha se o atendimento foi ao paciente ou à família.');
     var familia = dados.publico === 'FAMÍLIA';
     var quantidade = familia ? inteiroEntre(dados.quantidade, 1, 30, 1) : 1;
@@ -1648,6 +1980,7 @@ function apiRegistrarAtendimento(dados) {
       admissao_id: adm.id,
       unidade_id: adm.unidade_id,
       data: data,
+      hora: hora,
       publico: dados.publico,
       quantidade: quantidade,
       paciente_impossibilitado: familia ? impossibilitado : '',
@@ -1743,6 +2076,8 @@ function gerarCompilado(f) {
     reunioes: listar('REUNIOES'),
     gerenciais: listar('GERENCIAIS'),
     desfechosRegistrados: listar('DESFECHOS_REGISTRADOS'),
+    motivos: listar('MOTIVOS_SOLICITACAO').slice().sort(porOrdem),
+    prioridades: listar('PRIORIDADES').filter(function (p) { return p.ativo !== 'NÃO'; }).sort(porOrdem),
     listas: listas,
     desfechos: listar('DESFECHOS').slice().sort(porOrdem)
   }, opcoesCompilado(f));

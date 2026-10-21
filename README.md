@@ -32,12 +32,22 @@ gerado automaticamente. Base de dados nova, começando do zero.
 - **1º atendimento (avaliação):** tem que acontecer em até 3 dias úteis da data de admissão no hospital
   (parâmetro editável). Resultado: no prazo, fora do prazo, em andamento ou não se aplica — quando o
   paciente teve desfecho dentro do prazo sem ter sido atendido, a admissão fica fora do indicador.
-- **Prazo de retorno:** cada justificativa de acompanhamento tem um prazo em dias úteis. Depois de cada
+- **Prazo de retorno:** cada justificativa de acompanhamento tem um prazo em dias úteis (pela prioridade). Depois de cada
   atendimento que conta, o próximo tem que acontecer dentro desse prazo. Sábado, domingo e os feriados
   cadastrados não contam. Sem prazo quando a necessidade de acompanhamento é "NÃO" ou "N / A" ou a
   justificativa não tem prazo preenchido.
 - **Atendimento à família:** informa quantos familiares foram atendidos de uma vez. Só conta para os
   prazos (1º atendimento e retornos) quando o paciente estava impossibilitado de ser atendido.
+- **Matriz de atendimento (solicitação):** cada motivo da solicitação tem uma prioridade (ALTA 24h,
+  MODERADA 48h, BAIXA 72h). O primeiro atendimento depois da solicitação tem que acontecer dentro
+  desse prazo, em **horas corridas** (por isso a solicitação e o atendimento têm hora). Vale para os
+  tipos de solicitação marcados em Parâmetros (de início, só EQUIPE). Solicitação para o paciente é
+  respondida por atendimento ao paciente, ou à família com o paciente impossibilitado; solicitação para
+  um familiar (com nome e parentesco) é respondida por qualquer atendimento. Motivo sem prioridade
+  (TRIAGEM PSICOLÓGICA, REABILITA SEPSE) fica sem prazo até a coordenação definir.
+- **Matriz de seguimento:** cada justificativa tem uma prioridade de seguimento, e o prazo de retorno é o
+  da prioridade: ALTA 2 dias úteis (3x por semana), MODERADA 3 (2x por semana), BAIXA 5 (1x por semana),
+  MONITORAMENTO 10 (1x a cada 15 dias). Prazos, prioridades e ligações são editáveis em Cadastros.
 - **Profissional:** o atendimento já vem com quem está logado; dá para escolher outra pessoa.
 - **Categoria:** profissional da empresa, residente ou estagiário. A categoria e a unidade ficam
   gravadas em cada atendimento, atividade e reunião.
@@ -49,8 +59,9 @@ gerado automaticamente. Base de dados nova, começando do zero.
   atividades, reuniões e atividades gerenciais seguem esse filtro. Admissões, 1º atendimento e
   desfechos são do serviço todo (a admissão não pertence a uma categoria).
 - **Seções:** atendimentos (pacientes, familiares atendidos, total de pessoas); admissões e suas
-  distribuições (tipo, descrição e prioridade da solicitação, descrição e prioridade da demanda,
-  necessidade de acompanhamento); 1º atendimento no prazo (com % e média de dias); retornos no prazo
+  distribuições (tipo, motivo e prioridade da solicitação, para quem, descrição da demanda, prioridade
+  do seguimento, necessidade de acompanhamento); 1º atendimento no prazo (com % e média de dias);
+  resposta à solicitação no prazo (com % geral e por prioridade e média de horas); retornos no prazo
   da justificativa; desfechos; atividades assistenciais; reuniões de equipe; atividades gerenciais.
 - **Datas usadas:** atendimentos, atividades e reuniões pela data do registro; admissões e 1º
   atendimento pela data de admissão; desfechos pela data do desfecho.
@@ -114,9 +125,9 @@ com os dados dos pacientes fica no Drive dessa conta.
 1. **Implantar > Nova implantação > App da Web**: executar como **usuário que acessa o app**, acesso
    para **qualquer pessoa com conta Google**. O link gerado é o endereço do sistema.
 2. Compartilhe a planilha do banco como **editor** com a equipe (o app grava com a conta de quem usa).
-3. No sistema, em **Cadastros**: inclua cada profissional com o e-mail Google dela, preencha o prazo em
-   dias úteis de cada justificativa, confira os desfechos, o prazo do 1º atendimento e os feriados
-   (vêm só os nacionais de 2026 e 2027).
+3. No sistema, em **Cadastros**: inclua cada profissional com o e-mail Google dela; confira as
+   prioridades e prazos, os motivos da solicitação e as justificativas (já vêm com as matrizes do HGWA),
+   os desfechos, os parâmetros e os feriados (vêm só os nacionais de 2026 e 2027).
 
 ### Atualizar para uma versão nova
 

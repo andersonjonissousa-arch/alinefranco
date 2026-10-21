@@ -3,11 +3,7 @@
 
   var NOMES_LISTAS = {
     TIPO_SOLICITACAO: 'Tipo de solicitação',
-    ATENDIDO: 'Atendido',
-    DESCRICAO_SOLICITACAO: 'Descrição da solicitação',
-    PRIORIDADE_SOLICITACAO: 'Prioridade da solicitação',
     DESCRICAO_DEMANDA: 'Descrição da demanda',
-    PRIORIDADE_DEMANDA: 'Prioridade da demanda',
     NECESSIDADE_ACOMPANHAMENTO: 'Necessidade de acompanhamento',
     ATIVIDADE_ASSISTENCIAL: 'Atividades assistenciais',
     REUNIAO_EQUIPE: 'Reuniões de equipe',
@@ -129,11 +125,42 @@
     });
   }
 
+  function prioridadePorId(id) {
+    return estado.cad.prioridades.filter(function (p) { return p.id === id; })[0] || null;
+  }
+
+  function prioridadesDoTipo(tipo) {
+    return ativos(estado.cad.prioridades).filter(function (p) { return p.tipo === tipo; });
+  }
+
+  /** Texto do prazo de uma prioridade: "ALTA · até 24h" ou "MODERADA · até 3 dias úteis (2x por semana ou mais)". */
+  function rotuloPrioridade(p) {
+    if (!p) return 'sem prazo definido';
+    if (p.tipo === estado.cad.tipos_prioridade.solicitacao) return p.nome + ' · até ' + p.prazo + 'h';
+    return p.nome + ' · até ' + p.prazo + ' dia(s) útil(eis)' + (p.periodicidade ? ' (' + p.periodicidade + ')' : '');
+  }
+
   function opcoesJustificativas() {
     return ativos(estado.cad.justificativas).map(function (j) {
-      var prazo = j.prazo_dias_uteis === '' ? 'sem prazo definido' : 'até ' + j.prazo_dias_uteis + ' dia(s) útil(eis)';
-      return { valor: j.id, rotulo: j.nome + ' — ' + prazo };
+      return { valor: j.id, rotulo: j.nome + ' — ' + rotuloPrioridade(prioridadePorId(j.prioridade_id)) };
     });
+  }
+
+  function opcoesMotivos() {
+    return ativos(estado.cad.motivos).map(function (m) {
+      return { valor: m.id, rotulo: m.nome + ' — ' + rotuloPrioridade(prioridadePorId(m.prioridade_id)) };
+    });
+  }
+
+  /** 'AAAA-MM-DD HH:MM' -> 'DD/MM/AAAA HH:MM'. */
+  function dataHoraBr(dh) {
+    return dh ? dataBr(dh.slice(0, 10)) + ' ' + dh.slice(11, 16) : '';
+  }
+
+  /** Hora atual do computador, 'HH:MM'. */
+  function horaAgora() {
+    var d = new Date();
+    return ('0' + d.getHours()).slice(-2) + ':' + ('0' + d.getMinutes()).slice(-2);
   }
 
   var CLASSE_SITUACAO = { 'ATRASADO': 'selo atrasado', 'VENCE HOJE': 'selo hoje', 'NO PRAZO': 'selo prazo' };
@@ -281,7 +308,9 @@
           h('td', null, a.unidade_nome),
           h('td', null, dataBr(a.data_admissao)),
           h('td', null, a.primeiro_atendimento ? dataBr(a.primeiro_atendimento) + ' ' : '', seloPrimeiro(a.primeiro_no_prazo)),
-          h('td', null, dataBr(a.proximo_prazo)),
+          h('td', null, a.aguardando_resposta
+            ? h('span', null, dataHoraBr(a.prazo_resposta), h('div', { class: 'suave' }, 'resposta à solicitação'))
+            : dataBr(a.proximo_prazo)),
           h('td', null, selo(a.situacao)),
           h('td', null, seloStatus(a)));
       })));
@@ -351,8 +380,10 @@
       info('Admissão', dataBr(a.data_admissao)),
       info('1º atendimento', a.primeiro_atendimento ? dataBr(a.primeiro_atendimento) : 'até ' + dataBr(a.prazo_primeiro_atendimento),
         ' ', seloPrimeiro(a.primeiro_no_prazo)),
-      info('Justificativa', a.justificativa_nome || '—'),
-      info('Próximo prazo', dataBr(a.proximo_prazo) || '—', ' ', selo(a.situacao)),
+      a.resposta_no_prazo ? info('Solicitação', infoResposta(a)) : null,
+      info('Justificativa', a.justificativa_nome ? a.justificativa_nome + (a.prioridade_demanda ? ' · ' + a.prioridade_demanda.toLowerCase() : '') : '—'),
+      a.status === st.acompanhamento ? info('Próximo retorno', dataBr(a.proximo_prazo) || '—') : null,
+      selo(a.situacao),
       seloStatus(a)));
 
     if (a.status === st.acompanhamentoEncerrado) main.appendChild(formularioRetomada(a));
@@ -384,6 +415,25 @@
         }))));
   }
 
+  var ROTULO_RESPOSTA = {
+    'SIM': ['respondida no prazo', 'selo prazo'],
+    'NÃO': ['fora do prazo', 'selo atrasado'],
+    'EM ANDAMENTO': ['aguardando resposta', 'selo hoje'],
+    'NÃO SE APLICA': ['não se aplica', 'selo'],
+    'SEM PRAZO': ['sem prazo', 'selo']
+  };
+
+  /** Resumo da resposta à solicitação: prioridade, prazo em horas e quando foi respondida. */
+  function infoResposta(a) {
+    var r = ROTULO_RESPOSTA[a.resposta_no_prazo] || ['', 'selo'];
+    var partes = [];
+    if (a.prioridade_solicitacao) partes.push(a.prioridade_solicitacao.toLowerCase());
+    if (a.prazo_resposta) partes.push('até ' + dataHoraBr(a.prazo_resposta));
+    if (a.momento_resposta) partes.push('respondida ' + dataHoraBr(a.momento_resposta) + ' (' + String(a.horas_resposta).replace('.', ',') + 'h)');
+    if (a.para_quem === 'FAMILIAR') partes.push('para ' + [a.familiar_parentesco, a.familiar_nome].filter(Boolean).join(' ').toLowerCase());
+    return h('span', null, partes.join(' · ') + ' ', h('span', { class: r[1] }, r[0]));
+  }
+
   function formularioRetomada(a) {
     var form = h('form', { class: 'linha' },
       campo('Data da retomada', h('input', { name: 'data', type: 'date', value: estado.cad.hoje, max: estado.cad.hoje, required: true })),
@@ -412,6 +462,7 @@
       [{ valor: 'NÃO', rotulo: 'Não' }, { valor: 'SIM', rotulo: 'Sim — conta para o prazo do paciente' }], 'NÃO', false));
     var form = h('form', { class: 'linha' },
       campo('Data', h('input', { name: 'data', type: 'date', value: estado.cad.hoje, max: estado.cad.hoje, required: true })),
+      campo('Hora', h('input', { name: 'hora', type: 'time', value: horaAgora(), required: true })),
       campo('Atendimento a', publico), quantos, impossibilitado,
       campo('Profissional', seletor('profissional_id', opcoesProfissionais(), estado.usuario.id, false)),
       campo('Observação', h('input', { name: 'observacao', placeholder: 'Opcional' })));
@@ -455,7 +506,7 @@
       h('tbody', null, det.atendimentos.map(function (at) {
         var familia = at.publico === 'FAMÍLIA';
         return h('tr', null,
-          h('td', null, dataBr(at.data)),
+          h('td', null, dataBr(at.data), at.hora ? h('div', { class: 'suave' }, at.hora) : ''),
           h('td', null, familia ? 'Família · ' + at.quantidade + ' pessoa(s)' : 'Paciente',
             familia && at.paciente_impossibilitado === 'SIM' ? h('div', { class: 'suave' }, 'paciente impossibilitado') : ''),
           h('td', null, at.profissional_nome, at.categoria !== 'PROFISSIONAL DA EMPRESA'
@@ -566,18 +617,30 @@
       var campos = Array.prototype.slice.call(arguments, 1);
       return h('fieldset', null, h('legend', null, titulo), h('div', { class: 'linha' }, campos));
     };
+    var paraQuem = seletor('para_quem', [{ valor: 'PACIENTE', rotulo: 'Paciente' }, { valor: 'FAMILIAR', rotulo: 'Familiar' }],
+      v('para_quem') || 'PACIENTE', false);
+    var campoFamiliarNome = campo('Nome do familiar', h('input', { name: 'familiar_nome', value: v('familiar_nome') }));
+    var campoFamiliarParentesco = campo('Parentesco', h('input', { name: 'familiar_parentesco', value: v('familiar_parentesco'), placeholder: 'Ex.: mãe, filho' }));
+    var ajustarFamiliar = function () {
+      var familiar = paraQuem.value === 'FAMILIAR';
+      campoFamiliarNome.hidden = !familiar;
+      campoFamiliarParentesco.hidden = !familiar;
+    };
+    paraQuem.addEventListener('change', ajustarFamiliar);
+    ajustarFamiliar();
     var form = h('form', null,
       grupo('Admissão no hospital',
         data('data_admissao', 'Data da admissão', true),
         campo('Unidade', seletor('unidade_id', opcoesUnidades(), v('unidade_id')))),
       grupo('Solicitação',
-        data('data_solicitacao', 'Data da solicitação'),
         lista('tipo_solicitacao', 'Tipo de solicitação', 'TIPO_SOLICITACAO'),
-        lista('descricao_solicitacao', 'Descrição da solicitação', 'DESCRICAO_SOLICITACAO'),
-        lista('prioridade_solicitacao', 'Prioridade', 'PRIORIDADE_SOLICITACAO')),
+        campo('Motivo (prioridade e prazo)', seletor('motivo_solicitacao_id', opcoesMotivos(), v('motivo_solicitacao_id'))),
+        data('data_solicitacao', 'Data da solicitação'),
+        campo('Hora da solicitação', h('input', { name: 'hora_solicitacao', type: 'time', value: v('hora_solicitacao') })),
+        campo('Solicitação para', paraQuem),
+        campoFamiliarNome, campoFamiliarParentesco),
       grupo('Avaliação (1º atendimento)',
-        lista('descricao_demanda', 'Descrição da demanda', 'DESCRICAO_DEMANDA'),
-        lista('prioridade_demanda', 'Prioridade da demanda', 'PRIORIDADE_DEMANDA')),
+        lista('descricao_demanda', 'Descrição da demanda', 'DESCRICAO_DEMANDA')),
       grupo('Acompanhamento',
         lista('necessidade_acompanhamento', 'Necessidade de acompanhamento', 'NECESSIDADE_ACOMPANHAMENTO'),
         campo('Justificativa', seletor('justificativa_id', opcoesJustificativas(), v('justificativa_id')))),
@@ -749,9 +812,11 @@
     var corpo = h('div');
     var secoes = {
       Profissionais: cadProfissionais,
-      'Justificativas e prazos': cadJustificativas,
+      'Prioridades e prazos': cadPrioridades,
+      'Motivos da solicitação': cadMotivos,
+      'Justificativas': cadJustificativas,
       Desfechos: cadDesfechos,
-      'Prazo do 1º atendimento': cadParametros,
+      'Parâmetros': cadParametros,
       'Setores e unidades': cadUnidades,
       Listas: cadListas,
       Feriados: cadFeriados
@@ -834,25 +899,80 @@
     });
   }
 
+  function seletorPrioridade(tipo, valor) {
+    return seletor('prioridade_id', prioridadesDoTipo(tipo).map(function (p) {
+      return { valor: p.id, rotulo: rotuloPrioridade(p) };
+    }), valor, 'Sem prioridade (sem prazo)');
+  }
+
   function cadJustificativas(alvo, aoSalvar) {
     alvo.appendChild(h('p', { class: 'suave' },
-      'Depois de cada atendimento, o paciente tem que ser visto de novo em até o número de dias úteis da justificativa. ' +
-      'Sem prazo preenchido, o sistema não acompanha o retorno.'));
+      'Matriz de seguimento: cada justificativa tem uma prioridade, e o prazo de retorno (em dias úteis) é o da prioridade. ' +
+      'Justificativa sem prioridade não tem prazo de retorno.'));
     secaoCadastro(alvo, {
       api: 'apiSalvarJustificativa',
       aoSalvar: aoSalvar,
       itens: estado.cad.justificativas,
       colunas: [['Justificativa', function (j) { return j.nome; }],
-        ['Prazo (dias úteis)', function (j) { return j.prazo_dias_uteis === '' ? '—' : j.prazo_dias_uteis; }],
+        ['Prioridade e prazo', function (j) { return rotuloPrioridade(prioridadePorId(j.prioridade_id)); }],
         ['Ordem', function (j) { return j.ordem; }]],
       campos: function (j) {
         return [
           campo('Justificativa', h('input', { name: 'nome', value: j.nome || '', required: true })),
-          campo('Prazo em dias úteis', h('input', { name: 'prazo_dias_uteis', type: 'number', min: 0, value: j.prazo_dias_uteis === undefined ? '' : j.prazo_dias_uteis })),
+          campo('Prioridade', seletorPrioridade(estado.cad.tipos_prioridade.seguimento, j.prioridade_id)),
           campo('Ordem', h('input', { name: 'ordem', type: 'number', value: j.ordem || '' }))
         ];
       }
     });
+  }
+
+  function cadMotivos(alvo, aoSalvar) {
+    alvo.appendChild(h('p', { class: 'suave' },
+      'Matriz de atendimento: cada motivo da solicitação tem uma prioridade, e o prazo de resposta (em horas corridas) é o da prioridade. ' +
+      'Motivo sem prioridade fica sem prazo até ser definido.'));
+    secaoCadastro(alvo, {
+      api: 'apiSalvarMotivo',
+      aoSalvar: aoSalvar,
+      itens: estado.cad.motivos,
+      colunas: [['Motivo da solicitação', function (m) { return m.nome; }],
+        ['Prioridade e prazo', function (m) { return rotuloPrioridade(prioridadePorId(m.prioridade_id)); }],
+        ['Ordem', function (m) { return m.ordem; }]],
+      campos: function (m) {
+        return [
+          campo('Motivo', h('input', { name: 'nome', value: m.nome || '', required: true })),
+          campo('Prioridade', seletorPrioridade(estado.cad.tipos_prioridade.solicitacao, m.prioridade_id)),
+          campo('Ordem', h('input', { name: 'ordem', type: 'number', value: m.ordem || '' }))
+        ];
+      }
+    });
+  }
+
+  function cadPrioridades(alvo, aoSalvar) {
+    var tipos = estado.cad.tipos_prioridade;
+    [[tipos.solicitacao, 'Prioridades da solicitação (matriz de atendimento)', 'Prazo em horas', 'horas corridas a partir da solicitação'],
+      [tipos.seguimento, 'Prioridades do seguimento (matriz de seguimento)', 'Prazo em dias úteis', 'dias úteis entre um atendimento e o próximo']]
+      .forEach(function (t) {
+        var bloco = h('div');
+        alvo.appendChild(h('h2', { class: 'subtitulo-secao' }, t[1]));
+        alvo.appendChild(h('p', { class: 'suave' }, 'O prazo é em ' + t[3] + '. Mudar aqui vale para todos os itens ligados à prioridade.'));
+        alvo.appendChild(bloco);
+        secaoCadastro(bloco, {
+          api: 'apiSalvarPrioridade',
+          aoSalvar: aoSalvar,
+          extra: function () { return { tipo: t[0] }; },
+          itens: estado.cad.prioridades.filter(function (p) { return p.tipo === t[0]; }),
+          colunas: [['Prioridade', function (p) { return p.nome; }], [t[2], function (p) { return p.prazo; }],
+            ['Periodicidade / observação', function (p) { return p.periodicidade; }]],
+          campos: function (p) {
+            return [
+              campo('Prioridade', h('input', { name: 'nome', value: p.nome || '', required: true })),
+              campo(t[2], h('input', { name: 'prazo', type: 'number', min: 1, value: p.prazo || '', required: true })),
+              campo('Periodicidade / observação', h('input', { name: 'periodicidade', value: p.periodicidade || '' })),
+              campo('Ordem', h('input', { name: 'ordem', type: 'number', value: p.ordem || '' }))
+            ];
+          }
+        });
+      });
   }
 
   function cadDesfechos(alvo, aoSalvar) {
@@ -878,18 +998,36 @@
   }
 
   function cadParametros(alvo, aoSalvar) {
-    var p = estado.cad.parametros.filter(function (x) { return x.chave === 'PRAZO_PRIMEIRO_ATENDIMENTO_DIAS_UTEIS'; })[0];
-    if (!p) return;
-    var form = h('form', { class: 'linha' },
-      campo('Dias úteis para o 1º atendimento', h('input', { name: 'valor', type: 'number', min: 0, value: p.valor, required: true })));
-    var botao = h('button', { class: 'btn', type: 'submit' }, 'Salvar');
-    form.appendChild(botao);
-    form.addEventListener('submit', function (ev) {
-      ev.preventDefault();
-      enviar(botao, chamar('apiSalvarParametro', Object.assign(lerFormulario(form), { id: p.id }))).then(aoSalvar).catch(function () {});
-    });
-    alvo.appendChild(h('div', { class: 'cartao' }, h('p', { class: 'suave' }, p.descricao +
-      ' Admissões que tiverem desfecho dentro desse prazo sem terem sido atendidas ficam fora do indicador.'), form));
+    var param = function (chave) { return estado.cad.parametros.filter(function (x) { return x.chave === chave; })[0]; };
+    var p = param('PRAZO_PRIMEIRO_ATENDIMENTO_DIAS_UTEIS');
+    if (p) {
+      var form = h('form', { class: 'linha' },
+        campo('Dias úteis para o 1º atendimento', h('input', { name: 'valor', type: 'number', min: 0, value: p.valor, required: true })));
+      var botao = h('button', { class: 'btn', type: 'submit' }, 'Salvar');
+      form.appendChild(botao);
+      form.addEventListener('submit', function (ev) {
+        ev.preventDefault();
+        enviar(botao, chamar('apiSalvarParametro', Object.assign(lerFormulario(form), { id: p.id }))).then(aoSalvar).catch(function () {});
+      });
+      alvo.appendChild(h('div', { class: 'cartao' }, h('h2', null, '1º atendimento após a admissão'), h('p', { class: 'suave' }, p.descricao +
+        ' Admissões que tiverem desfecho dentro desse prazo sem terem sido atendidas ficam fora do indicador.'), form));
+    }
+    var t = param('TIPOS_SOLICITACAO_COM_PRAZO');
+    if (t) {
+      var marcados = String(t.valor || '').split(',').map(function (x) { return x.trim(); });
+      var caixas = opcoesLista('TIPO_SOLICITACAO').map(function (tipo) {
+        return h('label', { class: 'marcacao' }, h('input', { type: 'checkbox', value: tipo, checked: marcados.indexOf(tipo) !== -1 }), ' ' + tipo);
+      });
+      var botaoT = h('button', { class: 'btn', type: 'button' }, 'Salvar');
+      botaoT.addEventListener('click', function () {
+        var valor = caixas.map(function (c) { return c.querySelector('input'); }).filter(function (i) { return i.checked; })
+          .map(function (i) { return i.value; }).join(',');
+        enviar(botaoT, chamar('apiSalvarParametro', { id: t.id, valor: valor })).then(aoSalvar).catch(function () {});
+      });
+      alvo.appendChild(h('div', { class: 'cartao' }, h('h2', null, 'Prazo de resposta à solicitação'),
+        h('p', { class: 'suave' }, 'Tipos de solicitação que têm prazo de resposta pela matriz de atendimento (24h, 48h, 72h…).'),
+        h('div', { class: 'linha' }, caixas, botaoT)));
+    }
   }
 
   function cadFeriados(alvo, aoSalvar) {

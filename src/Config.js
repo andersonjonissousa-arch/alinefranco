@@ -18,8 +18,14 @@ var TABELAS = {
   UNIDADES: ['id', 'nome', 'setor_id', 'ordem', 'ativo'],
   PROFISSIONAIS: ['id', 'nome', 'email', 'categoria', 'perfil', 'ativo'],
   LISTAS: ['id', 'lista', 'valor', 'ordem', 'ativo'],
-  // Justificativa de acompanhamento e em quantos dias úteis o paciente tem que ser visto de novo.
-  JUSTIFICATIVAS: ['id', 'nome', 'prazo_dias_uteis', 'ordem', 'ativo'],
+  // Prioridades das duas matrizes, cada uma com seu prazo:
+  // tipo SOLICITAÇÃO → prazo em horas corridas para responder à solicitação;
+  // tipo SEGUIMENTO → prazo em dias úteis entre um atendimento e o próximo.
+  PRIORIDADES: ['id', 'tipo', 'nome', 'prazo', 'periodicidade', 'ordem', 'ativo'],
+  // Motivos da solicitação (matriz de atendimento). Sem prioridade = sem prazo de resposta.
+  MOTIVOS_SOLICITACAO: ['id', 'nome', 'prioridade_id', 'ordem', 'ativo'],
+  // Justificativas de acompanhamento (matriz de seguimento). Sem prioridade = sem prazo de retorno.
+  JUSTIFICATIVAS: ['id', 'nome', 'prioridade_id', 'ordem', 'ativo'],
   // Feriados não contam como dia útil no cálculo dos prazos.
   FERIADOS: ['id', 'data', 'descricao'],
   // Desfechos e se cada um encerra a admissão (saída do hospital) ou só o acompanhamento psicológico.
@@ -30,28 +36,31 @@ var TABELAS = {
     'id', 'admissao_id', 'unidade_id', 'desfecho_id', 'data', 'encerra_admissao', 'vigente',
     'criado_por', 'criado_em', 'atualizado_em'
   ],
-  // Parâmetros do sistema, como o prazo do 1º atendimento após a admissão.
+  // Parâmetros do sistema, como o prazo do 1º atendimento após a admissão e os tipos de solicitação com prazo.
   PARAMETROS: ['id', 'chave', 'valor', 'descricao'],
   PACIENTES: ['id', 'prontuario', 'nome', 'criado_em', 'atualizado_em'],
   // Cada entrada do paciente no hospital. Uma nova admissão só depois que a anterior foi encerrada.
   ADMISSOES: [
     'id', 'paciente_id', 'data_admissao', 'unidade_id',
-    // Solicitação
-    'tipo_solicitacao', 'descricao_solicitacao', 'prioridade_solicitacao', 'data_solicitacao',
+    // Solicitação (para o paciente ou para um familiar, com nome e parentesco)
+    'tipo_solicitacao', 'motivo_solicitacao_id', 'data_solicitacao', 'hora_solicitacao',
+    'para_quem', 'familiar_nome', 'familiar_parentesco',
     // Avaliação (o 1º atendimento)
-    'descricao_demanda', 'prioridade_demanda',
+    'descricao_demanda',
     // Acompanhamento e desfecho
     'necessidade_acompanhamento', 'justificativa_id', 'desfecho_id', 'data_desfecho', 'retomado_em', 'observacoes',
     // Calculados pelo sistema ao salvar
     'status', 'prazo_primeiro_atendimento', 'primeiro_atendimento', 'primeiro_no_prazo',
-    'dias_ate_primeiro_atendimento', 'dias_resposta', 'ultimo_contato', 'proximo_prazo',
+    'dias_ate_primeiro_atendimento', 'ultimo_contato', 'proximo_prazo', 'prioridade_demanda',
+    // Resposta à solicitação, em horas corridas, pela prioridade do motivo
+    'prioridade_solicitacao', 'prazo_resposta', 'momento_resposta', 'horas_resposta', 'resposta_no_prazo',
     'criado_por', 'criado_em', 'atualizado_em'
   ],
   // Cada atendimento: ao paciente ou à família (com quantas pessoas), por quem, em que unidade e se foi no prazo.
   // tipo_prazo: PRIMEIRO (1º atendimento da admissão) ou RETORNO.
   // Atendimento à família só conta para os prazos quando o paciente estava impossibilitado.
   ATENDIMENTOS: [
-    'id', 'admissao_id', 'unidade_id', 'data', 'publico', 'quantidade', 'paciente_impossibilitado', 'conta_prazo',
+    'id', 'admissao_id', 'unidade_id', 'data', 'hora', 'publico', 'quantidade', 'paciente_impossibilitado', 'conta_prazo',
     'profissional_id', 'categoria', 'justificativa_id', 'tipo_prazo', 'prazo_limite', 'no_prazo', 'observacao',
     'criado_por', 'criado_em'
   ],
@@ -68,6 +77,8 @@ var CATEGORIAS_PROFISSIONAL = ['PROFISSIONAL DA EMPRESA', 'RESIDENTE', 'ESTAGIÁ
 var CATEGORIA_EMPRESA = 'PROFISSIONAL DA EMPRESA';
 var PERFIS = ['COORDENAÇÃO', 'PROFISSIONAL'];
 var PUBLICOS_ATENDIMENTO = ['PACIENTE', 'FAMÍLIA'];
+var PARA_QUEM_SOLICITACAO = ['PACIENTE', 'FAMILIAR'];
+var TIPOS_PRIORIDADE = { solicitacao: 'SOLICITAÇÃO', seguimento: 'SEGUIMENTO' };
 /** Com estas respostas em "necessidade de acompanhamento", a admissão não tem prazo de retorno. */
 var SEM_ACOMPANHAMENTO = ['NÃO', 'N / A'];
 
@@ -80,11 +91,7 @@ var DESCRICOES_BASE = [
 /** Listas usadas nos campos de seleção. Editáveis pela coordenação na tela de cadastros. */
 var LISTAS_INICIAIS = {
   TIPO_SOLICITACAO: ['EQUIPE', 'BUSCA ATIVA', 'ESPONTÂNEA', 'SEGUIMENTO PSICOLÓGICO'],
-  ATENDIDO: ['SIM', 'NÃO', 'PENDENTE'],
-  DESCRICAO_SOLICITACAO: DESCRICOES_BASE.concat(['TRIAGEM PSICOLÓGICA', 'REABILITA SEPSE']),
-  PRIORIDADE_SOLICITACAO: ['ALTA', 'MODERADA', 'BAIXA', 'TRIAGEM', 'SEPSE'],
   DESCRICAO_DEMANDA: DESCRICOES_BASE.concat(['SEM CONDIÇÕES CLÍNICAS E/OU SOCIAIS', 'RECUSA', 'SEM DEMANDA']),
-  PRIORIDADE_DEMANDA: ['ALTA', 'MODERADA', 'BAIXA', 'RECUSA', 'SEM DEMANDA', 'SEM CONDIÇÕES CLÍNICAS E/OU SOCIAIS'],
   NECESSIDADE_ACOMPANHAMENTO: ['PACIENTE', 'PACIENTE E FAMÍLIA', 'FAMÍLIA', 'NÃO', 'N / A'],
   ATIVIDADE_ASSISTENCIAL: [
     'FICHA DE ADMISSÃO', 'DISCUSSÃO DE CASO', 'REUNIÃO FAMILIAR', 'VISITA DE CRIANÇA', 'VISITA ESTENDIDA',
@@ -107,14 +114,38 @@ var DESFECHOS_INICIAIS = [
 
 /** Parâmetros editáveis pela coordenação. */
 var PARAMETROS_INICIAIS = [
-  ['PRAZO_PRIMEIRO_ATENDIMENTO_DIAS_UTEIS', '3', 'Dias úteis, a partir da admissão no hospital, para o 1º atendimento (avaliação).']
+  ['PRAZO_PRIMEIRO_ATENDIMENTO_DIAS_UTEIS', '3', 'Dias úteis, a partir da admissão no hospital, para o 1º atendimento (avaliação).'],
+  ['TIPOS_SOLICITACAO_COM_PRAZO', 'EQUIPE', 'Tipos de solicitação que têm prazo de resposta pela matriz de atendimento (separados por vírgula).']
 ];
 
-/** Justificativas de acompanhamento. O prazo em dias úteis é preenchido pela coordenação. */
+/** Prioridades das matrizes do HGWA: [tipo, nome, prazo, periodicidade]. */
+var PRIORIDADES_INICIAIS = [
+  ['SOLICITAÇÃO', 'ALTA', '24', 'Atender em até 24h'],
+  ['SOLICITAÇÃO', 'MODERADA', '48', 'Atender em até 48h'],
+  ['SOLICITAÇÃO', 'BAIXA', '72', 'Atender em até 72h'],
+  ['SEGUIMENTO', 'ALTA', '2', '3x por semana ou mais'],
+  ['SEGUIMENTO', 'MODERADA', '3', '2x por semana ou mais'],
+  ['SEGUIMENTO', 'BAIXA', '5', '1x por semana ou mais'],
+  ['SEGUIMENTO', 'MONITORAMENTO', '10', '1x a cada 15 dias']
+];
+
+/** Matriz de prioridade para atendimento psicológico: [motivo da solicitação, prioridade]. */
+var MOTIVOS_SOLICITACAO_INICIAIS = [
+  ['ACOLHIMENTO A ÓBITO', 'ALTA'], ['RISCO DE SUICÍDIO', 'ALTA'], ['CUIDADOS DE FIM DE VIDA', 'ALTA'],
+  ['CUIDADOS PALIATIVOS', 'MODERADA'], ['HISTÓRICO DE TRANSTORNO MENTAL', 'MODERADA'],
+  ['HISTÓRICO DE VIOLÊNCIA', 'MODERADA'], ['COMUNICAÇÃO', 'MODERADA'], ['ADESÃO AO TRATAMENTO', 'MODERADA'],
+  ['INTERNAÇÃO PROLONGADA', 'BAIXA'], ['HUMOR DEPRIMIDO OU ANSIOSO', 'BAIXA'],
+  ['VISITA DE CRIANÇA / VISITA ESTENDIDA', 'BAIXA'],
+  ['TRIAGEM PSICOLÓGICA', ''], ['REABILITA SEPSE', '']
+];
+
+/** Matriz de prioridade para seguimento psicológico: [justificativa de acompanhamento, prioridade]. */
 var JUSTIFICATIVAS_INICIAIS = [
-  'RISCO DE SUICÍDIO', 'INST. PSIQ. COM RISCO A SI OU A TERCEIROS', 'INST. PSIQ. SEM RISCO A SI OU A TERCEIROS',
-  'CUIDADOS PALIATIVOS OU FIM DE VIDA', 'ADESÃO AO TRATAMENTO', 'POUCOS RECURSOS DE ENFRENTAMENTO',
-  'BONS A PARCIAIS RECURSOS DE ENFRENTAMENTO', 'INTERNAÇÃO PROLONGADA', 'SEM CONDIÇÕES CLÍNICAS / SOCIAIS'
+  ['RISCO DE SUICÍDIO', 'ALTA'], ['INST. PSIQ. COM RISCO A SI OU A TERCEIROS', 'ALTA'],
+  ['INST. PSIQ. SEM RISCO A SI OU A TERCEIROS', 'MODERADA'], ['CUIDADOS PALIATIVOS OU FIM DE VIDA', 'MODERADA'],
+  ['ADESÃO AO TRATAMENTO', 'MODERADA'], ['POUCOS RECURSOS DE ENFRENTAMENTO', 'MODERADA'],
+  ['BONS A PARCIAIS RECURSOS DE ENFRENTAMENTO', 'BAIXA'], ['INTERNAÇÃO PROLONGADA', 'MONITORAMENTO'],
+  ['SEM CONDIÇÕES CLÍNICAS / SOCIAIS', '']
 ];
 
 /** Feriados nacionais. Estaduais, municipais e pontos facultativos são incluídos pela coordenação. */

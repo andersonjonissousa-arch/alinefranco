@@ -99,6 +99,13 @@ function validarAdmissao(adm, hojeIso) {
     }
   });
 
+  if (normalizarData(adm.data_solicitacao) && !normalizarHora(adm.hora_solicitacao)) {
+    erros.push('Informe a hora da solicitação.');
+  }
+  if (adm.para_quem === 'FAMILIAR' && !String(adm.familiar_nome || '').trim() && !String(adm.familiar_parentesco || '').trim()) {
+    erros.push('Informe o nome ou o parentesco do familiar.');
+  }
+
   var temData = Boolean(normalizarData(adm.data_desfecho));
   if (adm.desfecho_id && !temData) erros.push('Informe a data do desfecho.');
   if (temData && !adm.desfecho_id) erros.push('Informe o desfecho.');
@@ -271,7 +278,6 @@ function calcularAdmissao(adm, atendimentos, op) {
       primeiro_atendimento: primeiro,
       primeiro_no_prazo: primeiroNoPrazo,
       dias_ate_primeiro_atendimento: diasEntre(adm.data_admissao, primeiro),
-      dias_resposta: diasEntre(adm.data_solicitacao, primeiro),
       ultimo_contato: ultimo,
       proximo_prazo: proximo
     }
@@ -291,4 +297,110 @@ function situacaoPrazo(proximoPrazo, hoje) {
 /** Atendimentos de residentes e estagiários não entram nos números da empresa. */
 function contaParaEmpresa(categoria) {
   return categoria === CATEGORIA_EMPRESA;
+}
+
+// ---------- Horas: prazo de resposta à solicitação ----------
+
+/** 'H:MM' ou 'HH:MM' → 'HH:MM'. Retorna '' se vazio ou inválido. */
+function normalizarHora(valor) {
+  if (valor === null || valor === undefined || valor === '') return '';
+  if (Object.prototype.toString.call(valor) === '[object Date]') {
+    return isNaN(valor.getTime()) ? '' : doisDigitos(valor.getHours()) + ':' + doisDigitos(valor.getMinutes());
+  }
+  var m = /^(\d{1,2}):(\d{2})(?::\d{2})?$/.exec(String(valor).trim());
+  if (!m || Number(m[1]) > 23 || Number(m[2]) > 59) return '';
+  return doisDigitos(Number(m[1])) + ':' + m[2];
+}
+
+/** Data e hora juntas, 'AAAA-MM-DD HH:MM'. Sem hora vale 00:00. '' se não houver data. */
+function dataHora(data, hora) {
+  var d = normalizarData(data);
+  if (!d) return '';
+  return d + ' ' + (normalizarHora(hora) || '00:00');
+}
+
+function dataHoraParaUtc(dh) {
+  var m = /^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2})$/.exec(dh || '');
+  return m ? Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5]) : NaN;
+}
+
+/** Soma horas corridas a 'AAAA-MM-DD HH:MM'. */
+function adicionarHoras(dh, horas) {
+  var t = dataHoraParaUtc(dh);
+  if (isNaN(t)) return '';
+  var d = new Date(t + Number(horas) * 60 * 60 * 1000);
+  return normalizarDataUtc(d) + ' ' + doisDigitos(d.getUTCHours()) + ':' + doisDigitos(d.getUTCMinutes());
+}
+
+/** Horas corridas entre dois 'AAAA-MM-DD HH:MM', com uma casa decimal. */
+function horasEntre(inicio, fim) {
+  var a = dataHoraParaUtc(inicio);
+  var b = dataHoraParaUtc(fim);
+  if (isNaN(a) || isNaN(b)) return '';
+  return Math.round((b - a) / 360000) / 10;
+}
+
+/**
+ * Resposta à solicitação (matriz de atendimento): o primeiro atendimento depois da solicitação
+ * tem que acontecer em até N horas corridas, conforme a prioridade do motivo.
+ * Solicitação para o paciente: vale atendimento ao paciente, ou à família com o paciente impossibilitado.
+ * Solicitação para um familiar: vale atendimento ao paciente ou à família.
+ *
+ * @param adm a admissão
+ * @param atendimentos atendimentos da admissão (data, hora, publico, paciente_impossibilitado)
+ * @param op { prioridade: { nome, prazo } ou null, tiposComPrazo: [tipos], agora: 'AAAA-MM-DD HH:MM' }
+ * @return { prioridade_solicitacao, prazo_resposta, momento_resposta, horas_resposta, resposta_no_prazo }
+ *   resposta_no_prazo: SIM, NÃO, EM ANDAMENTO, NÃO SE APLICA (desfecho antes do prazo sem resposta),
+ *   SEM PRAZO (tipo ou motivo sem prazo) ou '' (sem solicitação).
+ */
+function calcularResposta(adm, atendimentos, op) {
+  var vazio = { prioridade_solicitacao: '', prazo_resposta: '', momento_resposta: '', horas_resposta: '', resposta_no_prazo: '' };
+  var inicio = normalizarHora(adm.hora_solicitacao) ? dataHora(adm.data_solicitacao, adm.hora_solicitacao) : '';
+  if (!inicio) return vazio;
+
+  var prioridade = op.prioridade;
+  var horasPrazo = prioridade && prioridade.prazo !== '' && !isNaN(Number(prioridade.prazo)) ? Number(prioridade.prazo) : null;
+  var temPrazo = horasPrazo !== null && (op.tiposComPrazo || []).indexOf(adm.tipo_solicitacao) !== -1;
+  var paraFamiliar = adm.para_quem === 'FAMILIAR';
+
+  var resposta = '';
+  atendimentos.forEach(function (a) {
+    var dh = dataHora(a.data, a.hora);
+    if (!dh || dh < inicio) return;
+    var vale = paraFamiliar ? (a.publico === 'PACIENTE' || a.publico === 'FAMÍLIA') : contaParaPrazo(a);
+    if (vale && (!resposta || dh < resposta)) resposta = dh;
+  });
+
+  var prazo = temPrazo ? adicionarHoras(inicio, horasPrazo) : '';
+  var situacao;
+  if (!temPrazo) situacao = 'SEM PRAZO';
+  else if (resposta) situacao = resposta <= prazo ? 'SIM' : 'NÃO';
+  else {
+    var desfecho = normalizarData(adm.data_desfecho);
+    if (desfecho && desfecho <= prazo.slice(0, 10)) situacao = 'NÃO SE APLICA';
+    else if (desfecho || (op.agora && op.agora > prazo)) situacao = 'NÃO';
+    else situacao = 'EM ANDAMENTO';
+  }
+  return {
+    prioridade_solicitacao: prioridade ? prioridade.nome : '',
+    prazo_resposta: prazo,
+    momento_resposta: resposta,
+    horas_resposta: resposta ? horasEntre(inicio, resposta) : '',
+    resposta_no_prazo: situacao
+  };
+}
+
+/** Situação de um prazo com hora ('AAAA-MM-DD HH:MM') em relação a agora. */
+function situacaoPrazoHora(prazo, agora) {
+  if (!prazo || !agora) return '';
+  if (prazo < agora) return 'ATRASADO';
+  if (prazo.slice(0, 10) === agora.slice(0, 10)) return 'VENCE HOJE';
+  return 'NO PRAZO';
+}
+
+var GRAVIDADE_SITUACAO = { 'ATRASADO': 3, 'VENCE HOJE': 2, 'NO PRAZO': 1, '': 0 };
+
+/** A mais urgente de duas situações. */
+function situacaoMaisUrgente(a, b) {
+  return (GRAVIDADE_SITUACAO[a || ''] || 0) >= (GRAVIDADE_SITUACAO[b || ''] || 0) ? (a || '') : (b || '');
 }

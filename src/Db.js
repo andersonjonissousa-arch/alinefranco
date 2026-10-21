@@ -43,6 +43,7 @@ function listar(nome) {
 /** Datas lidas da planilha voltam como texto: 'AAAA-MM-DD' ou data e hora ISO nos carimbos *_em. */
 function normalizarDataHora(coluna, valor) {
   if (/_em$/.test(coluna)) return valor.toISOString();
+  if (/^hora/.test(coluna)) return normalizarHora(valor);
   return normalizarData(valor);
 }
 
@@ -60,6 +61,11 @@ function novoId() {
 
 function agoraIso() {
   return new Date().toISOString();
+}
+
+/** Data e hora de agora no fuso do hospital, 'AAAA-MM-DD HH:MM'. */
+function agora() {
+  return Utilities.formatDate(new Date(), APP.fusoHorario, 'yyyy-MM-dd HH:mm');
 }
 
 /** Data de hoje no fuso do hospital, 'AAAA-MM-DD'. */

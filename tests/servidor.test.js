@@ -108,9 +108,11 @@ function sistemaComAdmissao() {
   const { ctx } = sis;
   ctx.configurar();
   ctx.novaExecucao();
-  vm.runInContext("hoje = function () { return '2026-10-20'; }", ctx);
+  vm.runInContext("hoje = function () { return '2026-10-20'; }; agora = function () { return '2026-10-20 12:00'; }", ctx);
   const j = ctx.listar('JUSTIFICATIVAS').find((x) => x.nome === 'POUCOS RECURSOS DE ENFRENTAMENTO');
-  ctx.apiSalvarJustificativa({ id: j.id, nome: j.nome, prazo_dias_uteis: '2', ordem: j.ordem });
+  // POUCOS RECURSOS é prioridade MODERADA; nos testes o prazo dela fica em 2 dias úteis.
+  const moderada = ctx.listar('PRIORIDADES').find((p) => p.tipo === 'SEGUIMENTO' && p.nome === 'MODERADA');
+  ctx.apiSalvarPrioridade({ ...moderada, prazo: '2' });
   ctx.novaExecucao();
   const paciente = ctx.apiSalvarPaciente({ prontuario: '161349', nome: 'Francisca Kelyane' }).dados;
   ctx.novaExecucao();
@@ -127,11 +129,11 @@ function sistemaComAdmissao() {
   };
   const atender = (adm, extra) => {
     ctx.novaExecucao();
-    const r = ctx.apiRegistrarAtendimento({ admissao_id: adm.id, data: '2026-10-14', publico: 'PACIENTE', ...extra });
+    const r = ctx.apiRegistrarAtendimento({ admissao_id: adm.id, data: '2026-10-14', hora: '10:00', publico: 'PACIENTE', ...extra });
     ctx.novaExecucao();
     return r;
   };
-  return { ...sis, j, paciente, unidade, desfecho, admitir, atender };
+  return { ...sis, j, moderada, paciente, unidade, desfecho, admitir, atender };
 }
 
 test('admissão: abre aguardando o 1º atendimento e impede outra admissão aberta do paciente', () => {
@@ -235,8 +237,8 @@ test('desfecho psicológico mantém a admissão; retomada recomeça; saída do h
   assert.equal(nova.dados.outras_admissoes.length, 1);
 });
 
-test('parâmetro do prazo do 1º atendimento e prazo de justificativa recalculam as admissões abertas', () => {
-  const { ctx, admitir, atender, j } = sistemaComAdmissao();
+test('parâmetro do prazo do 1º atendimento e prazo da prioridade de seguimento recalculam as admissões abertas', () => {
+  const { ctx, admitir, atender, moderada } = sistemaComAdmissao();
   const adm = admitir().dados.admissao;
   const p = ctx.listar('PARAMETROS')[0];
   const r = ctx.apiSalvarParametro({ id: p.id, valor: '5' });
@@ -246,7 +248,7 @@ test('parâmetro do prazo do 1º atendimento e prazo de justificativa recalculam
   assert.equal(ctx.apiSalvarParametro({ id: p.id, valor: 'três' }).ok, false);
 
   atender(adm, { data: '2026-10-14' });
-  ctx.apiSalvarJustificativa({ id: j.id, nome: j.nome, prazo_dias_uteis: '5', ordem: j.ordem });
+  ctx.apiSalvarPrioridade({ ...moderada, prazo: '5' });
   ctx.novaExecucao();
   assert.equal(ctx.buscarPorId('ADMISSOES', adm.id).proximo_prazo, '2026-10-21');
   ctx.novaExecucao();
@@ -350,4 +352,77 @@ test('histórico de desfechos: retomada preserva o desfecho anterior; correção
   assert.equal(linhas.find((l) => l.rotulo === 'TOTAL').total, 2);
   assert.equal(linhas.find((l) => l.rotulo === 'ALTA PSICOLÓGICA').total, 1);
   assert.equal(linhas.find((l) => l.rotulo.startsWith('… saídas')).total, 1);
+});
+
+test('solicitação: prazo em horas pela prioridade do motivo, familiar, motivo sem prioridade e compilado', () => {
+  const { ctx, admitir, atender } = sistemaComAdmissao();
+  const motivo = (nome) => ctx.listar('MOTIVOS_SOLICITACAO').find((m) => m.nome === nome);
+  const sol = { tipo_solicitacao: 'EQUIPE', data_solicitacao: '2026-10-19', hora_solicitacao: '8:00' };
+
+  const semNome = admitir({ ...sol, motivo_solicitacao_id: motivo('RISCO DE SUICÍDIO').id, para_quem: 'FAMILIAR' });
+  assert.equal(semNome.ok, false);
+  assert.match(semNome.erro, /familiar/);
+
+  const r = admitir({ ...sol, motivo_solicitacao_id: motivo('RISCO DE SUICÍDIO').id, para_quem: 'FAMILIAR', familiar_nome: 'maria', familiar_parentesco: 'mãe' });
+  assert.equal(r.ok, true, r.erro);
+  const adm = r.dados.admissao;
+  assert.equal(adm.hora_solicitacao, '08:00');
+  assert.equal(adm.familiar_parentesco, 'MÃE');
+  assert.equal(adm.prioridade_solicitacao, 'ALTA');
+  assert.equal(adm.prazo_resposta, '2026-10-20 08:00');
+  assert.equal(adm.resposta_no_prazo, 'NÃO'); // agora = 20/10 12:00, ninguém respondeu
+  assert.equal(adm.aguardando_resposta, true);
+  assert.equal(adm.situacao, 'ATRASADO');
+  assert.equal(adm.motivo_nome, 'RISCO DE SUICÍDIO');
+  assert.equal(adm.prioridade_demanda, 'MODERADA'); // da justificativa POUCOS RECURSOS
+
+  const semHora = atender(adm, { hora: '' });
+  assert.equal(semHora.ok, false);
+  const futuro = atender(adm, { data: '2026-10-20', hora: '13:00' });
+  assert.equal(futuro.ok, false);
+
+  // Solicitação para familiar: atendimento à família responde, mesmo sem o paciente impossibilitado.
+  const resp = atender(adm, { data: '2026-10-19', hora: '10:30', publico: 'FAMÍLIA', quantidade: '1', paciente_impossibilitado: 'NÃO' });
+  assert.equal(resp.ok, true, resp.erro);
+  assert.equal(resp.dados.admissao.momento_resposta, '2026-10-19 10:30');
+  assert.equal(Number(resp.dados.admissao.horas_resposta), 2.5);
+  assert.equal(resp.dados.admissao.resposta_no_prazo, 'SIM');
+  assert.equal(resp.dados.atendimentos[0].hora, '10:30');
+
+  const c = ctx.apiCompilado({ ano: '2026', mes: '10', eixo: 'UNIDADE' }).dados;
+  const sec = c.secoes.find((s) => s.titulo.startsWith('Resposta à solicitação'));
+  assert.equal(sec.linhas.find((l) => l.rotulo === 'NO PRAZO').total, 1);
+  assert.equal(sec.linhas.find((l) => l.rotulo === '% NO PRAZO — ALTA').total, 1);
+  assert.equal(sec.linhas.find((l) => l.rotulo.startsWith('MÉDIA DE HORAS')).total, 2.5);
+  const motivoSec = c.secoes.find((s) => s.titulo === 'Motivo da solicitação');
+  assert.equal(motivoSec.linhas.find((l) => l.rotulo === 'RISCO DE SUICÍDIO').total, 1);
+});
+
+test('motivo sem prioridade fica sem prazo até a coordenação definir; tipos com prazo são configuráveis', () => {
+  const { ctx, admitir, paciente } = sistemaComAdmissao();
+  const triagem = ctx.listar('MOTIVOS_SOLICITACAO').find((m) => m.nome === 'TRIAGEM PSICOLÓGICA');
+  const adm = admitir({ tipo_solicitacao: 'EQUIPE', motivo_solicitacao_id: triagem.id, data_solicitacao: '2026-10-19', hora_solicitacao: '09:00' }).dados.admissao;
+  assert.equal(adm.resposta_no_prazo, 'SEM PRAZO');
+  assert.equal(adm.situacao, 'ATRASADO'); // vem do 1º atendimento (3 dias úteis da admissão), não da solicitação
+
+  const baixa = ctx.listar('PRIORIDADES').find((p) => p.tipo === 'SOLICITAÇÃO' && p.nome === 'BAIXA');
+  const r = ctx.apiSalvarMotivo({ ...triagem, prioridade_id: baixa.id });
+  assert.equal(r.ok, true, r.erro);
+  ctx.novaExecucao();
+  const depois = ctx.buscarPorId('ADMISSOES', adm.id);
+  assert.equal(depois.prioridade_solicitacao, 'BAIXA');
+  assert.equal(depois.prazo_resposta, '2026-10-22 09:00');
+  assert.equal(depois.resposta_no_prazo, 'EM ANDAMENTO');
+
+  const seg = ctx.listar('PRIORIDADES').find((p) => p.tipo === 'SEGUIMENTO');
+  assert.equal(ctx.apiSalvarMotivo({ ...triagem, prioridade_id: seg.id }).ok, false); // prioridade do tipo errado
+
+  ctx.novaExecucao();
+  const p = ctx.listar('PARAMETROS').find((x) => x.chave === 'TIPOS_SOLICITACAO_COM_PRAZO');
+  assert.equal(ctx.apiSalvarParametro({ id: p.id, valor: 'EQUIPE, INVENTADO' }).ok, false);
+  ctx.novaExecucao();
+  assert.equal(ctx.apiSalvarParametro({ id: p.id, valor: 'ESPONTÂNEA' }).ok, true);
+  ctx.novaExecucao();
+  assert.equal(ctx.buscarPorId('ADMISSOES', adm.id).resposta_no_prazo, 'SEM PRAZO'); // EQUIPE saiu da lista
+  void paciente;
 });

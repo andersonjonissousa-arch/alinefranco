@@ -34,6 +34,7 @@ function acumular(linha, chave, valor) {
  * Monta o compilado.
  *
  * @param dados { unidades, admissoes, atendimentos, atividades, reunioes, gerenciais, desfechosRegistrados,
+ *                motivos: [{ id, nome }], prioridades: [{ tipo, nome }],
  *                listas: { NOME_DA_LISTA: [valores] }, desfechos: [{ id, nome }] }
  * @param op { ano, mes (1 a 12, só no mensal), eixo: 'UNIDADE' | 'MES', grupo, setor_id, unidade_id, diasPrimeiro }
  * @return { titulo, subtitulo, colunas: [{ chave, nome }], secoes: [{ titulo, nota, semColunas, linhas }] }
@@ -134,15 +135,25 @@ function montarCompilado(dados, op) {
   lAdm.destaque = true;
   adms.forEach(function (a) { acumular(lAdm, chaveAdm(a), 1); });
   secao('Admissões', [lAdm], { nota: notaServico });
+  var motivos = porId(dados.motivos || []);
+  var prioridades = dados.prioridades || [];
+  var nomesPrioridade = function (tipo) {
+    return prioridades.filter(function (p) { return p.tipo === tipo; }).map(function (p) { return p.nome; });
+  };
+  var comSolicitacao = function (a) { return Boolean(a.motivo_solicitacao_id || a.data_solicitacao); };
   [
-    ['Tipo de solicitação', 'tipo_solicitacao', 'TIPO_SOLICITACAO'],
-    ['Descrição da solicitação', 'descricao_solicitacao', 'DESCRICAO_SOLICITACAO'],
-    ['Prioridade da solicitação', 'prioridade_solicitacao', 'PRIORIDADE_SOLICITACAO'],
-    ['Descrição da demanda', 'descricao_demanda', 'DESCRICAO_DEMANDA'],
-    ['Prioridade da demanda', 'prioridade_demanda', 'PRIORIDADE_DEMANDA'],
-    ['Necessidade de acompanhamento', 'necessidade_acompanhamento', 'NECESSIDADE_ACOMPANHAMENTO']
+    ['Tipo de solicitação', function (a) { return a.tipo_solicitacao; }, listas.TIPO_SOLICITACAO, adms],
+    ['Motivo da solicitação', function (a) { return (motivos[a.motivo_solicitacao_id] || {}).nome; },
+      (dados.motivos || []).map(function (m) { return m.nome; }), adms.filter(comSolicitacao)],
+    ['Prioridade da solicitação', function (a) { return a.prioridade_solicitacao || 'SEM PRIORIDADE'; },
+      nomesPrioridade(TIPOS_PRIORIDADE.solicitacao), adms.filter(comSolicitacao)],
+    ['Solicitação para', function (a) { return a.para_quem; }, PARA_QUEM_SOLICITACAO, adms.filter(comSolicitacao)],
+    ['Descrição da demanda', function (a) { return a.descricao_demanda; }, listas.DESCRICAO_DEMANDA, adms],
+    ['Prioridade da demanda (seguimento)', function (a) { return a.prioridade_demanda || 'SEM PRIORIDADE'; },
+      nomesPrioridade(TIPOS_PRIORIDADE.seguimento), adms],
+    ['Necessidade de acompanhamento', function (a) { return a.necessidade_acompanhamento; }, listas.NECESSIDADE_ACOMPANHAMENTO, adms]
   ].forEach(function (d) {
-    secao(d[0], distribuicao(adms, function (a) { return a[d[1]]; }, listas[d[2]], chaveAdm), { nota: notaServico });
+    secao(d[0], distribuicao(d[3], d[1], d[2], chaveAdm), { nota: notaServico });
   });
 
   // 3. 1º atendimento em até N dias úteis da admissão
@@ -165,6 +176,47 @@ function montarCompilado(dados, op) {
   });
   secao('1º atendimento em até ' + op.diasPrimeiro + ' dia(s) útil(eis) da admissão', [lSim, lNao, lAnd, lNsa, lPct, lMedia], {
     nota: [notaServico, '% no prazo = no prazo ÷ (no prazo + fora do prazo). Em andamento e não se aplica ficam fora da conta.']
+      .filter(Boolean).join(' ')
+  });
+
+  // 3b. Resposta à solicitação no prazo da prioridade (matriz de atendimento), pela data da solicitação.
+  var sols = dados.admissoes.filter(function (a) { return a.resposta_no_prazo && aceita(a.data_solicitacao, a.unidade_id); });
+  var chaveSol = function (a) { return chave(a.data_solicitacao, a.unidade_id); };
+  var rSim = linhaCompilado('NO PRAZO');
+  var rNao = linhaCompilado('FORA DO PRAZO');
+  var rAnd = linhaCompilado('EM ANDAMENTO');
+  var rNsa = linhaCompilado('NÃO SE APLICA (desfecho antes do prazo)');
+  var rSem = linhaCompilado('SEM PRAZO (motivo sem prioridade ou tipo sem prazo)');
+  var rPct = linhaCompilado('% NO PRAZO', 'pct');
+  rPct.num = rSim;
+  rPct.den = [rSim, rNao];
+  rPct.destaque = true;
+  var rMedia = linhaCompilado('MÉDIA DE HORAS ATÉ A RESPOSTA', 'media');
+  var mapaResp = { 'SIM': rSim, 'NÃO': rNao, 'EM ANDAMENTO': rAnd, 'NÃO SE APLICA': rNsa, 'SEM PRAZO': rSem };
+  // % no prazo por prioridade
+  var porPrioridade = {};
+  var ordemPrioridade = nomesPrioridade(TIPOS_PRIORIDADE.solicitacao);
+  ordemPrioridade.forEach(function (n) {
+    var sim = linhaCompilado('');
+    var nao = linhaCompilado('');
+    var pct = linhaCompilado('% NO PRAZO — ' + n, 'pct');
+    pct.num = sim;
+    pct.den = [sim, nao];
+    porPrioridade[n] = { sim: sim, nao: nao, pct: pct };
+  });
+  sols.forEach(function (a) {
+    var c = chaveSol(a);
+    if (mapaResp[a.resposta_no_prazo]) acumular(mapaResp[a.resposta_no_prazo], c, 1);
+    if (a.horas_resposta !== '' && a.horas_resposta !== undefined && a.resposta_no_prazo !== 'SEM PRAZO') {
+      acumular(rMedia, c, Number(a.horas_resposta));
+    }
+    var pp = porPrioridade[a.prioridade_solicitacao];
+    if (pp && a.resposta_no_prazo === 'SIM') acumular(pp.sim, c, 1);
+    if (pp && a.resposta_no_prazo === 'NÃO') acumular(pp.nao, c, 1);
+  });
+  var linhasPorPrioridade = ordemPrioridade.map(function (n) { return porPrioridade[n].pct; });
+  secao('Resposta à solicitação no prazo da prioridade', [rSim, rNao, rAnd, rNsa, rSem, rPct].concat(linhasPorPrioridade).concat([rMedia]), {
+    nota: [notaServico, 'Horas corridas entre a solicitação e o primeiro atendimento depois dela, pela data da solicitação.']
       .filter(Boolean).join(' ')
   });
 

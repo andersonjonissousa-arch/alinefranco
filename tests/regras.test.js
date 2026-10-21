@@ -152,7 +152,6 @@ test('calcularAdmissao: 1º atendimento e retornos, família sem impossibilidade
   assert.equal(c.primeiro_atendimento, '2026-10-14');
   assert.equal(c.primeiro_no_prazo, 'SIM');
   assert.equal(c.dias_ate_primeiro_atendimento, 5);
-  assert.equal(c.dias_resposta, 2);
   assert.equal(c.ultimo_contato, '2026-10-21');
   assert.equal(c.proximo_prazo, '2026-10-23');
 });
@@ -301,4 +300,62 @@ test('montarCompilado: anual por mês e exportação em tabela', () => {
   assert.equal(r.formatarValorCompilado(0.857, 'pct'), '86%');
   assert.equal(r.formatarValorCompilado(2.25, 'media'), '2,3');
   assert.equal(r.formatarValorCompilado(null, 'pct'), '—');
+});
+
+test('horas: normalizar, somar e medir', () => {
+  assert.equal(r.normalizarHora('8:05'), '08:05');
+  assert.equal(r.normalizarHora('23:59:00'), '23:59');
+  assert.equal(r.normalizarHora('24:00'), '');
+  assert.equal(r.normalizarHora('abc'), '');
+  assert.equal(r.dataHora('2026-10-19', '7:30'), '2026-10-19 07:30');
+  assert.equal(r.dataHora('2026-10-19', ''), '2026-10-19 00:00');
+  assert.equal(r.adicionarHoras('2026-10-30 22:00', 24), '2026-10-31 22:00');
+  assert.equal(r.adicionarHoras('2026-12-31 20:00', 72), '2027-01-03 20:00'); // horas corridas, com fim de semana
+  assert.equal(r.horasEntre('2026-10-19 08:00', '2026-10-19 15:30'), 7.5);
+  assert.equal(r.situacaoPrazoHora('2026-10-20 08:00', '2026-10-20 12:00'), 'ATRASADO');
+  assert.equal(r.situacaoPrazoHora('2026-10-20 18:00', '2026-10-20 12:00'), 'VENCE HOJE');
+  assert.equal(r.situacaoPrazoHora('2026-10-21 08:00', '2026-10-20 12:00'), 'NO PRAZO');
+  assert.equal(r.situacaoMaisUrgente('NO PRAZO', 'ATRASADO'), 'ATRASADO');
+  assert.equal(r.situacaoMaisUrgente('', 'VENCE HOJE'), 'VENCE HOJE');
+});
+
+test('validarAdmissao: hora da solicitação e familiar', () => {
+  const base = { paciente_id: 'p', unidade_id: 'u', data_admissao: '2026-10-10' };
+  assert.ok(Array.from(r.validarAdmissao({ ...base, data_solicitacao: '2026-10-12' }, '2026-10-20')).includes('Informe a hora da solicitação.'));
+  assert.ok(Array.from(r.validarAdmissao({ ...base, para_quem: 'FAMILIAR' }, '2026-10-20')).includes('Informe o nome ou o parentesco do familiar.'));
+  assert.deepEqual(Array.from(r.validarAdmissao({ ...base, para_quem: 'FAMILIAR', familiar_parentesco: 'MÃE' }, '2026-10-20')), []);
+});
+
+test('calcularResposta: prazo em horas pela prioridade, paciente x familiar, sem prazo e desfecho', () => {
+  const alta = { nome: 'ALTA', prazo: '24' };
+  const op = { prioridade: alta, tiposComPrazo: ['EQUIPE'], agora: '2026-10-20 12:00' };
+  const sol = { tipo_solicitacao: 'EQUIPE', data_solicitacao: '2026-10-19', hora_solicitacao: '08:00', para_quem: 'PACIENTE' };
+  const fam = { data: '2026-10-19', hora: '09:00', publico: 'FAMÍLIA', paciente_impossibilitado: 'NÃO' };
+  const pac = { data: '2026-10-19', hora: '15:30', publico: 'PACIENTE' };
+  const antes = { data: '2026-10-18', hora: '10:00', publico: 'PACIENTE' };
+
+  const ok = r.calcularResposta(sol, [antes, fam, pac], op);
+  assert.equal(ok.prioridade_solicitacao, 'ALTA');
+  assert.equal(ok.prazo_resposta, '2026-10-20 08:00');
+  assert.equal(ok.momento_resposta, '2026-10-19 15:30'); // família sem impossibilidade e atendimento anterior não contam
+  assert.equal(ok.horas_resposta, 7.5);
+  assert.equal(ok.resposta_no_prazo, 'SIM');
+
+  const paraFamiliar = r.calcularResposta({ ...sol, para_quem: 'FAMILIAR' }, [fam, pac], op);
+  assert.equal(paraFamiliar.momento_resposta, '2026-10-19 09:00');
+  assert.equal(paraFamiliar.horas_resposta, 1);
+
+  const atrasada = r.calcularResposta(sol, [], op);
+  assert.equal(atrasada.resposta_no_prazo, 'NÃO');
+  assert.equal(r.calcularResposta(sol, [], { ...op, agora: '2026-10-19 20:00' }).resposta_no_prazo, 'EM ANDAMENTO');
+  assert.equal(r.calcularResposta({ ...sol, data_desfecho: '2026-10-19' }, [], op).resposta_no_prazo, 'NÃO SE APLICA');
+  const fora = r.calcularResposta(sol, [{ data: '2026-10-20', hora: '09:00', publico: 'PACIENTE' }], op);
+  assert.equal(fora.resposta_no_prazo, 'NÃO');
+  assert.equal(fora.horas_resposta, 25);
+
+  assert.equal(r.calcularResposta({ ...sol, tipo_solicitacao: 'BUSCA ATIVA' }, [pac], op).resposta_no_prazo, 'SEM PRAZO');
+  const semPrioridade = r.calcularResposta(sol, [pac], { ...op, prioridade: null });
+  assert.equal(semPrioridade.resposta_no_prazo, 'SEM PRAZO');
+  assert.equal(semPrioridade.horas_resposta, 7.5); // o tempo é medido mesmo sem prazo
+  assert.equal(r.calcularResposta({ ...sol, hora_solicitacao: '' }, [pac], op).resposta_no_prazo, '');
 });

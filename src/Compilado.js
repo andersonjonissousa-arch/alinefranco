@@ -29,6 +29,8 @@ function gerarCompilado(f) {
     reunioes: listar('REUNIOES'),
     gerenciais: listar('GERENCIAIS'),
     desfechosRegistrados: listar('DESFECHOS_REGISTRADOS'),
+    motivos: listar('MOTIVOS_SOLICITACAO').slice().sort(porOrdem),
+    prioridades: listar('PRIORIDADES').filter(function (p) { return p.ativo !== 'NÃO'; }).sort(porOrdem),
     listas: listas,
     desfechos: listar('DESFECHOS').slice().sort(porOrdem)
   }, opcoesCompilado(f));

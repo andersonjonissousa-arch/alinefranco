@@ -36,6 +36,11 @@ function dadosDeCadastro(incluirInativos) {
     unidades: unidades,
     profissionais: profissionais,
     justificativas: listar('JUSTIFICATIVAS').filter(ativo).sort(porOrdem),
+    motivos: listar('MOTIVOS_SOLICITACAO').filter(ativo).sort(porOrdem),
+    prioridades: listar('PRIORIDADES').filter(ativo).sort(porOrdem),
+    tipos_prioridade: TIPOS_PRIORIDADE,
+    para_quem: PARA_QUEM_SOLICITACAO,
+    agora: agora(),
     desfechos: listar('DESFECHOS').filter(ativo).sort(porOrdem),
     parametros: listar('PARAMETROS'),
     status_admissao: STATUS_ADMISSAO,
@@ -145,20 +150,72 @@ function apiSalvarItemLista(dados) {
   });
 }
 
+function validarPrioridadeDoTipo(prioridadeId, tipo) {
+  if (!prioridadeId) return '';
+  var p = buscarPorId('PRIORIDADES', prioridadeId);
+  if (!p || p.tipo !== tipo) throw new Error('Prioridade inválida.');
+  return p.id;
+}
+
+/** Justificativa de acompanhamento ligada a uma prioridade de seguimento (sem prioridade = sem prazo). */
 function apiSalvarJustificativa(dados) {
   return responder(function () {
     exigirCoordenacao();
-    var prazo = String(dados.prazo_dias_uteis === undefined ? '' : dados.prazo_dias_uteis).trim();
-    if (prazo !== '' && !/^\d+$/.test(prazo)) throw new Error('O prazo deve ser um número inteiro de dias úteis.');
     var item = {
       nome: formatarNome(dados.nome),
-      prazo_dias_uteis: prazo,
+      prioridade_id: validarPrioridadeDoTipo(dados.prioridade_id, TIPOS_PRIORIDADE.seguimento),
       ordem: Number(dados.ordem) || 99,
       ativo: dados.ativo === 'NÃO' ? 'NÃO' : 'SIM'
     };
     if (!item.nome) throw new Error('Informe a justificativa.');
     if (dados.id) atualizar('JUSTIFICATIVAS', dados.id, item);
     else inserir('JUSTIFICATIVAS', item);
+    recalcularAdmissoesAbertas();
+    return dadosDeCadastro(true);
+  });
+}
+
+/** Motivo da solicitação ligado a uma prioridade de solicitação (sem prioridade = sem prazo). */
+function apiSalvarMotivo(dados) {
+  return responder(function () {
+    exigirCoordenacao();
+    var item = {
+      nome: formatarNome(dados.nome),
+      prioridade_id: validarPrioridadeDoTipo(dados.prioridade_id, TIPOS_PRIORIDADE.solicitacao),
+      ordem: Number(dados.ordem) || 99,
+      ativo: dados.ativo === 'NÃO' ? 'NÃO' : 'SIM'
+    };
+    if (!item.nome) throw new Error('Informe o motivo.');
+    if (dados.id) atualizar('MOTIVOS_SOLICITACAO', dados.id, item);
+    else inserir('MOTIVOS_SOLICITACAO', item);
+    recalcularAdmissoesAbertas();
+    return dadosDeCadastro(true);
+  });
+}
+
+/** Prioridade de solicitação (prazo em horas) ou de seguimento (prazo em dias úteis). */
+function apiSalvarPrioridade(dados) {
+  return responder(function () {
+    exigirCoordenacao();
+    var tipos = [TIPOS_PRIORIDADE.solicitacao, TIPOS_PRIORIDADE.seguimento];
+    var atual = dados.id ? buscarPorId('PRIORIDADES', dados.id) : null;
+    var tipo = atual ? atual.tipo : dados.tipo;
+    if (tipos.indexOf(tipo) === -1) throw new Error('Escolha se a prioridade é de solicitação ou de seguimento.');
+    var prazo = String(dados.prazo === undefined ? '' : dados.prazo).trim();
+    if (!/^\d+$/.test(prazo) || Number(prazo) < 1) {
+      throw new Error(tipo === TIPOS_PRIORIDADE.solicitacao ? 'O prazo deve ser um número inteiro de horas.' : 'O prazo deve ser um número inteiro de dias úteis.');
+    }
+    var item = {
+      tipo: tipo,
+      nome: formatarNome(dados.nome),
+      prazo: prazo,
+      periodicidade: String(dados.periodicidade || '').trim(),
+      ordem: Number(dados.ordem) || 99,
+      ativo: dados.ativo === 'NÃO' ? 'NÃO' : 'SIM'
+    };
+    if (!item.nome) throw new Error('Informe o nome da prioridade.');
+    if (atual) atualizar('PRIORIDADES', atual.id, item);
+    else inserir('PRIORIDADES', item);
     recalcularAdmissoesAbertas();
     return dadosDeCadastro(true);
   });
@@ -218,6 +275,12 @@ function apiSalvarParametro(dados) {
     var valor = String(dados.valor === undefined ? '' : dados.valor).trim();
     if (param.chave === 'PRAZO_PRIMEIRO_ATENDIMENTO_DIAS_UTEIS' && !/^\d+$/.test(valor)) {
       throw new Error('O prazo deve ser um número inteiro de dias úteis.');
+    }
+    if (param.chave === 'TIPOS_SOLICITACAO_COM_PRAZO') {
+      var tipos = listar('LISTAS').filter(function (i) { return i.lista === 'TIPO_SOLICITACAO'; }).map(function (i) { return i.valor; });
+      var escolhidos = valor.split(',').map(function (t) { return t.trim(); }).filter(Boolean);
+      escolhidos.forEach(function (t) { if (tipos.indexOf(t) === -1) throw new Error('Tipo de solicitação desconhecido: ' + t + '.'); });
+      valor = escolhidos.join(',');
     }
     atualizar('PARAMETROS', param.id, { valor: valor });
     recalcularAdmissoesAbertas();
