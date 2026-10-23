@@ -84,6 +84,8 @@ function semearListas() {
     });
     var aba = abaDaTabela('LISTAS');
     aba.getRange(aba.getLastRow() + 1, 1, linhas.length, linhas[0].length).setValues(linhas);
+    // Gravação direta na planilha: a próxima leitura pela API espera ela chegar (lerPelaApi, em Db.js).
+    _pendenteNaPlanilha = true;
     delete _cacheTabelas.LISTAS;
   });
 }

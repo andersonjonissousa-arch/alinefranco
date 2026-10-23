@@ -6,7 +6,8 @@
 var APP = {
   nome: 'Gestão da Psicologia',
   propDbId: 'DB_ID',
-  fusoHorario: 'America/Fortaleza'
+  fusoHorario: 'America/Fortaleza',
+  inicioIndicadorPrimeiro: '2026-11-03'
 };
 
 /**
@@ -19,7 +20,7 @@ var TABELAS = {
   PROFISSIONAIS: ['id', 'nome', 'email', 'categoria', 'perfil', 'ativo'],
   LISTAS: ['id', 'lista', 'valor', 'ordem', 'ativo'],
   // Prioridades das duas matrizes, cada uma com seu prazo:
-  // tipo SOLICITAÇÃO → prazo em horas corridas para responder à solicitação;
+  // tipo SOLICITAÇÃO → prazo em horas úteis para responder à solicitação;
   // tipo SEGUIMENTO → prazo em dias úteis entre um atendimento e o próximo.
   PRIORIDADES: ['id', 'tipo', 'nome', 'prazo', 'periodicidade', 'ordem', 'ativo'],
   // Motivos da solicitação (matriz de atendimento). Sem prioridade = sem prazo de resposta.
@@ -38,11 +39,11 @@ var TABELAS = {
   ],
   // Parâmetros do sistema, como o prazo do 1º atendimento após a admissão e os tipos de solicitação com prazo.
   PARAMETROS: ['id', 'chave', 'valor', 'descricao'],
-  PACIENTES: ['id', 'prontuario', 'nome', 'criado_em', 'atualizado_em'],
+  PACIENTES: ['id', 'prontuario', 'nome', 'criado_em', 'atualizado_em', 'sexo', 'data_nascimento'],
   // Cada entrada do paciente no hospital. Uma nova admissão só depois que a anterior foi encerrada.
   ADMISSOES: [
     'id', 'paciente_id', 'data_admissao', 'unidade_id',
-    // Solicitação (para o paciente ou para um familiar, com nome e parentesco)
+    // Solicitação antiga: colunas preservadas para compatibilidade; novos registros em INTERCONSULTAS.
     'tipo_solicitacao', 'motivo_solicitacao_id', 'data_solicitacao', 'hora_solicitacao',
     'para_quem', 'familiar_nome', 'familiar_parentesco',
     // Avaliação (o 1º atendimento)
@@ -52,9 +53,18 @@ var TABELAS = {
     // Calculados pelo sistema ao salvar
     'status', 'prazo_primeiro_atendimento', 'primeiro_atendimento', 'primeiro_no_prazo',
     'dias_ate_primeiro_atendimento', 'ultimo_contato', 'proximo_prazo', 'prioridade_demanda',
-    // Resposta à solicitação, em horas corridas, pela prioridade do motivo
+    // Resposta à solicitação, em horas úteis, pela prioridade do motivo
     'prioridade_solicitacao', 'prazo_resposta', 'momento_resposta', 'horas_resposta', 'resposta_no_prazo',
     'criado_por', 'criado_em', 'atualizado_em'
+  ],
+  // Transferências internas: a unidade da admissão é preservada; a última transferência define a localização atual.
+  TRANSFERENCIAS: ['id', 'admissao_id', 'origem_unidade_id', 'destino_unidade_id', 'data', 'hora', 'criado_por', 'criado_em'],
+  // Solicitações independentes: várias por internação, com prazo próprio e resposta vinculada.
+  INTERCONSULTAS: [
+    'id', 'admissao_id', 'unidade_id', 'tipo_solicitacao', 'motivo_solicitacao_id',
+    'data_solicitacao', 'hora_solicitacao', 'para_quem', 'familiar_nome', 'familiar_parentesco',
+    'prioridade_solicitacao', 'prazo_horas', 'tem_prazo', 'atendimento_id', 'origem', 'observacoes',
+    'criado_por', 'criado_em', 'excluido_em', 'excluido_por'
   ],
   // Cada atendimento: ao paciente ou à família (com quantas pessoas), por quem, em que unidade e se foi no prazo.
   // tipo_prazo: PRIMEIRO (1º atendimento da admissão) ou RETORNO.
@@ -62,7 +72,7 @@ var TABELAS = {
   ATENDIMENTOS: [
     'id', 'admissao_id', 'unidade_id', 'data', 'hora', 'publico', 'quantidade', 'paciente_impossibilitado', 'conta_prazo',
     'profissional_id', 'categoria', 'justificativa_id', 'tipo_prazo', 'prazo_limite', 'no_prazo', 'observacao',
-    'criado_por', 'criado_em'
+    'criado_por', 'criado_em', 'tipo_atendimento'
   ],
   // Atividades assistenciais da admissão (ficha de admissão, discussão de caso, visitas...).
   ATIVIDADES: ['id', 'admissao_id', 'unidade_id', 'data', 'tipo', 'quantidade', 'profissional_id', 'categoria', 'criado_por', 'criado_em'],
@@ -76,6 +86,8 @@ var TABELAS = {
 var CATEGORIAS_PROFISSIONAL = ['PROFISSIONAL DA EMPRESA', 'RESIDENTE', 'ESTAGIÁRIO'];
 var CATEGORIA_EMPRESA = 'PROFISSIONAL DA EMPRESA';
 var PERFIS = ['COORDENAÇÃO', 'PROFISSIONAL'];
+var TIPOS_ATENDIMENTO = ['INTERCONSULTA', 'BUSCA ATIVA', 'ESPONTÂNEA', 'SEGUIMENTO PSICOLÓGICO'];
+var SEXOS_PACIENTE = ['FEMININO', 'MASCULINO', 'INTERSEXO'];
 var PUBLICOS_ATENDIMENTO = ['PACIENTE', 'FAMÍLIA'];
 var PARA_QUEM_SOLICITACAO = ['PACIENTE', 'FAMILIAR'];
 var TIPOS_PRIORIDADE = { solicitacao: 'SOLICITAÇÃO', seguimento: 'SEGUIMENTO' };
@@ -120,9 +132,9 @@ var PARAMETROS_INICIAIS = [
 
 /** Prioridades das matrizes do HGWA: [tipo, nome, prazo, periodicidade]. */
 var PRIORIDADES_INICIAIS = [
-  ['SOLICITAÇÃO', 'ALTA', '24', 'Atender em até 24h'],
-  ['SOLICITAÇÃO', 'MODERADA', '48', 'Atender em até 48h'],
-  ['SOLICITAÇÃO', 'BAIXA', '72', 'Atender em até 72h'],
+  ['SOLICITAÇÃO', 'ALTA', '24', 'Atender em até 24h úteis'],
+  ['SOLICITAÇÃO', 'MODERADA', '48', 'Atender em até 48h úteis'],
+  ['SOLICITAÇÃO', 'BAIXA', '72', 'Atender em até 72h úteis'],
   ['SEGUIMENTO', 'ALTA', '2', '3x por semana ou mais'],
   ['SEGUIMENTO', 'MODERADA', '3', '2x por semana ou mais'],
   ['SEGUIMENTO', 'BAIXA', '5', '1x por semana ou mais'],

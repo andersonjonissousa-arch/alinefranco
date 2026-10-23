@@ -6,7 +6,7 @@ const path = require('node:path');
 const raiz = path.join(__dirname, '..');
 const src = path.join(raiz, 'src');
 const dist = path.join(raiz, 'dist');
-const ordem = ['Config.js', 'Regras.js', 'Indicadores.js', 'Db.js', 'Setup.js', 'Main.js', 'Api.js', 'Admissoes.js', 'Compilado.js', 'Gestao.js', 'Autoteste.js', 'Desempenho.js'];
+const ordem = ['Config.js', 'Regras.js', 'Indicadores.js', 'PainelIndicadores.js', 'Db.js', 'Setup.js', 'Main.js', 'Api.js', 'Admissoes.js', 'Transferencias.js', 'Interconsultas.js', 'Compilado.js', 'Gestao.js', 'Autoteste.js', 'Desempenho.js'];
 
 const presentes = fs.readdirSync(src).filter((f) => f.endsWith('.js'));
 const faltando = presentes.filter((f) => !ordem.includes(f));

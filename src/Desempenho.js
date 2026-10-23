@@ -75,7 +75,7 @@ function medirDesempenho() {
     var n = 0;
     comparar('Registrar atendimento', function () {
       n++;
-      return apiRegistrarAtendimento({ admissao_id: adm.id, data: adicionarDias(hojeIso, -1), hora: '08:' + (n < 10 ? '0' : '') + n, publico: 'PACIENTE' });
+      return apiRegistrarAtendimento({ tipo_atendimento: 'BUSCA ATIVA', admissao_id: adm.id, data: adicionarDias(hojeIso, -1), hora: '08:' + (n < 10 ? '0' : '') + n, publico: 'PACIENTE' });
     });
     comparar('Salvar admissão', function () {
       n++;

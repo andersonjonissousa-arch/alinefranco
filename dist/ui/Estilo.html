@@ -114,6 +114,12 @@
   .indicador.prazo .numero { color: var(--ok); }
   button.indicador { font: inherit; text-align: left; cursor: pointer; }
   button.indicador:hover { border-color: var(--primaria); background: #f7fafd; }
+  .painel-indicadores { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr)); gap: 16px; }
+  .percentual-indicador { font-size: 38px; font-weight: 700; color: var(--primaria); font-variant-numeric: tabular-nums; }
+  .barra-indicador { display: flex; height: 12px; overflow: hidden; border-radius: 6px; margin: 16px 0; background: #eef2f6; }
+  .barra-indicador .cumprido { background: var(--ok); }
+  .barra-indicador .atrasado { background: var(--perigo); }
+  .barra-indicador .aguardando { background: #e6b84b; }
   .selo.espaco { margin-left: 8px; vertical-align: middle; }
 
   .cabecalho-caso { display: flex; flex-wrap: wrap; gap: 8px 24px; align-items: center; }

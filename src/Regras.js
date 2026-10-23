@@ -92,7 +92,7 @@ var ROTULOS_DATA_ADMISSAO = {
 };
 
 /** Lista de erros de preenchimento da admissão. Vazia quando está tudo certo. */
-function validarAdmissao(adm, hojeIso) {
+function validarAdmissao(adm, hojeIso, permitirJustificativaPendente) {
   var erros = [];
   if (!adm.paciente_id) erros.push('Informe o paciente.');
   if (!normalizarData(adm.data_admissao)) erros.push('Informe a data de admissão no hospital.');
@@ -117,7 +117,7 @@ function validarAdmissao(adm, hojeIso) {
   if (adm.desfecho_id && !temData) erros.push('Informe a data do desfecho.');
   if (temData && !adm.desfecho_id) erros.push('Informe o desfecho.');
   var acompanha = adm.necessidade_acompanhamento && SEM_ACOMPANHAMENTO.indexOf(adm.necessidade_acompanhamento) === -1;
-  if (acompanha && !adm.justificativa_id) erros.push('Informe a justificativa do acompanhamento.');
+  if (acompanha && !adm.justificativa_id && !permitirJustificativaPendente) erros.push('Informe a justificativa do acompanhamento.');
   return erros;
 }
 
@@ -347,15 +347,52 @@ function horasEntre(inicio, fim) {
   return Math.round((b - a) / 360000) / 10;
 }
 
+/** Horas úteis: todos os minutos dos dias úteis, sem expediente diário presumido. */
+function adicionarHorasUteis(inicio, horas, feriados) {
+  var t = dataHoraParaUtc(inicio), n = Number(horas);
+  if (!isFinite(t) || !isFinite(n) || n < 0) return '';
+  var minutos = Math.round(n * 60), dia = inicio.slice(0, 10);
+  var minuto = Number(inicio.slice(11, 13)) * 60 + Number(inicio.slice(14, 16));
+  while (true) {
+    if (!ehDiaUtil(dia, feriados || {})) {
+      dia = adicionarDias(dia, 1);
+      minuto = 0;
+      continue;
+    }
+    var disponivel = 1440 - minuto;
+    if (minutos < disponivel) {
+      minuto += minutos;
+      return dia + ' ' + doisDigitos(Math.floor(minuto / 60)) + ':' + doisDigitos(minuto % 60);
+    }
+    minutos -= disponivel;
+    dia = adicionarDias(dia, 1);
+    minuto = 0;
+  }
+}
+
+/** Mede horas úteis, inclusive em sentido negativo para mostrar o atraso. */
+function horasUteisEntre(inicio, fim, feriados) {
+  var a = dataHoraParaUtc(inicio), b = dataHoraParaUtc(fim);
+  if (!isFinite(a) || !isFinite(b)) return '';
+  if (b < a) return -horasUteisEntre(fim, inicio, feriados);
+  var dia = inicio.slice(0, 10), total = 0;
+  while (paraUtc(dia) < b) {
+    var proximo = adicionarDias(dia, 1);
+    if (ehDiaUtil(dia, feriados || {})) total += Math.max(0, Math.min(b, paraUtc(proximo)) - Math.max(a, paraUtc(dia)));
+    dia = proximo;
+  }
+  return Math.round(total / 360000) / 10;
+}
+
 /**
  * Resposta à solicitação (matriz de atendimento): o primeiro atendimento depois da solicitação
- * tem que acontecer em até N horas corridas, conforme a prioridade do motivo.
+ * tem que acontecer em até N horas úteis, conforme a prioridade do motivo.
  * Solicitação para o paciente: vale atendimento ao paciente, ou à família com o paciente impossibilitado.
  * Solicitação para um familiar: vale atendimento ao paciente ou à família.
  *
  * @param adm a admissão
  * @param atendimentos atendimentos da admissão (data, hora, publico, paciente_impossibilitado)
- * @param op { prioridade: { nome, prazo } ou null, tiposComPrazo: [tipos], agora: 'AAAA-MM-DD HH:MM' }
+ * @param op { prioridade: { nome, prazo } ou null, tiposComPrazo: [tipos], agora: 'AAAA-MM-DD HH:MM', feriados: conjunto }
  * @return { prioridade_solicitacao, prazo_resposta, momento_resposta, horas_resposta, resposta_no_prazo }
  *   resposta_no_prazo: SIM, NÃO, EM ANDAMENTO, NÃO SE APLICA (desfecho antes do prazo sem resposta),
  *   SEM PRAZO (tipo ou motivo sem prazo) ou '' (sem solicitação).
@@ -378,7 +415,7 @@ function calcularResposta(adm, atendimentos, op) {
     if (vale && (!resposta || dh < resposta)) resposta = dh;
   });
 
-  var prazo = temPrazo ? adicionarHoras(inicio, horasPrazo) : '';
+  var prazo = temPrazo ? adicionarHorasUteis(inicio, horasPrazo, op.feriados) : '';
   var situacao;
   if (!temPrazo) situacao = 'SEM PRAZO';
   else if (resposta) situacao = resposta <= prazo ? 'SIM' : 'NÃO';
@@ -392,7 +429,7 @@ function calcularResposta(adm, atendimentos, op) {
     prioridade_solicitacao: prioridade ? prioridade.nome : '',
     prazo_resposta: prazo,
     momento_resposta: resposta,
-    horas_resposta: resposta ? horasEntre(inicio, resposta) : '',
+    horas_resposta: resposta ? horasUteisEntre(inicio, resposta, op.feriados) : '',
     resposta_no_prazo: situacao
   };
 }
@@ -421,7 +458,7 @@ function situacaoMaisUrgente(a, b) {
  *            situacao (se pendente): ATRASADO | VENCE HOJE | NO PRAZO, resultado (se cumprido): NO PRAZO | FORA DO PRAZO }
  * proximo: o prazo pendente mais urgente ({ tipo, prazo, situacao }) ou null.
  */
-function prazosDaAdmissao(adm, hojeIso, agoraDh) {
+function prazosDaAdmissao(adm, hojeIso, agoraDh, feriados) {
   var ativa = adm.status !== STATUS_ADMISSAO.encerrada && !adm.desfecho_id;
 
   var primeiro = { prazo: adm.prazo_primeiro_atendimento || '' };
@@ -451,7 +488,7 @@ function prazosDaAdmissao(adm, hojeIso, agoraDh) {
   } else if (ativa) {
     interconsulta.estado = 'PENDENTE';
     interconsulta.situacao = situacaoPrazoHora(interconsulta.prazo, agoraDh);
-    interconsulta.horas_restantes = horasEntre(agoraDh, interconsulta.prazo);
+    interconsulta.horas_restantes = horasUteisEntre(agoraDh, interconsulta.prazo, feriados);
   } else {
     interconsulta.estado = 'NÃO REALIZADO';
     interconsulta.resultado = 'FORA DO PRAZO';

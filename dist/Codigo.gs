@@ -9,7 +9,8 @@
 var APP = {
   nome: 'Gestão da Psicologia',
   propDbId: 'DB_ID',
-  fusoHorario: 'America/Fortaleza'
+  fusoHorario: 'America/Fortaleza',
+  inicioIndicadorPrimeiro: '2026-11-03'
 };
 
 /**
@@ -22,7 +23,7 @@ var TABELAS = {
   PROFISSIONAIS: ['id', 'nome', 'email', 'categoria', 'perfil', 'ativo'],
   LISTAS: ['id', 'lista', 'valor', 'ordem', 'ativo'],
   // Prioridades das duas matrizes, cada uma com seu prazo:
-  // tipo SOLICITAÇÃO → prazo em horas corridas para responder à solicitação;
+  // tipo SOLICITAÇÃO → prazo em horas úteis para responder à solicitação;
   // tipo SEGUIMENTO → prazo em dias úteis entre um atendimento e o próximo.
   PRIORIDADES: ['id', 'tipo', 'nome', 'prazo', 'periodicidade', 'ordem', 'ativo'],
   // Motivos da solicitação (matriz de atendimento). Sem prioridade = sem prazo de resposta.
@@ -41,11 +42,11 @@ var TABELAS = {
   ],
   // Parâmetros do sistema, como o prazo do 1º atendimento após a admissão e os tipos de solicitação com prazo.
   PARAMETROS: ['id', 'chave', 'valor', 'descricao'],
-  PACIENTES: ['id', 'prontuario', 'nome', 'criado_em', 'atualizado_em'],
+  PACIENTES: ['id', 'prontuario', 'nome', 'criado_em', 'atualizado_em', 'sexo', 'data_nascimento'],
   // Cada entrada do paciente no hospital. Uma nova admissão só depois que a anterior foi encerrada.
   ADMISSOES: [
     'id', 'paciente_id', 'data_admissao', 'unidade_id',
-    // Solicitação (para o paciente ou para um familiar, com nome e parentesco)
+    // Solicitação antiga: colunas preservadas para compatibilidade; novos registros em INTERCONSULTAS.
     'tipo_solicitacao', 'motivo_solicitacao_id', 'data_solicitacao', 'hora_solicitacao',
     'para_quem', 'familiar_nome', 'familiar_parentesco',
     // Avaliação (o 1º atendimento)
@@ -55,9 +56,18 @@ var TABELAS = {
     // Calculados pelo sistema ao salvar
     'status', 'prazo_primeiro_atendimento', 'primeiro_atendimento', 'primeiro_no_prazo',
     'dias_ate_primeiro_atendimento', 'ultimo_contato', 'proximo_prazo', 'prioridade_demanda',
-    // Resposta à solicitação, em horas corridas, pela prioridade do motivo
+    // Resposta à solicitação, em horas úteis, pela prioridade do motivo
     'prioridade_solicitacao', 'prazo_resposta', 'momento_resposta', 'horas_resposta', 'resposta_no_prazo',
     'criado_por', 'criado_em', 'atualizado_em'
+  ],
+  // Transferências internas: a unidade da admissão é preservada; a última transferência define a localização atual.
+  TRANSFERENCIAS: ['id', 'admissao_id', 'origem_unidade_id', 'destino_unidade_id', 'data', 'hora', 'criado_por', 'criado_em'],
+  // Solicitações independentes: várias por internação, com prazo próprio e resposta vinculada.
+  INTERCONSULTAS: [
+    'id', 'admissao_id', 'unidade_id', 'tipo_solicitacao', 'motivo_solicitacao_id',
+    'data_solicitacao', 'hora_solicitacao', 'para_quem', 'familiar_nome', 'familiar_parentesco',
+    'prioridade_solicitacao', 'prazo_horas', 'tem_prazo', 'atendimento_id', 'origem', 'observacoes',
+    'criado_por', 'criado_em', 'excluido_em', 'excluido_por'
   ],
   // Cada atendimento: ao paciente ou à família (com quantas pessoas), por quem, em que unidade e se foi no prazo.
   // tipo_prazo: PRIMEIRO (1º atendimento da admissão) ou RETORNO.
@@ -65,7 +75,7 @@ var TABELAS = {
   ATENDIMENTOS: [
     'id', 'admissao_id', 'unidade_id', 'data', 'hora', 'publico', 'quantidade', 'paciente_impossibilitado', 'conta_prazo',
     'profissional_id', 'categoria', 'justificativa_id', 'tipo_prazo', 'prazo_limite', 'no_prazo', 'observacao',
-    'criado_por', 'criado_em'
+    'criado_por', 'criado_em', 'tipo_atendimento'
   ],
   // Atividades assistenciais da admissão (ficha de admissão, discussão de caso, visitas...).
   ATIVIDADES: ['id', 'admissao_id', 'unidade_id', 'data', 'tipo', 'quantidade', 'profissional_id', 'categoria', 'criado_por', 'criado_em'],
@@ -79,6 +89,8 @@ var TABELAS = {
 var CATEGORIAS_PROFISSIONAL = ['PROFISSIONAL DA EMPRESA', 'RESIDENTE', 'ESTAGIÁRIO'];
 var CATEGORIA_EMPRESA = 'PROFISSIONAL DA EMPRESA';
 var PERFIS = ['COORDENAÇÃO', 'PROFISSIONAL'];
+var TIPOS_ATENDIMENTO = ['INTERCONSULTA', 'BUSCA ATIVA', 'ESPONTÂNEA', 'SEGUIMENTO PSICOLÓGICO'];
+var SEXOS_PACIENTE = ['FEMININO', 'MASCULINO', 'INTERSEXO'];
 var PUBLICOS_ATENDIMENTO = ['PACIENTE', 'FAMÍLIA'];
 var PARA_QUEM_SOLICITACAO = ['PACIENTE', 'FAMILIAR'];
 var TIPOS_PRIORIDADE = { solicitacao: 'SOLICITAÇÃO', seguimento: 'SEGUIMENTO' };
@@ -123,9 +135,9 @@ var PARAMETROS_INICIAIS = [
 
 /** Prioridades das matrizes do HGWA: [tipo, nome, prazo, periodicidade]. */
 var PRIORIDADES_INICIAIS = [
-  ['SOLICITAÇÃO', 'ALTA', '24', 'Atender em até 24h'],
-  ['SOLICITAÇÃO', 'MODERADA', '48', 'Atender em até 48h'],
-  ['SOLICITAÇÃO', 'BAIXA', '72', 'Atender em até 72h'],
+  ['SOLICITAÇÃO', 'ALTA', '24', 'Atender em até 24h úteis'],
+  ['SOLICITAÇÃO', 'MODERADA', '48', 'Atender em até 48h úteis'],
+  ['SOLICITAÇÃO', 'BAIXA', '72', 'Atender em até 72h úteis'],
   ['SEGUIMENTO', 'ALTA', '2', '3x por semana ou mais'],
   ['SEGUIMENTO', 'MODERADA', '3', '2x por semana ou mais'],
   ['SEGUIMENTO', 'BAIXA', '5', '1x por semana ou mais'],
@@ -273,7 +285,7 @@ var ROTULOS_DATA_ADMISSAO = {
 };
 
 /** Lista de erros de preenchimento da admissão. Vazia quando está tudo certo. */
-function validarAdmissao(adm, hojeIso) {
+function validarAdmissao(adm, hojeIso, permitirJustificativaPendente) {
   var erros = [];
   if (!adm.paciente_id) erros.push('Informe o paciente.');
   if (!normalizarData(adm.data_admissao)) erros.push('Informe a data de admissão no hospital.');
@@ -298,7 +310,7 @@ function validarAdmissao(adm, hojeIso) {
   if (adm.desfecho_id && !temData) erros.push('Informe a data do desfecho.');
   if (temData && !adm.desfecho_id) erros.push('Informe o desfecho.');
   var acompanha = adm.necessidade_acompanhamento && SEM_ACOMPANHAMENTO.indexOf(adm.necessidade_acompanhamento) === -1;
-  if (acompanha && !adm.justificativa_id) erros.push('Informe a justificativa do acompanhamento.');
+  if (acompanha && !adm.justificativa_id && !permitirJustificativaPendente) erros.push('Informe a justificativa do acompanhamento.');
   return erros;
 }
 
@@ -528,15 +540,52 @@ function horasEntre(inicio, fim) {
   return Math.round((b - a) / 360000) / 10;
 }
 
+/** Horas úteis: todos os minutos dos dias úteis, sem expediente diário presumido. */
+function adicionarHorasUteis(inicio, horas, feriados) {
+  var t = dataHoraParaUtc(inicio), n = Number(horas);
+  if (!isFinite(t) || !isFinite(n) || n < 0) return '';
+  var minutos = Math.round(n * 60), dia = inicio.slice(0, 10);
+  var minuto = Number(inicio.slice(11, 13)) * 60 + Number(inicio.slice(14, 16));
+  while (true) {
+    if (!ehDiaUtil(dia, feriados || {})) {
+      dia = adicionarDias(dia, 1);
+      minuto = 0;
+      continue;
+    }
+    var disponivel = 1440 - minuto;
+    if (minutos < disponivel) {
+      minuto += minutos;
+      return dia + ' ' + doisDigitos(Math.floor(minuto / 60)) + ':' + doisDigitos(minuto % 60);
+    }
+    minutos -= disponivel;
+    dia = adicionarDias(dia, 1);
+    minuto = 0;
+  }
+}
+
+/** Mede horas úteis, inclusive em sentido negativo para mostrar o atraso. */
+function horasUteisEntre(inicio, fim, feriados) {
+  var a = dataHoraParaUtc(inicio), b = dataHoraParaUtc(fim);
+  if (!isFinite(a) || !isFinite(b)) return '';
+  if (b < a) return -horasUteisEntre(fim, inicio, feriados);
+  var dia = inicio.slice(0, 10), total = 0;
+  while (paraUtc(dia) < b) {
+    var proximo = adicionarDias(dia, 1);
+    if (ehDiaUtil(dia, feriados || {})) total += Math.max(0, Math.min(b, paraUtc(proximo)) - Math.max(a, paraUtc(dia)));
+    dia = proximo;
+  }
+  return Math.round(total / 360000) / 10;
+}
+
 /**
  * Resposta à solicitação (matriz de atendimento): o primeiro atendimento depois da solicitação
- * tem que acontecer em até N horas corridas, conforme a prioridade do motivo.
+ * tem que acontecer em até N horas úteis, conforme a prioridade do motivo.
  * Solicitação para o paciente: vale atendimento ao paciente, ou à família com o paciente impossibilitado.
  * Solicitação para um familiar: vale atendimento ao paciente ou à família.
  *
  * @param adm a admissão
  * @param atendimentos atendimentos da admissão (data, hora, publico, paciente_impossibilitado)
- * @param op { prioridade: { nome, prazo } ou null, tiposComPrazo: [tipos], agora: 'AAAA-MM-DD HH:MM' }
+ * @param op { prioridade: { nome, prazo } ou null, tiposComPrazo: [tipos], agora: 'AAAA-MM-DD HH:MM', feriados: conjunto }
  * @return { prioridade_solicitacao, prazo_resposta, momento_resposta, horas_resposta, resposta_no_prazo }
  *   resposta_no_prazo: SIM, NÃO, EM ANDAMENTO, NÃO SE APLICA (desfecho antes do prazo sem resposta),
  *   SEM PRAZO (tipo ou motivo sem prazo) ou '' (sem solicitação).
@@ -559,7 +608,7 @@ function calcularResposta(adm, atendimentos, op) {
     if (vale && (!resposta || dh < resposta)) resposta = dh;
   });
 
-  var prazo = temPrazo ? adicionarHoras(inicio, horasPrazo) : '';
+  var prazo = temPrazo ? adicionarHorasUteis(inicio, horasPrazo, op.feriados) : '';
   var situacao;
   if (!temPrazo) situacao = 'SEM PRAZO';
   else if (resposta) situacao = resposta <= prazo ? 'SIM' : 'NÃO';
@@ -573,7 +622,7 @@ function calcularResposta(adm, atendimentos, op) {
     prioridade_solicitacao: prioridade ? prioridade.nome : '',
     prazo_resposta: prazo,
     momento_resposta: resposta,
-    horas_resposta: resposta ? horasEntre(inicio, resposta) : '',
+    horas_resposta: resposta ? horasUteisEntre(inicio, resposta, op.feriados) : '',
     resposta_no_prazo: situacao
   };
 }
@@ -602,7 +651,7 @@ function situacaoMaisUrgente(a, b) {
  *            situacao (se pendente): ATRASADO | VENCE HOJE | NO PRAZO, resultado (se cumprido): NO PRAZO | FORA DO PRAZO }
  * proximo: o prazo pendente mais urgente ({ tipo, prazo, situacao }) ou null.
  */
-function prazosDaAdmissao(adm, hojeIso, agoraDh) {
+function prazosDaAdmissao(adm, hojeIso, agoraDh, feriados) {
   var ativa = adm.status !== STATUS_ADMISSAO.encerrada && !adm.desfecho_id;
 
   var primeiro = { prazo: adm.prazo_primeiro_atendimento || '' };
@@ -632,7 +681,7 @@ function prazosDaAdmissao(adm, hojeIso, agoraDh) {
   } else if (ativa) {
     interconsulta.estado = 'PENDENTE';
     interconsulta.situacao = situacaoPrazoHora(interconsulta.prazo, agoraDh);
-    interconsulta.horas_restantes = horasEntre(agoraDh, interconsulta.prazo);
+    interconsulta.horas_restantes = horasUteisEntre(agoraDh, interconsulta.prazo, feriados);
   } else {
     interconsulta.estado = 'NÃO REALIZADO';
     interconsulta.resultado = 'FORA DO PRAZO';
@@ -800,20 +849,21 @@ function montarCompilado(dados, op) {
   var nomesPrioridade = function (tipo) {
     return prioridades.filter(function (p) { return p.tipo === tipo; }).map(function (p) { return p.nome; });
   };
+  var solicitacoes = dados.interconsultas ? dados.interconsultas.filter(function (a) { return aceita(a.data_solicitacao, a.unidade_id); }) : adms;
   var comSolicitacao = function (a) { return Boolean(a.motivo_solicitacao_id || a.data_solicitacao); };
   [
-    ['Tipo de solicitação', function (a) { return a.tipo_solicitacao; }, listas.TIPO_SOLICITACAO, adms],
+    ['Tipo de solicitação', function (a) { return a.tipo_solicitacao; }, listas.TIPO_SOLICITACAO, solicitacoes],
     ['Motivo da solicitação', function (a) { return (motivos[a.motivo_solicitacao_id] || {}).nome; },
-      (dados.motivos || []).map(function (m) { return m.nome; }), adms.filter(comSolicitacao)],
+      (dados.motivos || []).map(function (m) { return m.nome; }), solicitacoes.filter(comSolicitacao)],
     ['Prioridade da solicitação', function (a) { return a.prioridade_solicitacao || 'SEM PRIORIDADE'; },
-      nomesPrioridade(TIPOS_PRIORIDADE.solicitacao), adms.filter(comSolicitacao)],
-    ['Solicitação para', function (a) { return a.para_quem; }, PARA_QUEM_SOLICITACAO, adms.filter(comSolicitacao)],
+      nomesPrioridade(TIPOS_PRIORIDADE.solicitacao), solicitacoes.filter(comSolicitacao)],
+    ['Solicitação para', function (a) { return a.para_quem; }, PARA_QUEM_SOLICITACAO, solicitacoes.filter(comSolicitacao)],
     ['Descrição da demanda', function (a) { return a.descricao_demanda; }, listas.DESCRICAO_DEMANDA, adms],
     ['Prioridade da demanda (seguimento)', function (a) { return a.prioridade_demanda || 'SEM PRIORIDADE'; },
       nomesPrioridade(TIPOS_PRIORIDADE.seguimento), adms],
     ['Necessidade de acompanhamento', function (a) { return a.necessidade_acompanhamento; }, listas.NECESSIDADE_ACOMPANHAMENTO, adms]
   ].forEach(function (d) {
-    secao(d[0], distribuicao(d[3], d[1], d[2], chaveAdm), { nota: notaServico });
+    secao(d[0], distribuicao(d[3], d[1], d[2], (!dados.interconsultas || d[3] === adms) ? chaveAdm : function (a) { return chave(a.data_solicitacao, a.unidade_id); }), { nota: notaServico });
   });
 
   // 3. 1º atendimento em até N dias úteis da admissão
@@ -840,7 +890,7 @@ function montarCompilado(dados, op) {
   });
 
   // 3b. Resposta à solicitação no prazo da prioridade (matriz de atendimento), pela data da solicitação.
-  var sols = dados.admissoes.filter(function (a) { return a.resposta_no_prazo && aceita(a.data_solicitacao, a.unidade_id); });
+  var sols = (dados.interconsultas || dados.admissoes).filter(function (a) { return a.resposta_no_prazo && aceita(a.data_solicitacao, a.unidade_id); });
   var chaveSol = function (a) { return chave(a.data_solicitacao, a.unidade_id); };
   var rSim = linhaCompilado('NO PRAZO');
   var rNao = linhaCompilado('FORA DO PRAZO');
@@ -851,7 +901,7 @@ function montarCompilado(dados, op) {
   rPct.num = rSim;
   rPct.den = [rSim, rNao];
   rPct.destaque = true;
-  var rMedia = linhaCompilado('MÉDIA DE HORAS ATÉ A RESPOSTA', 'media');
+  var rMedia = linhaCompilado('MÉDIA DE HORAS ÚTEIS ATÉ A RESPOSTA', 'media');
   var mapaResp = { 'SIM': rSim, 'NÃO': rNao, 'EM ANDAMENTO': rAnd, 'NÃO SE APLICA': rNsa, 'SEM PRAZO': rSem };
   // % no prazo por prioridade
   var porPrioridade = {};
@@ -876,7 +926,7 @@ function montarCompilado(dados, op) {
   });
   var linhasPorPrioridade = ordemPrioridade.map(function (n) { return porPrioridade[n].pct; });
   secao('Resposta à solicitação no prazo da prioridade', [rSim, rNao, rAnd, rNsa, rSem, rPct].concat(linhasPorPrioridade).concat([rMedia]), {
-    nota: [notaServico, 'Horas corridas entre a solicitação e o primeiro atendimento depois dela, pela data da solicitação.']
+    nota: [notaServico, 'Horas úteis entre a solicitação e a resposta, sem sábados, domingos e feriados, pela data da solicitação.']
       .filter(Boolean).join(' ')
   });
 
@@ -1009,6 +1059,170 @@ function compiladoEmTabela(c) {
   return { linhas: linhas, tipos: tipos, largura: largura };
 }
 
+// ===== PainelIndicadores.js =====
+/** Indicadores assistenciais: percentuais e casos, separados da produção do compilado. */
+function resumoIndicador_(itens) {
+  var r = { total: itens.length, no_prazo: 0, fora_prazo: 0, em_andamento: 0,
+    nao_se_aplica: 0, sem_prazo: 0, dados_pendentes: 0, fora_escopo: 0, atrasados_abertos: 0 };
+  var campos = { 'SIM': 'no_prazo', 'NÃO': 'fora_prazo', 'EM ANDAMENTO': 'em_andamento',
+    'NÃO SE APLICA': 'nao_se_aplica', 'SEM PRAZO': 'sem_prazo',
+    'DADOS PENDENTES': 'dados_pendentes', 'FORA DO ESCOPO': 'fora_escopo' };
+  itens.forEach(function (i) {
+    if (campos[i.resultado]) r[campos[i.resultado]]++;
+    if (i.resultado === 'NÃO' && !i.realizado && !i.encerrado) r.atrasados_abertos++;
+  });
+  r.avaliados = r.no_prazo + r.fora_prazo;
+  r.percentual = r.avaliados ? r.no_prazo / r.avaliados : null;
+  return r;
+}
+
+/** Função pura: datas ISO, grupos e uma obrigação por retorno, mesmo com vários contatos no dia. */
+function montarPainelIndicadores(dados, op) {
+  var mapas = function (lista) {
+    var m = {};
+    (lista || []).forEach(function (x) { m[x.id] = x; });
+    return m;
+  };
+  var pacientes = mapas(dados.pacientes), unidades = mapas(dados.unidades);
+  var justificativas = mapas(dados.justificativas), prioridades = mapas(dados.prioridades);
+  var mes = String(op.ano) + '-' + doisDigitos(Number(op.mes));
+  var feriados = conjuntoFeriados(dados.feriados || []);
+  var agoraDh = op.agora, hojeIso = agoraDh.slice(0, 10);
+  var primeiro = [], interconsultas = [], retornos = [];
+  var admissoes = mapas(dados.admissoes);
+  var atendimentos = {}, desfechos = {};
+  (dados.atendimentos || []).forEach(function (a) {
+    (atendimentos[a.admissao_id] = atendimentos[a.admissao_id] || []).push(a);
+  });
+  (dados.desfechos || []).forEach(function (d) {
+    (desfechos[d.admissao_id] = desfechos[d.admissao_id] || []).push(normalizarData(d.data));
+  });
+  function aceita(adm, data, unidadeId) {
+    if (normalizarData(data).slice(0, 7) !== mes) return false;
+    var u = unidades[unidadeId] || {};
+    if (op.setor_id && op.setor_id !== u.setor_id) return false;
+    if (op.unidade_id && op.unidade_id !== unidadeId) return false;
+    var p = pacientes[adm.paciente_id] || {};
+    var termo = normalizarTexto(op.termo);
+    return !termo || normalizarTexto(p.nome).indexOf(termo) !== -1 || String(p.prontuario || '') === normalizarProntuario(op.termo);
+  }
+  function caso(adm, unidadeId, campos) {
+    var p = pacientes[adm.paciente_id] || {}, u = unidades[unidadeId] || {};
+    return Object.assign({ admissao_id: adm.id, paciente_nome: p.nome || '', prontuario: p.prontuario || '',
+      unidade_nome: u.nome || '', unidade_id: unidadeId }, campos);
+  }
+  function resultado(prazo, realizado, encerramento) {
+    if (!prazo) return 'SEM PRAZO';
+    if (realizado) return realizado <= prazo ? 'SIM' : 'NÃO';
+    if (encerramento && encerramento <= prazo.slice(0, 10)) return 'NÃO SE APLICA';
+    if (encerramento || (prazo.length > 10 ? agoraDh : hojeIso) > prazo) return 'NÃO';
+    return 'EM ANDAMENTO';
+  }
+  (dados.admissoes || []).forEach(function (adm) {
+    var contatos = (atendimentos[adm.id] || []).filter(function (a) {
+      return contaParaPrazo(a) && normalizarData(a.data) && a.data <= hojeIso;
+    }).slice().sort(function (a, b) {
+      return String(a.data).localeCompare(String(b.data)) || String(a.hora || '').localeCompare(String(b.hora || '')) ||
+        String(a.criado_em || '').localeCompare(String(b.criado_em || ''));
+    });
+    if (aceita(adm, adm.data_admissao, adm.unidade_id)) {
+      var entrada = normalizarData(adm.data_admissao);
+      var dataPrimeiro = contatos.length ? normalizarData(contatos[0].data) : normalizarData(adm.primeiro_atendimento);
+      var prazoPrimeiro = adicionarDiasUteis(entrada, op.diasPrimeiro, feriados);
+      var situacao = entrada < op.inicioPrimeiro ? 'FORA DO ESCOPO' :
+        resultado(prazoPrimeiro, dataPrimeiro, normalizarData(adm.data_desfecho));
+      if (!entrada || (dataPrimeiro && (dataPrimeiro < entrada || dataPrimeiro > hojeIso))) situacao = 'DADOS PENDENTES';
+      primeiro.push(caso(adm, adm.unidade_id, { id: adm.id, referencia: entrada, prazo: prazoPrimeiro,
+        realizado: dataPrimeiro, resultado: situacao, encerrado: Boolean(adm.desfecho_id), grupo: 'Todas as admissões' }));
+    }
+
+    // Um dia de atendimento abre um único próximo retorno. A justificativa daquele dia
+    // define a obrigação histórica, mesmo quando a justificativa atual mudou.
+    var dias = [];
+    contatos.forEach(function (a) {
+      if (dias.length && dias[dias.length - 1].data === a.data) dias[dias.length - 1] = a;
+      else dias.push(a);
+    });
+    var retomada = normalizarData(adm.retomado_em);
+    if (retomada && retomada <= hojeIso && !dias.some(function (a) { return a.data === retomada; })) {
+      var apos = dias.filter(function (a) { return a.data > retomada; })[0];
+      dias.push({ id: 'retomada_' + adm.id, data: retomada, unidade_id: adm.unidade_id,
+        justificativa_id: apos ? apos.justificativa_id : adm.justificativa_id });
+      dias.sort(function (a, b) { return a.data.localeCompare(b.data); });
+    }
+    var encerramentos = (desfechos[adm.id] || []).slice();
+    if (adm.data_desfecho) encerramentos.push(normalizarData(adm.data_desfecho));
+    encerramentos = encerramentos.filter(Boolean).sort();
+    dias.forEach(function (origem, index) {
+      var proximo = dias[index + 1];
+      var fim = encerramentos.filter(function (d) {
+        // Um desfecho antigo na própria data da retomada não encerra o novo ciclo.
+        var anteriorARetomada = retomada && origem.data >= retomada && d <= retomada && d !== normalizarData(adm.data_desfecho);
+        return d >= origem.data && !anteriorARetomada;
+      })[0] || '';
+      var realizado = proximo && (!fim || proximo.data <= fim) ? proximo.data : '';
+      // Uma retomada é o começo de um novo ciclo, não a resposta ao retorno anterior.
+      if (proximo && String(proximo.id).indexOf('retomada_') === 0) realizado = '';
+      var atual = !proximo && !fim;
+      var justificativaId = atual ? (adm.justificativa_id || origem.justificativa_id) : origem.justificativa_id;
+      var j = justificativas[justificativaId] || {};
+      var p = prioridades[j.prioridade_id] || {};
+      var temPrazo = p.prazo !== '' && p.prazo !== undefined && !isNaN(Number(p.prazo));
+      var prazo = temPrazo ? adicionarDiasUteis(origem.data, Number(p.prazo), feriados) : '';
+      var referencia = prazo || origem.data;
+      var unidadeId = origem.unidade_id || adm.unidade_id;
+      if (!aceita(adm, referencia, unidadeId)) return;
+      var r = !justificativaId ? 'DADOS PENDENTES' : resultado(prazo, realizado, fim);
+      if (atual && SEM_ACOMPANHAMENTO.indexOf(adm.necessidade_acompanhamento) !== -1) r = 'NÃO SE APLICA';
+      retornos.push(caso(adm, unidadeId, { id: origem.id, referencia: referencia, inicio: origem.data,
+        prazo: prazo, prazo_dias: temPrazo ? Number(p.prazo) : null, realizado: realizado, resultado: r,
+        encerrado: Boolean(fim), grupo: j.nome || 'Justificativa não informada', prioridade: p.nome || '' }));
+    });
+  });
+  (dados.interconsultas || []).forEach(function (i) {
+    var adm = admissoes[i.admissao_id];
+    if (!adm || i.excluido_em || !aceita(adm, i.data_solicitacao, i.unidade_id)) return;
+    interconsultas.push(caso(adm, i.unidade_id, { id: i.id, referencia: dataHora(i.data_solicitacao, i.hora_solicitacao),
+      prazo: i.prazo_resposta || '', realizado: i.momento_resposta || '', resultado: i.resposta_no_prazo || 'DADOS PENDENTES',
+      encerrado: !i.pendente && !i.momento_resposta, grupo: i.prioridade_solicitacao || 'Sem prioridade', motivo: i.motivo_nome || '' }));
+  });
+  function indicador(itens, criterio) {
+    var grupos = {};
+    itens.forEach(function (i) { (grupos[i.grupo] = grupos[i.grupo] || []).push(i); });
+    itens.sort(function (a, b) {
+      var ordem = { 'NÃO': 0, 'EM ANDAMENTO': 1, 'DADOS PENDENTES': 2, 'SIM': 3 };
+      return (ordem[a.resultado] === undefined ? 4 : ordem[a.resultado]) - (ordem[b.resultado] === undefined ? 4 : ordem[b.resultado]) ||
+        String(a.prazo).localeCompare(String(b.prazo));
+    });
+    return { resumo: resumoIndicador_(itens), criterio: criterio,
+      grupos: Object.keys(grupos).sort().map(function (nome) { return { nome: nome, resumo: resumoIndicador_(grupos[nome]) }; }),
+      casos: itens.slice(0, 300), total_casos: itens.length };
+  }
+  return { mes: mes, agora: agoraDh, inicio_primeiro: op.inicioPrimeiro, dias_primeiro: op.diasPrimeiro,
+    primeiro: indicador(primeiro, 'Admissões no mês selecionado. Indicador válido para entradas a partir de ' + op.inicioPrimeiro + '.'),
+    interconsultas: indicador(interconsultas, 'Solicitações feitas no mês selecionado. Prazo em horas úteis, excluindo sábados, domingos e feriados, pela prioridade de cada solicitação.'),
+    acompanhamento: indicador(retornos, 'Retornos cujo prazo vence no mês selecionado, em dias úteis pela justificativa do atendimento anterior. Cada intervalo conta uma vez.') };
+}
+
+function apiIndicadores(filtros) {
+  return responder(function () {
+    usuarioAtual();
+    var f = filtros || {};
+    var ano = Number(f.ano), mes = Number(f.mes);
+    if (!Number.isInteger(ano) || ano < 2020 || ano > 2100 || !Number.isInteger(mes) || mes < 1 || mes > 12) {
+      throw new Error('Selecione um mês e ano válidos.');
+    }
+    if (f.unidade_id && !buscarPorId('UNIDADES', f.unidade_id)) throw new Error('Unidade não encontrada.');
+    if (f.setor_id && !buscarPorId('SETORES', f.setor_id)) throw new Error('Setor não encontrado.');
+    return montarPainelIndicadores({ pacientes: listar('PACIENTES'), unidades: listar('UNIDADES'),
+      admissoes: listar('ADMISSOES'), atendimentos: listar('ATENDIMENTOS'), interconsultas: listarInterconsultas_(),
+      justificativas: listar('JUSTIFICATIVAS'), prioridades: listar('PRIORIDADES'),
+      feriados: listar('FERIADOS'), desfechos: listar('DESFECHOS_REGISTRADOS') },
+    { ano: ano, mes: mes, setor_id: f.setor_id || '', unidade_id: f.unidade_id || '', termo: f.termo || '',
+      agora: agora(), diasPrimeiro: diasPrimeiroAtendimento(), inicioPrimeiro: APP.inicioIndicadorPrimeiro });
+  });
+}
+
 // ===== Db.js =====
 /**
  * Acesso às abas do banco como tabelas. Cada linha vira um objeto
@@ -1016,6 +1230,25 @@ function compiladoEmTabela(c) {
  */
 
 var _cacheTabelas = {};
+var _indicesTabelas = {};
+
+/** Índice por id em memória, refeito sozinho quando a tabela é lida ou gravada de novo. */
+function indicePorId_(nome) {
+  var lista = listar(nome);
+  var indice = _indicesTabelas[nome];
+  if (!indice || indice.lista !== lista) {
+    var mapa = Object.create(null);
+    lista.forEach(function (r) { if (!mapa[String(r.id)]) mapa[String(r.id)] = r; });
+    indice = _indicesTabelas[nome] = { lista: lista, mapa: mapa };
+  }
+  return indice.mapa;
+}
+
+function agruparPor_(registros, campo) {
+  var grupos = Object.create(null);
+  registros.forEach(function (r) { (grupos[r[campo]] = grupos[r[campo]] || []).push(r); });
+  return grupos;
+}
 
 var _banco = null;
 // Usado só pelo autoteste: aponta o sistema para uma planilha de teste durante a execução.
@@ -1054,6 +1287,7 @@ var _apiIndisponivel = false;
 /**
  * Lê numa consulta só, pela API do Google Planilhas, todas as tabelas que ainda não estão no cache.
  * Cada consulta ao Google custa um tempo fixo, então ler tudo junto é bem mais rápido que aba por aba.
+ * A leitura traz o cabeçalho: se faltar coluna ou aba nova, ela é acrescentada sem mexer nos dados.
  * Se a API não estiver disponível, lê só a tabela pedida, aba por aba.
  */
 function carregarTabelas(pedida) {
@@ -1061,14 +1295,11 @@ function carregarTabelas(pedida) {
   if (!_forcarLeituraPorAba && !_apiIndisponivel && typeof Sheets !== 'undefined') {
     var nomes = Object.keys(TABELAS).filter(function (n) { return !_cacheTabelas[n]; });
     try {
-      var resposta = Sheets.Spreadsheets.Values.batchGet(idDoBanco(), {
-        ranges: nomes.map(intervaloDaTabela),
-        valueRenderOption: 'UNFORMATTED_VALUE',
-        dateTimeRenderOption: 'SERIAL_NUMBER'
-      });
-      var faixas = resposta.valueRanges || [];
+      var faixas = lerPelaApi(nomes);
+      var migrar = nomes.filter(function (nome, i) { return precisaPrepararAba(nome, ((faixas[i] && faixas[i].values) || [])[0]); });
+      if (migrar.length) prepararAbas(migrar);
       nomes.forEach(function (nome, i) {
-        _cacheTabelas[nome] = registrosDe(nome, (faixas[i] && faixas[i].values) || []);
+        _cacheTabelas[nome] = registrosDe(nome, ((faixas[i] && faixas[i].values) || []).slice(1));
       });
       _modoLeitura = 'API';
       return;
@@ -1077,10 +1308,56 @@ function carregarTabelas(pedida) {
       if (!_semRegistroDeErros) console.warn('Leitura pela API do Google Planilhas falhou; lendo aba por aba. ' + e.message);
     }
   }
-  var aba = abaDaTabela(pedida);
+  var aba = abrirBanco().getSheetByName(pedida);
+  if (!aba) {
+    prepararAbas([pedida]);
+    aba = abaDaTabela(pedida);
+  }
+  var colunas = TABELAS[pedida];
   var ultima = aba.getLastRow();
-  _cacheTabelas[pedida] = registrosDe(pedida, ultima < 2 ? [] : aba.getRange(2, 1, ultima - 1, TABELAS[pedida].length).getValues());
+  var valores = ultima < 1 ? [] : aba.getRange(1, 1, ultima, colunas.length).getValues();
+  if (precisaPrepararAba(pedida, valores[0])) prepararAbas([pedida]);
+  _cacheTabelas[pedida] = registrosDe(pedida, valores.slice(1));
   _modoLeitura = 'ABAS';
+}
+
+/** Uma consulta pela API. Se alguma aba ainda não existir (versão nova do sistema), cria e tenta de novo. */
+function lerPelaApi(nomes) {
+  // Dentro de uma gravação, o que ainda não foi para a planilha vai antes da leitura.
+  if (_pendenteNaPlanilha) {
+    SpreadsheetApp.flush();
+    _pendenteNaPlanilha = false;
+  }
+  if (_travaAtiva) enviarGravacoes();
+  var consulta = function () {
+    return Sheets.Spreadsheets.Values.batchGet(idDoBanco(), {
+      ranges: nomes.map(intervaloDaTabela),
+      valueRenderOption: 'UNFORMATTED_VALUE',
+      dateTimeRenderOption: 'SERIAL_NUMBER'
+    }).valueRanges || [];
+  };
+  try {
+    return consulta();
+  } catch (e) {
+    var existentes = abrirBanco().getSheets().map(function (a) { return a.getName(); });
+    var faltando = nomes.filter(function (n) { return existentes.indexOf(n) === -1; });
+    if (!faltando.length) throw e;
+    prepararAbas(faltando);
+    return consulta();
+  }
+}
+
+/** O cabeçalho da aba não tem todas as colunas da tabela (coluna ou aba nova). */
+function precisaPrepararAba(nome, cabecalho) {
+  return TABELAS[nome].some(function (col, i) { return !cabecalho || cabecalho[i] !== col; });
+}
+
+/** Cria a aba ou acrescenta as colunas que faltam no cabeçalho (ver prepararAba, em Setup.js). */
+function prepararAbas(nomes) {
+  comTrava(function () {
+    nomes.forEach(function (nome) { prepararAba(abrirBanco(), nome); });
+    SpreadsheetApp.flush();
+  });
 }
 
 var _idBanco = '';
@@ -1091,9 +1368,9 @@ function idDoBanco() {
   return _idBanco;
 }
 
-/** Ex.: 'ATENDIMENTOS'!A2:R — da segunda linha até o fim, só as colunas da tabela. */
+/** Ex.: 'ATENDIMENTOS'!A1:R — do cabeçalho até o fim, só as colunas da tabela. */
 function intervaloDaTabela(nome) {
-  return "'" + nome + "'!A2:" + letraDaColuna(TABELAS[nome].length);
+  return "'" + nome + "'!A1:" + letraDaColuna(TABELAS[nome].length);
 }
 
 function letraDaColuna(n) {
@@ -1144,11 +1421,7 @@ function normalizarDataHora(coluna, valor) {
 }
 
 function buscarPorId(nome, id) {
-  var lista = listar(nome);
-  for (var i = 0; i < lista.length; i++) {
-    if (String(lista[i].id) === String(id)) return lista[i];
-  }
-  return null;
+  return indicePorId_(nome)[String(id)] || null;
 }
 
 function novoId() {
@@ -1200,6 +1473,7 @@ function inserir(nome, registro) {
     if (_cacheTabelas[nome] && linha) {
       _cacheTabelas[nome].push(registroDeValores(colunas, valores));
       _linhas[nome][String(obj.id)] = Number(linha[1]);
+      delete _indicesTabelas[nome];
     } else {
       // Sem saber a linha nova, a aba vai ser lida de novo: o que estava para gravar vai antes.
       enviarGravacoes();
@@ -1248,6 +1522,7 @@ function atualizarVarios(nome, mudancas, unico) {
       lista[i] = registroDeValores(colunas, valores);
       gravados.push(lista[i]);
     });
+    delete _indicesTabelas[nome];
     return gravados;
   });
 }
@@ -1363,6 +1638,7 @@ function comTrava(fn) {
   trava.waitLock(20000);
   _travaAtiva = true;
   _cacheTabelas = {};
+  _indicesTabelas = {};
   _gravacoes = {};
   try {
     var resultado = fn();
@@ -1468,6 +1744,8 @@ function semearListas() {
     });
     var aba = abaDaTabela('LISTAS');
     aba.getRange(aba.getLastRow() + 1, 1, linhas.length, linhas[0].length).setValues(linhas);
+    // Gravação direta na planilha: a próxima leitura pela API espera ela chegar (lerPelaApi, em Db.js).
+    _pendenteNaPlanilha = true;
     delete _cacheTabelas.LISTAS;
   });
 }
@@ -1546,12 +1824,7 @@ function doGet() {
  * ficar dentro de um <script>. Sem acesso, leva o erro, e a tela mostra a mensagem.
  */
 function dadosIniciaisDaPagina() {
-  var r = responder(function () {
-    var dados = apiInicio();
-    if (!dados.ok) throw new Error(dados.erro);
-    var gestao = apiGestao({});
-    return Object.assign(dados.dados, { gestao: gestao.ok ? gestao.dados : null });
-  });
+  var r = apiInicio(true);
   return JSON.stringify(r).replace(/</g, '\\u003c').replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029');
 }
 
@@ -1616,10 +1889,12 @@ function porOrdem(a, b) {
 }
 
 /** Tudo o que a tela precisa para abrir: usuário, listas, setores, unidades e profissionais. */
-function apiInicio() {
+function apiInicio(incluirPainel) {
   return responder(function () {
     var usuario = usuarioAtual();
-    return Object.assign({ usuario: usuario }, dadosDeCadastro(usuario.perfil === 'COORDENAÇÃO'));
+    var dados = Object.assign({ usuario: usuario }, dadosDeCadastro(usuario.perfil === 'COORDENAÇÃO'));
+    if (incluirPainel === true) dados.painel = dadosDeGestao_({});
+    return dados;
   });
 }
 
@@ -1638,7 +1913,7 @@ function dadosDeCadastro(incluirInativos) {
   var profissionais = listar('PROFISSIONAIS').filter(ativo).sort(function (a, b) {
     return String(a.nome).localeCompare(String(b.nome));
   });
-  return {
+  var dados = {
     listas: listas,
     setores: setores,
     unidades: unidades,
@@ -1657,11 +1932,44 @@ function dadosDeCadastro(incluirInativos) {
     categorias: CATEGORIAS_PROFISSIONAL,
     perfis: PERFIS,
     publicos: PUBLICOS_ATENDIMENTO,
+    sexos_paciente: SEXOS_PACIENTE,
+    tipos_atendimento: TIPOS_ATENDIMENTO,
+    inicio_indicador_primeiro: APP.inicioIndicadorPrimeiro,
     hoje: hoje()
   };
+  return dados;
 }
 
 // ---------- Pacientes ----------
+
+/** Lista a página de pacientes, inclusive quando não há termo de busca. */
+function apiListarPacientes(filtros) {
+  return responder(function () {
+    usuarioAtual();
+    filtros = filtros || {};
+    var termo = String(filtros.termo || '').trim();
+    var pacientes = listar('PACIENTES');
+    pacientes = termo ? filtrarPacientes(pacientes, termo, pacientes.length) : pacientes.slice();
+    pacientes.sort(function (a, b) {
+      return normalizarTexto(a.nome).localeCompare(normalizarTexto(b.nome))
+        || String(a.prontuario).localeCompare(String(b.prontuario))
+        || String(a.id).localeCompare(String(b.id));
+    });
+    var tamanho = 20;
+    var total = pacientes.length;
+    var paginas = Math.max(1, Math.ceil(total / tamanho));
+    var pagina = Number(filtros.pagina);
+    if (!isFinite(pagina) || pagina < 1) pagina = 1;
+    pagina = Math.min(paginas, Math.floor(pagina));
+    return {
+      pacientes: pacientes.slice((pagina - 1) * tamanho, pagina * tamanho),
+      pagina: pagina,
+      paginas: paginas,
+      total: total,
+      tamanho_pagina: tamanho
+    };
+  });
+}
 
 function apiBuscarPacientes(termo) {
   return responder(function () {
@@ -1680,6 +1988,18 @@ function apiSalvarPaciente(dados) {
     };
     if (!paciente.prontuario) throw new Error('Informe o prontuário (somente números).');
     if (!paciente.nome) throw new Error('Informe o nome do paciente.');
+    if (Object.prototype.hasOwnProperty.call(dados, 'sexo')) {
+      paciente.sexo = String(dados.sexo || '').trim().toUpperCase();
+      if (paciente.sexo && SEXOS_PACIENTE.indexOf(paciente.sexo) === -1) throw new Error('Selecione um sexo válido.');
+    }
+    if (Object.prototype.hasOwnProperty.call(dados, 'data_nascimento')) {
+      var nascimento = String(dados.data_nascimento || '').trim();
+      paciente.data_nascimento = normalizarData(nascimento);
+      if (nascimento && (!/^(\d{4}-\d{2}-\d{2}|\d{1,2}\/\d{1,2}\/\d{4})$/.test(nascimento) || !paciente.data_nascimento)) {
+        throw new Error('Data de nascimento inválida.');
+      }
+      if (paciente.data_nascimento > hoje()) throw new Error('A data de nascimento não pode estar no futuro.');
+    }
     var duplicado = acharDuplicado(listar('PACIENTES'), paciente);
     if (duplicado) throw new Error('Já existe paciente com o prontuário ' + paciente.prontuario + ': ' + duplicado.nome + '.');
     if (paciente.id) return atualizar('PACIENTES', paciente.id, paciente);
@@ -1907,6 +2227,48 @@ var CAMPOS_ADMISSAO_EDITAVEIS = [
   'necessidade_acompanhamento', 'justificativa_id', 'desfecho_id', 'data_desfecho', 'observacoes'
 ];
 var CAMPOS_DATA_ADMISSAO = ['data_admissao', 'data_solicitacao', 'data_desfecho'];
+var CAMPOS_ENTRADA_ADMISSAO = [
+  'paciente_id', 'data_admissao', 'unidade_id', 'observacoes'
+];
+var CAMPOS_ACOMPANHAMENTO = ['descricao_demanda', 'necessidade_acompanhamento', 'justificativa_id'];
+
+/** Salva somente a parte exibida pela tela, preservando os demais dados da internação. */
+function salvarCamposAdmissao_(dados, campos, exigirExistente, exigirAcompanhamentoAtivo) {
+  return responderGravando(function () {
+    var usuario = usuarioAtual();
+    dados = dados || {};
+    if (exigirExistente && !dados.id) throw new Error('Informe a admissão.');
+    var atual = dados.id ? buscarPorId('ADMISSOES', dados.id) : null;
+    if (dados.id && !atual) throw new Error('Admissão não encontrada.');
+    if (exigirAcompanhamentoAtivo) admissaoParaRegistro(dados.id);
+    if (atual && campos.indexOf('paciente_id') !== -1 && dados.paciente_id && dados.paciente_id !== atual.paciente_id) {
+      throw new Error('O paciente de uma admissão existente não pode ser trocado.');
+    }
+    var combinado = Object.assign({}, atual || {}, { id: atual ? atual.id : '' });
+    campos.forEach(function (c) {
+      if (Object.prototype.hasOwnProperty.call(dados, c)) combinado[c] = dados[c];
+    });
+    if (exigirAcompanhamentoAtivo && combinado.justificativa_id && !buscarPorId('JUSTIFICATIVAS', combinado.justificativa_id)) {
+      throw new Error('Justificativa não encontrada.');
+    }
+    return salvarAdmissao_(combinado, usuario, true);
+  });
+}
+
+/** Entrada hospitalar: não altera demanda, acompanhamento ou desfecho. */
+function apiSalvarEntradaAdmissao(dados) {
+  return salvarCamposAdmissao_(dados, CAMPOS_ENTRADA_ADMISSAO, false, false);
+}
+
+/** Dados clínicos editados na tela Atendimentos. */
+function apiSalvarAcompanhamento(dados) {
+  return salvarCamposAdmissao_(dados, CAMPOS_ACOMPANHAMENTO, true, true);
+}
+
+/** Registra ou corrige o desfecho da admissão escolhida, mantendo seu histórico. */
+function apiSalvarDesfechoAdmissao(dados) {
+  return salvarCamposAdmissao_(dados, ['desfecho_id', 'data_desfecho'], true, false);
+}
 
 function mapaPorId(nome) {
   var mapa = {};
@@ -1978,6 +2340,7 @@ function recalcularAdmissoes(ids) {
     var resposta = calcularResposta(adm, daAdmissao, {
       prioridade: prioridadeDe(buscarPorId('MOTIVOS_SOLICITACAO', adm.motivo_solicitacao_id)),
       tiposComPrazo: tipos,
+      feriados: op.feriados,
       agora: momento
     });
     Object.assign(r.campos, resposta);
@@ -2003,7 +2366,15 @@ function recalcularAdmissoesAbertas() {
 }
 
 function auxiliares() {
+  var interconsultas = listarInterconsultas_();
+  var transferencias = listarTransferencias_();
   return {
+    feriados: conjuntoFeriados(listar('FERIADOS')),
+    transferencias: transferencias,
+    transferenciasPorAdmissao: agruparPor_(transferencias, 'admissao_id'),
+    setores: mapaPorId('SETORES'),
+    interconsultas: interconsultas,
+    interconsultasPorAdmissao: agruparPor_(interconsultas, 'admissao_id'),
     pacientes: mapaPorId('PACIENTES'),
     unidades: mapaPorId('UNIDADES'),
     justificativas: mapaPorId('JUSTIFICATIVAS'),
@@ -2017,20 +2388,39 @@ function auxiliares() {
 
 /** Admissão com os nomes que a tela mostra e a situação do próximo prazo. */
 function resumoAdmissao(adm, aux) {
+  var solicitacoes = aux.interconsultasPorAdmissao ? (aux.interconsultasPorAdmissao[adm.id] || []) :
+    aux.interconsultas.filter(function (i) { return i.admissao_id === adm.id; });
+  var pendentes = solicitacoes.filter(function (i) { return i.pendente; }).sort(function (a, b) {
+    return String(a.prazo_resposta || '9999').localeCompare(String(b.prazo_resposta || '9999'));
+  });
+  var destaque = pendentes[0] || solicitacoes[solicitacoes.length - 1];
+  adm = Object.assign({}, adm);
+  ['prioridade_solicitacao', 'prazo_resposta', 'momento_resposta', 'horas_resposta', 'resposta_no_prazo'].forEach(function (c) {
+    adm[c] = destaque ? destaque[c] : '';
+  });
+  adm.interconsultas_pendentes = pendentes.length;
   var paciente = aux.pacientes[adm.paciente_id] || {};
   var unidade = aux.unidades[adm.unidade_id] || {};
+  var unidadeAtualId = unidadeNaData_(adm, aux.hoje, aux.agora.slice(11),
+    aux.transferenciasPorAdmissao ? (aux.transferenciasPorAdmissao[adm.id] || []) : aux.transferencias);
+  var unidadeAtual = aux.unidades[unidadeAtualId] || {};
   var justificativa = aux.justificativas[adm.justificativa_id] || {};
   var desfecho = aux.desfechos[adm.desfecho_id] || {};
   var motivo = aux.motivos[adm.motivo_solicitacao_id] || {};
   // Aguardando resposta à solicitação: o prazo em horas também entra na situação.
-  var aguardandoResposta = adm.resposta_no_prazo === 'EM ANDAMENTO' ||
-    (adm.resposta_no_prazo === 'NÃO' && !adm.momento_resposta && !adm.desfecho_id);
+  var aguardandoResposta = pendentes.length > 0;
   var situacaoResposta = aguardandoResposta ? situacaoPrazoHora(adm.prazo_resposta, aux.agora) : '';
   var situacaoRetorno = adm.proximo_prazo ? situacaoPrazo(adm.proximo_prazo, aux.hoje) : '';
   return Object.assign({}, adm, {
     paciente_nome: paciente.nome || '',
     prontuario: paciente.prontuario || '',
     unidade_nome: unidade.nome || '',
+    unidade_admissao_nome: unidade.nome || '',
+    primeiro_em_avaliacao: Boolean(normalizarData(adm.data_admissao) && normalizarData(adm.data_admissao) >= APP.inicioIndicadorPrimeiro),
+    unidade_atual_id: unidadeAtualId,
+    unidade_atual_nome: unidadeAtual.nome || '',
+    setor_atual_id: unidadeAtual.setor_id || '',
+    setor_atual_nome: (aux.setores[unidadeAtual.setor_id] || {}).nome || '',
     setor_id: unidade.setor_id || '',
     justificativa_nome: justificativa.nome || '',
     desfecho_nome: desfecho.nome || '',
@@ -2086,8 +2476,28 @@ function apiObterAdmissao(id) {
   });
 }
 
+/** Apresentação do prazo clínico; o resultado da interconsulta tem seu próprio vínculo e prazo. */
+function prazoClinicoNoHistorico_(adm, atendimento) {
+  var p = { tipo: atendimento.tipo_prazo || '', prazo: atendimento.prazo_limite || '', resultado: atendimento.no_prazo || 'NÃO AVALIADO' };
+  if (p.tipo === 'PRIMEIRO' && !normalizarData(adm.data_admissao)) {
+    p.prazo = '';
+    p.resultado = 'NÃO AVALIADO';
+  } else if (p.tipo === 'PRIMEIRO' && normalizarData(adm.data_admissao) < APP.inicioIndicadorPrimeiro) {
+    p.prazo = '';
+    p.resultado = 'FORA DO ESCOPO';
+  } else if (atendimento.conta_prazo === 'NÃO') {
+    p.prazo = '';
+    p.resultado = 'NÃO CONTA';
+  } else if (!p.prazo) {
+    p.resultado = p.tipo ? 'SEM PRAZO' : 'NÃO AVALIADO';
+  }
+  return p;
+}
+
 function detalheAdmissao(adm) {
   var aux = auxiliares();
+  var solicitacoes = aux.interconsultasPorAdmissao[adm.id] || [];
+  var respostas = agruparPor_(solicitacoes, 'atendimento_resposta_id');
   var nomeProf = function (pid) { return (aux.profissionais[pid] || {}).nome || ''; };
   var porData = function (a, b) {
     return String(b.data).localeCompare(String(a.data)) || String(b.hora || '').localeCompare(String(a.hora || '')) ||
@@ -2095,7 +2505,18 @@ function detalheAdmissao(adm) {
   };
   var daAdmissao = function (tabela) {
     return listar(tabela).filter(function (a) { return a.admissao_id === adm.id; }).sort(porData)
-      .map(function (a) { return Object.assign({ profissional_nome: nomeProf(a.profissional_id) }, a); });
+      .map(function (a) {
+        var item = Object.assign({ profissional_nome: nomeProf(a.profissional_id), unidade_nome: (aux.unidades[a.unidade_id] || {}).nome || '',
+          justificativa_nome: (aux.justificativas[a.justificativa_id] || {}).nome || '' }, a);
+        if (tabela === 'ATENDIMENTOS') {
+          item.prazo_acompanhamento = prazoClinicoNoHistorico_(adm, a);
+          item.interconsultas_respondidas = (respostas[a.id] || []).map(function (i) {
+            return { id: i.id, prioridade_solicitacao: i.prioridade_solicitacao, prazo_resposta: i.prazo_resposta,
+              resposta_no_prazo: i.resposta_no_prazo, momento_resposta: i.momento_resposta, horas_resposta: i.horas_resposta };
+          });
+        }
+        return item;
+      });
   };
   var anteriores = listar('ADMISSOES').filter(function (a) { return a.paciente_id === adm.paciente_id && a.id !== adm.id; })
     .map(function (a) { return resumoAdmissao(a, aux); })
@@ -2103,6 +2524,11 @@ function detalheAdmissao(adm) {
   return {
     admissao: resumoAdmissao(adm, aux),
     paciente: aux.pacientes[adm.paciente_id] || null,
+    transferencias: transferenciasDaAdmissao_(adm, aux.transferenciasPorAdmissao[adm.id] || []).map(function (t) {
+      return Object.assign({}, t, { origem_nome: (aux.unidades[t.origem_unidade_id] || {}).nome || '',
+        destino_nome: (aux.unidades[t.destino_unidade_id] || {}).nome || '', profissional_nome: nomeProf(t.criado_por) });
+    }),
+    interconsultas: solicitacoes,
     atendimentos: daAdmissao('ATENDIMENTOS'),
     atividades: daAdmissao('ATIVIDADES'),
     desfechos: listar('DESFECHOS_REGISTRADOS').filter(function (d) { return d.admissao_id === adm.id; })
@@ -2116,55 +2542,65 @@ function detalheAdmissao(adm) {
 
 function apiSalvarAdmissao(dados) {
   return responderGravando(function () {
-    var usuario = usuarioAtual();
-    var adm = {};
-    CAMPOS_ADMISSAO_EDITAVEIS.forEach(function (c) {
-      var v = dados[c] === undefined || dados[c] === null ? '' : String(dados[c]).trim();
-      adm[c] = CAMPOS_DATA_ADMISSAO.indexOf(c) !== -1 ? normalizarData(v) : v;
-    });
-    adm.hora_solicitacao = normalizarHora(adm.hora_solicitacao);
-    adm.para_quem = adm.para_quem === 'FAMILIAR' ? 'FAMILIAR' : 'PACIENTE';
-    if (adm.para_quem === 'PACIENTE') { adm.familiar_nome = ''; adm.familiar_parentesco = ''; }
-    adm.familiar_nome = formatarNome(adm.familiar_nome);
-    adm.familiar_parentesco = formatarNome(adm.familiar_parentesco);
-    var atual = dados.id ? buscarPorId('ADMISSOES', dados.id) : null;
-    if (dados.id && !atual) throw new Error('Admissão não encontrada.');
-
-    var erros = validarAdmissao(adm, hoje());
-    if (dados.hora_solicitacao && !adm.hora_solicitacao) erros.push('Hora da solicitação inválida.');
-    if (adm.hora_solicitacao && dataHora(adm.data_solicitacao, adm.hora_solicitacao) > agora()) {
-      erros.push('A solicitação não pode estar no futuro.');
-    }
-    if (adm.motivo_solicitacao_id && !buscarPorId('MOTIVOS_SOLICITACAO', adm.motivo_solicitacao_id)) {
-      erros.push('Motivo da solicitação não encontrado.');
-    }
-    if (adm.paciente_id && !buscarPorId('PACIENTES', adm.paciente_id)) erros.unshift('Paciente não encontrado.');
-    if (adm.unidade_id && !buscarPorId('UNIDADES', adm.unidade_id)) erros.push('Unidade não encontrada.');
-    if (adm.desfecho_id && !buscarPorId('DESFECHOS', adm.desfecho_id)) erros.push('Desfecho não encontrado.');
-    var primeiroAtend = atual ? atual.primeiro_atendimento : '';
-    if (primeiroAtend && adm.data_admissao > primeiroAtend) erros.push('A admissão não pode ser depois do 1º atendimento.');
-    var ultimoAtend = listar('ATENDIMENTOS').filter(function (a) { return atual && a.admissao_id === atual.id; })
-      .reduce(function (m, a) { return a.data > m ? a.data : m; }, '');
-    if (adm.data_desfecho && atual && atual.retomado_em && adm.data_desfecho < normalizarData(atual.retomado_em)) {
-      erros.push('O desfecho não pode ser antes da retomada do acompanhamento.');
-    }
-    if (adm.data_desfecho && ultimoAtend && adm.data_desfecho < ultimoAtend) {
-      erros.push('O desfecho não pode ser antes do último atendimento (' + ultimoAtend.split('-').reverse().join('/') + ').');
-    }
-    var outraAberta = listar('ADMISSOES').filter(function (a) {
-      return a.paciente_id === adm.paciente_id && a.status !== STATUS_ADMISSAO.encerrada && a.id !== dados.id;
-    })[0];
-    if (outraAberta && !(adm.desfecho_id && desfechoEncerraAdmissao(adm.desfecho_id))) {
-      erros.push('Este paciente já tem uma admissão aberta. Use essa admissão ou registre a saída do hospital antes.');
-    }
-    if (erros.length) throw new Error(erros.join(' '));
-
-    var salvo = atual
-      ? atualizar('ADMISSOES', atual.id, adm)
-      : inserir('ADMISSOES', Object.assign({ criado_por: usuario.id, status: STATUS_ADMISSAO.aguardando }, adm));
-    registrarDesfecho(salvo, usuario);
-    return detalheAdmissao(recalcularAdmissao(salvo.id));
+    return salvarAdmissao_(dados, usuarioAtual());
   });
+}
+
+/** Gravação comum às telas e à API completa, mantida para compatibilidade. */
+function salvarAdmissao_(dados, usuario, permitirJustificativaPendente) {
+  var adm = {};
+  CAMPOS_ADMISSAO_EDITAVEIS.forEach(function (c) {
+    var v = dados[c] === undefined || dados[c] === null ? '' : String(dados[c]).trim();
+    adm[c] = CAMPOS_DATA_ADMISSAO.indexOf(c) !== -1 ? normalizarData(v) : v;
+  });
+  adm.hora_solicitacao = normalizarHora(adm.hora_solicitacao);
+  adm.para_quem = adm.para_quem === 'FAMILIAR' ? 'FAMILIAR' : 'PACIENTE';
+  if (adm.para_quem === 'PACIENTE') { adm.familiar_nome = ''; adm.familiar_parentesco = ''; }
+  adm.familiar_nome = formatarNome(adm.familiar_nome);
+  adm.familiar_parentesco = formatarNome(adm.familiar_parentesco);
+  var atual = dados.id ? buscarPorId('ADMISSOES', dados.id) : null;
+  if (dados.id && !atual) throw new Error('Admissão não encontrada.');
+
+  var erros = validarAdmissao(adm, hoje(), permitirJustificativaPendente);
+  if (dados.hora_solicitacao && !adm.hora_solicitacao) erros.push('Hora da solicitação inválida.');
+  if (adm.hora_solicitacao && dataHora(adm.data_solicitacao, adm.hora_solicitacao) > agora()) {
+    erros.push('A solicitação não pode estar no futuro.');
+  }
+  if (adm.motivo_solicitacao_id && !buscarPorId('MOTIVOS_SOLICITACAO', adm.motivo_solicitacao_id)) {
+    erros.push('Motivo da solicitação não encontrado.');
+  }
+  if (adm.paciente_id && !buscarPorId('PACIENTES', adm.paciente_id)) erros.unshift('Paciente não encontrado.');
+  if (adm.unidade_id && !buscarPorId('UNIDADES', adm.unidade_id)) erros.push('Unidade não encontrada.');
+  if (adm.desfecho_id && !buscarPorId('DESFECHOS', adm.desfecho_id)) erros.push('Desfecho não encontrado.');
+  var primeiroAtend = atual ? atual.primeiro_atendimento : '';
+  if (primeiroAtend && adm.data_admissao > primeiroAtend) erros.push('A admissão não pode ser depois do 1º atendimento.');
+  var ultimoAtend = listar('ATENDIMENTOS').filter(function (a) { return atual && a.admissao_id === atual.id; })
+    .reduce(function (m, a) { return a.data > m ? a.data : m; }, '');
+  if (adm.data_desfecho && atual && atual.retomado_em && adm.data_desfecho < normalizarData(atual.retomado_em)) {
+    erros.push('O desfecho não pode ser antes da retomada do acompanhamento.');
+  }
+  if (adm.data_desfecho && ultimoAtend && adm.data_desfecho < ultimoAtend) {
+    erros.push('O desfecho não pode ser antes do último atendimento (' + ultimoAtend.split('-').reverse().join('/') + ').');
+  }
+  if (atual) listarInterconsultas_().filter(function (i) { return i.admissao_id === atual.id; }).forEach(function (i) {
+    if (adm.data_admissao > i.data_solicitacao) erros.push('A admissão não pode ser depois de uma interconsulta.');
+    if (adm.data_desfecho && desfechoEncerraAdmissao(adm.desfecho_id) && adm.data_desfecho < i.data_solicitacao) {
+      erros.push('A saída do hospital não pode ser antes de uma interconsulta.');
+    }
+  });
+  var outraAberta = listar('ADMISSOES').filter(function (a) {
+    return a.paciente_id === adm.paciente_id && a.status !== STATUS_ADMISSAO.encerrada && a.id !== dados.id;
+  })[0];
+  if (outraAberta && !(adm.desfecho_id && desfechoEncerraAdmissao(adm.desfecho_id))) {
+    erros.push('Este paciente já tem uma admissão aberta. Use essa admissão ou registre a saída do hospital antes.');
+  }
+  if (erros.length) throw new Error(erros.join(' '));
+
+  var salvo = atual
+    ? atualizar('ADMISSOES', atual.id, adm)
+    : inserir('ADMISSOES', Object.assign({ criado_por: usuario.id, status: STATUS_ADMISSAO.aguardando }, adm));
+  registrarDesfecho(salvo, usuario);
+  return detalheAdmissao(recalcularAdmissao(salvo.id));
 }
 
 /** Desfecho atual (vigente) da admissão no histórico, se houver. */
@@ -2186,7 +2622,8 @@ function registrarDesfecho(adm, usuario) {
     return;
   }
   var dados = {
-    unidade_id: adm.unidade_id,
+    unidade_id: vigente && normalizarData(vigente.data) === normalizarData(adm.data_desfecho) ? vigente.unidade_id :
+      unidadeNaData_(adm, adm.data_desfecho),
     desfecho_id: adm.desfecho_id,
     data: normalizarData(adm.data_desfecho),
     encerra_admissao: desfechoEncerraAdmissao(adm.desfecho_id) ? 'SIM' : 'NÃO'
@@ -2270,27 +2707,48 @@ function apiRegistrarAtendimento(dados) {
     if (!hora) throw new Error('Informe a hora do atendimento.');
     if (dataHora(data, hora) > agora()) throw new Error('O atendimento não pode estar no futuro.');
     if (PUBLICOS_ATENDIMENTO.indexOf(dados.publico) === -1) throw new Error('Escolha se o atendimento foi ao paciente ou à família.');
+    if (TIPOS_ATENDIMENTO.indexOf(dados.tipo_atendimento) === -1) throw new Error('Selecione o tipo da solicitação: interconsulta, busca ativa, espontânea ou seguimento psicológico.');
+    if (dados.tipo_atendimento === 'INTERCONSULTA' && !dados.interconsulta_id) throw new Error('Selecione a interconsulta respondida.');
+    if (dados.tipo_atendimento !== 'INTERCONSULTA' && dados.interconsulta_id) throw new Error('Somente atendimento por interconsulta pode responder a uma solicitação.');
     var familia = dados.publico === 'FAMÍLIA';
     var quantidade = familia ? inteiroEntre(dados.quantidade, 1, 30, 1) : 1;
     if (quantidade === null) throw new Error('Informe quantos familiares foram atendidos (1 a 30).');
     var impossibilitado = familia && dados.paciente_impossibilitado === 'SIM' ? 'SIM' : 'NÃO';
     var prof = profissionalDoRegistro(dados.profissional_id, usuario);
+    var justificativaId = Object.prototype.hasOwnProperty.call(dados, 'justificativa_id') ? String(dados.justificativa_id || '').trim() : adm.justificativa_id;
+    if (justificativaId) {
+      var justificativa = buscarPorId('JUSTIFICATIVAS', justificativaId);
+      if (!justificativa || justificativa.ativo === 'NÃO') throw new Error('Selecione uma justificativa de acompanhamento válida.');
+    }
+    var acompanha = adm.necessidade_acompanhamento && SEM_ACOMPANHAMENTO.indexOf(adm.necessidade_acompanhamento) === -1;
+    if (acompanha && !justificativaId) throw new Error('Selecione a justificativa no registro do atendimento.');
     var atendimento = {
       admissao_id: adm.id,
-      unidade_id: adm.unidade_id,
+      unidade_id: unidadeDoRegistro_(dados, adm, data, hora),
       data: data,
       hora: hora,
       publico: dados.publico,
+      tipo_atendimento: dados.tipo_atendimento,
       quantidade: quantidade,
       paciente_impossibilitado: familia ? impossibilitado : '',
       profissional_id: prof.id,
       categoria: prof.categoria,
-      justificativa_id: adm.justificativa_id,
+      justificativa_id: justificativaId || '',
       observacao: String(dados.observacao || '').trim(),
       criado_por: usuario.id
     };
     atendimento.conta_prazo = contaParaPrazo(atendimento) ? 'SIM' : 'NÃO';
-    inserir('ATENDIMENTOS', atendimento);
+    if (dados.interconsulta_id) validarRespostaInterconsulta_(dados.interconsulta_id, atendimento);
+    listar('ATENDIMENTOS'); // Completa o cabeçalho do banco anterior antes de gravar.
+    var salvo = inserir('ATENDIMENTOS', atendimento);
+    // Registro retroativo mantém sua justificativa própria, sem substituir a do contato mais recente.
+    var temContatoPosterior = listar('ATENDIMENTOS').some(function (a) {
+      return a.admissao_id === adm.id && contaParaPrazo(a) && dataHora(a.data, a.hora) > dataHora(data, hora);
+    });
+    if (contaParaPrazo(atendimento) && !temContatoPosterior && String(adm.justificativa_id || '') !== String(justificativaId || '')) {
+      atualizar('ADMISSOES', adm.id, { justificativa_id: justificativaId || '' });
+    }
+    if (dados.interconsulta_id) atualizar('INTERCONSULTAS', dados.interconsulta_id, { atendimento_id: salvo.id });
     return detalheAdmissao(recalcularAdmissao(adm.id));
   });
 }
@@ -2325,7 +2783,7 @@ function apiRegistrarAtividade(dados) {
     if (quantidade === null) throw new Error('Quantidade inválida.');
     var prof = profissionalDoRegistro(dados.profissional_id, usuario);
     inserir('ATIVIDADES', {
-      admissao_id: adm.id, unidade_id: adm.unidade_id, data: data, tipo: dados.tipo, quantidade: quantidade,
+      admissao_id: adm.id, unidade_id: unidadeDoRegistro_(dados, adm, data), data: data, tipo: dados.tipo, quantidade: quantidade,
       profissional_id: prof.id, categoria: prof.categoria, criado_por: usuario.id
     });
     return detalheAdmissao(adm);
@@ -2340,6 +2798,214 @@ function apiExcluirAtividade(id) {
     exigirAutorOuCoordenacao(atividade, usuario);
     excluir('ATIVIDADES', id);
     return detalheAdmissao(buscarPorId('ADMISSOES', atividade.admissao_id));
+  });
+}
+
+// ===== Transferencias.js =====
+/** Localização atual e histórico de movimentações internas da mesma internação. */
+function listarTransferencias_() {
+  // Se a aba ainda não existir, a própria leitura cria (carregarTabelas, em Db.js).
+  return listar('TRANSFERENCIAS');
+}
+
+function transferenciasDaAdmissao_(adm, registros) {
+  return (registros || listarTransferencias_()).filter(function (t) { return t.admissao_id === adm.id; })
+    .slice().sort(function (a, b) {
+      return dataHora(a.data, a.hora).localeCompare(dataHora(b.data, b.hora)) ||
+        String(a.criado_em || '').localeCompare(String(b.criado_em || ''));
+    });
+}
+
+function unidadeNaData_(adm, data, hora, registros) {
+  var momento = dataHora(data || hoje(), hora || '23:59');
+  return transferenciasDaAdmissao_(adm, registros).reduce(function (id, t) {
+    return dataHora(t.data, t.hora) <= momento ? t.destino_unidade_id : id;
+  }, adm.unidade_id);
+}
+
+function unidadeDoRegistro_(dados, adm, data, hora) {
+  var id = dados.unidade_id || unidadeNaData_(adm, data, hora);
+  var u = buscarPorId('UNIDADES', id);
+  if (!u) throw new Error('Selecione uma unidade válida para o registro.');
+  if (dados.unidade_id && u.ativo === 'NÃO') throw new Error('Esta unidade está inativa.');
+  return id;
+}
+
+function apiTransferirPaciente(dados) {
+  return responderGravando(function () {
+    var usuario = usuarioAtual();
+    dados = dados || {};
+    listarTransferencias_();
+    var admissaoId = comTrava(function () {
+      // A operação inteira já roda com a trava e lê depois dela (responderGravando): duas profissionais
+      // não criam uma origem desatualizada.
+      var adm = buscarPorId('ADMISSOES', dados.admissao_id);
+      if (!adm) throw new Error('Admissão não encontrada.');
+      if (adm.status === STATUS_ADMISSAO.encerrada || desfechoEncerraAdmissao(adm.desfecho_id)) {
+        throw new Error('Não é possível transferir: esta internação já foi encerrada.');
+      }
+      var data = normalizarData(dados.data), hora = normalizarHora(dados.hora);
+      if (!data || !hora) throw new Error('Informe data e hora da transferência.');
+      if (data < normalizarData(adm.data_admissao)) throw new Error('A transferência não pode ser antes da admissão.');
+      if (dataHora(data, hora) > agora()) throw new Error('A transferência não pode estar no futuro.');
+      var destino = buscarPorId('UNIDADES', dados.unidade_id);
+      if (!destino || destino.ativo === 'NÃO') throw new Error('Selecione uma unidade de destino ativa.');
+      if (dados.setor_id && destino.setor_id !== dados.setor_id) throw new Error('A unidade não pertence ao setor selecionado.');
+      var historico = transferenciasDaAdmissao_(adm);
+      var ultima = historico[historico.length - 1];
+      if (ultima && dataHora(data, hora) < dataHora(ultima.data, ultima.hora)) {
+        throw new Error('A transferência não pode ser antes da última movimentação registrada.');
+      }
+      var origem = ultima ? ultima.destino_unidade_id : adm.unidade_id;
+      if (destino.id === origem) throw new Error('O paciente já está nessa unidade.');
+      var registro = { id: novoId(), admissao_id: adm.id, origem_unidade_id: origem,
+        destino_unidade_id: destino.id, data: data, hora: hora, criado_por: usuario.id, criado_em: agoraIso() };
+      inserir('TRANSFERENCIAS', registro);
+      return adm.id;
+    });
+    return detalheAdmissao(buscarPorId('ADMISSOES', admissaoId));
+  });
+}
+
+// ===== Interconsultas.js =====
+/** Interconsultas pertencem à internação, mas cada solicitação tem seu próprio prazo. */
+function prepararInterconsultas_() {
+  // Migração aditiva e idempotente: não apaga nem reorganiza as colunas antigas.
+  // A aba e as colunas novas são criadas pela própria leitura (carregarTabelas, em Db.js); aqui
+  // só se confere, em memória, se alguma solicitação antiga ainda não virou interconsulta.
+  var faltaLegado = function () {
+    var existentes = indicePorId_('INTERCONSULTAS');
+    return listar('ADMISSOES').filter(function (a) { return a.data_solicitacao && !existentes['legado_' + a.id]; });
+  };
+  if (!faltaLegado().length) return;
+  comTrava(function () {
+    // Outra execução pode ter concluído a migração enquanto esta aguardava a trava (a trava relê tudo).
+    faltaLegado().forEach(function (a) {
+      inserir('INTERCONSULTAS', Object.assign({}, a, { id: 'legado_' + a.id, admissao_id: a.id, origem: 'LEGADO', atendimento_id: '' }));
+    });
+  });
+}
+
+/** Resposta calculada por solicitação; somente registros antigos mantêm a associação automática. */
+function listarInterconsultas_() {
+  prepararInterconsultas_();
+  var admissoes = mapaPorId('ADMISSOES');
+  var atendimentos = listar('ATENDIMENTOS');
+  var porAdmissao = agruparPor_(atendimentos, 'admissao_id');
+  var porId = indicePorId_('ATENDIMENTOS');
+  var feriados = conjuntoFeriados(listar('FERIADOS'));
+  return listar('INTERCONSULTAS').filter(function (i) { return !i.excluido_em; }).map(function (original) {
+    var adm = admissoes[original.admissao_id];
+    if (!adm) return null;
+    var legado = original.origem === 'LEGADO';
+    var i = Object.assign({}, original);
+    if (legado) ['tipo_solicitacao', 'motivo_solicitacao_id', 'data_solicitacao', 'hora_solicitacao',
+      'para_quem', 'familiar_nome', 'familiar_parentesco'].forEach(function (c) { i[c] = adm[c]; });
+    var resposta = porId[i.atendimento_id];
+    var candidatos = legado ? (porAdmissao[adm.id] || []) :
+      (resposta && resposta.admissao_id === adm.id ? [resposta] : []);
+    var encerrada = adm.status === STATUS_ADMISSAO.encerrada || (legado && Boolean(adm.desfecho_id));
+    var contexto = Object.assign({}, i, { data_desfecho: encerrada ? adm.data_desfecho : '' });
+    var prioridade = legado ? prioridadeDe(buscarPorId('MOTIVOS_SOLICITACAO', i.motivo_solicitacao_id)) :
+      (i.tem_prazo === 'SIM' ? { nome: i.prioridade_solicitacao, prazo: i.prazo_horas } : null);
+    Object.assign(i, calcularResposta(contexto, candidatos, {
+      prioridade: prioridade, tiposComPrazo: legado ? tiposSolicitacaoComPrazo() : (i.tem_prazo === 'SIM' ? [i.tipo_solicitacao] : []), agora: agora(), feriados: feriados
+    }));
+    var respondidoPor = i.momento_resposta ? candidatos.filter(function (a) {
+      var vale = i.para_quem === 'FAMILIAR' ? (a.publico === 'PACIENTE' || a.publico === 'FAMÍLIA') : contaParaPrazo(a);
+      return vale && dataHora(a.data, a.hora) === i.momento_resposta;
+    })[0] : null;
+    i.atendimento_resposta_id = respondidoPor ? respondidoPor.id : '';
+    if (!legado && !i.prioridade_solicitacao) i.prioridade_solicitacao = original.prioridade_solicitacao;
+    i.pendente = !i.momento_resposta && !encerrada;
+    i.motivo_nome = (buscarPorId('MOTIVOS_SOLICITACAO', i.motivo_solicitacao_id) || {}).nome || '';
+    // Novas solicitações independem do encerramento psicológico. O legado mantém sua regra histórica.
+    i.prazo = prazosDaAdmissao(Object.assign({}, contexto, i, {
+      status: encerrada ? STATUS_ADMISSAO.encerrada : STATUS_ADMISSAO.aguardando, desfecho_id: encerrada ? adm.desfecho_id : ''
+    }), hoje(), agora(), feriados).interconsulta;
+    if (i.momento_resposta && i.resposta_no_prazo === 'SEM PRAZO') {
+      i.prazo = { estado: 'CUMPRIDO', realizado: i.momento_resposta, horas: i.horas_resposta, resultado: 'SEM PRAZO' };
+    }
+    return i;
+  }).filter(Boolean);
+}
+
+function apiRegistrarInterconsulta(dados) {
+  return responderGravando(function () {
+    var usuario = usuarioAtual();
+    dados = dados || {};
+    var adm = buscarPorId('ADMISSOES', dados.admissao_id);
+    if (!adm) throw new Error('Admissão não encontrada.');
+    if (adm.status === STATUS_ADMISSAO.encerrada) throw new Error('Esta admissão está encerrada: o paciente saiu do hospital.');
+    var data = normalizarData(dados.data_solicitacao);
+    var hora = normalizarHora(dados.hora_solicitacao);
+    if (!data || !hora) throw new Error('Informe data e hora da solicitação.');
+    if (data < normalizarData(adm.data_admissao)) throw new Error('A solicitação não pode ser antes da admissão.');
+    if (dataHora(data, hora) > agora()) throw new Error('A solicitação não pode estar no futuro.');
+    // Interconsulta é sempre uma solicitação da equipe, independentemente do payload da tela.
+    var motivo = buscarPorId('MOTIVOS_SOLICITACAO', dados.motivo_solicitacao_id);
+    if (!motivo || motivo.ativo === 'NÃO') throw new Error('Escolha o motivo da solicitação.');
+    if (PARA_QUEM_SOLICITACAO.indexOf(dados.para_quem) === -1) throw new Error('Informe para quem é a solicitação.');
+    var familiar = dados.para_quem === 'FAMILIAR';
+    var nome = familiar ? formatarNome(dados.familiar_nome || '') : '';
+    var parentesco = familiar ? formatarNome(dados.familiar_parentesco || '') : '';
+    if (familiar && !nome && !parentesco) throw new Error('Informe o nome ou o parentesco do familiar.');
+    var prioridade = prioridadeDe(motivo);
+    var temPrazo = prioridade && prioridade.prazo !== '' && tiposSolicitacaoComPrazo().indexOf('EQUIPE') !== -1;
+    prepararInterconsultas_();
+    inserir('INTERCONSULTAS', {
+      admissao_id: adm.id, unidade_id: unidadeNaData_(adm, data, hora), tipo_solicitacao: 'EQUIPE',
+      motivo_solicitacao_id: motivo.id, data_solicitacao: data, hora_solicitacao: hora,
+      para_quem: dados.para_quem, familiar_nome: nome, familiar_parentesco: parentesco,
+      prioridade_solicitacao: prioridade ? prioridade.nome : '', prazo_horas: temPrazo ? prioridade.prazo : '',
+      tem_prazo: temPrazo ? 'SIM' : 'NÃO', origem: 'SOLICITAÇÃO', observacoes: String(dados.observacoes || '').trim(), criado_por: usuario.id
+    });
+    return detalheAdmissao(adm);
+  });
+}
+
+function validarRespostaInterconsulta_(id, atendimento) {
+  var i = listarInterconsultas_().filter(function (s) { return s.id === id; })[0];
+  if (!i || i.admissao_id !== atendimento.admissao_id) throw new Error('A interconsulta não pertence a esta admissão.');
+  if (i.momento_resposta) throw new Error('Esta interconsulta já foi respondida.');
+  if (dataHora(atendimento.data, atendimento.hora) < dataHora(i.data_solicitacao, i.hora_solicitacao)) {
+    throw new Error('O atendimento não pode ser antes da solicitação.');
+  }
+  if (i.para_quem !== 'FAMILIAR' && !contaParaPrazo(atendimento)) {
+    throw new Error('Este atendimento à família não responde à solicitação do paciente.');
+  }
+  return i;
+}
+
+function apiResponderInterconsulta(dados) {
+  return responderGravando(function () {
+    usuarioAtual();
+    var atendimento = buscarPorId('ATENDIMENTOS', dados.atendimento_id);
+    if (!atendimento) throw new Error('Escolha o atendimento que respondeu à solicitação.');
+    var i = validarRespostaInterconsulta_(dados.id, atendimento);
+    atualizar('ATENDIMENTOS', atendimento.id, { tipo_atendimento: 'INTERCONSULTA' });
+    atualizar('INTERCONSULTAS', i.id, { atendimento_id: atendimento.id, origem: 'SOLICITAÇÃO',
+      tem_prazo: i.prazo_resposta ? 'SIM' : 'NÃO', prazo_horas: i.prazo_resposta ?
+        (i.prazo_horas !== '' && i.prazo_horas !== undefined ? i.prazo_horas :
+          horasUteisEntre(dataHora(i.data_solicitacao, i.hora_solicitacao), i.prazo_resposta, conjuntoFeriados(listar('FERIADOS')))) : '',
+      prioridade_solicitacao: i.prioridade_solicitacao });
+    return detalheAdmissao(buscarPorId('ADMISSOES', i.admissao_id));
+  });
+}
+
+/** Exclui da operação, mantendo a marca para que a migração não recrie solicitações antigas. */
+function apiExcluirInterconsulta(id) {
+  return responderGravando(function () {
+    var usuario = usuarioAtual();
+    prepararInterconsultas_();
+    var i = buscarPorId('INTERCONSULTAS', id);
+    if (!i || i.excluido_em) throw new Error('Interconsulta não encontrada ou já excluída.');
+    exigirAutorOuCoordenacao(i, usuario);
+    var adm = buscarPorId('ADMISSOES', i.admissao_id);
+    if (!adm) throw new Error('Admissão não encontrada.');
+    atualizar('INTERCONSULTAS', i.id, { excluido_em: agoraIso(), excluido_por: usuario.id });
+    // Não apaga atendimentos, dados da admissão nem outras solicitações.
+    return detalheAdmissao(adm);
   });
 }
 
@@ -2370,6 +3036,7 @@ function gerarCompilado(f) {
   return montarCompilado({
     unidades: listar('UNIDADES').slice().sort(porOrdem),
     admissoes: listar('ADMISSOES'),
+    interconsultas: listarInterconsultas_(),
     atendimentos: listar('ATENDIMENTOS'),
     atividades: listar('ATIVIDADES'),
     reunioes: listar('REUNIOES'),
@@ -2508,8 +3175,21 @@ function itemDeGestao(adm, aux) {
   var r = resumoAdmissao(adm, aux);
   var justificativa = aux.justificativas[adm.justificativa_id] || {};
   var prioridade = justificativa.prioridade_id ? (aux.prioridades[justificativa.prioridade_id] || {}) : {};
+  var prazos = prazosDaAdmissao(r, aux.hoje, aux.agora, aux.feriados);
+  var pendentes = (aux.interconsultasPorAdmissao[adm.id] || []).filter(function (i) { return i.pendente && i.prazo_resposta; })
+    .sort(function (a, b) { return a.prazo_resposta.localeCompare(b.prazo_resposta); });
+  if (pendentes.length) {
+    prazos.interconsulta = pendentes[0].prazo;
+    var p = prazos.interconsulta;
+    if (!prazos.proximo || p.prazo < prazos.proximo.prazo + (prazos.proximo.prazo.length === 10 ? ' 23:59' : '')) {
+      prazos.proximo = { tipo: 'INTERCONSULTA', prazo: p.prazo, situacao: p.situacao };
+    }
+  }
   return Object.assign(r, {
-    prazos: prazosDaAdmissao(adm, aux.hoje, aux.agora),
+    unidade_id: r.unidade_atual_id,
+    unidade_nome: r.unidade_atual_nome,
+    setor_id: r.setor_atual_id,
+    prazos: prazos,
     dias_internado: diasEntre(adm.data_admissao, aux.hoje),
     periodicidade: prioridade.periodicidade || ''
   });
@@ -2538,13 +3218,25 @@ function ordemUrgencia(a, b) {
 function apiGestao(filtros) {
   return responder(function () {
     usuarioAtual();
+    return dadosDeGestao_(filtros);
+  });
+}
+
+/** Compartilhado com a abertura inicial; acesso validado pela API chamadora. */
+function dadosDeGestao_(filtros) {
     var f = filtros || {};
+    if (f.status_atendimento && ['ATIVOS', 'INATIVOS', 'TODOS'].indexOf(f.status_atendimento) === -1) throw new Error('Filtro de situação inválido.');
     var aux = auxiliaresGestao();
     var termo = normalizarTexto(f.termo);
     var prontuario = normalizarProntuario(f.termo);
     var itens = listar('ADMISSOES').filter(function (a) {
+      if (f.status_atendimento) {
+        var inativa = Boolean(a.desfecho_id) || a.status === STATUS_ADMISSAO.encerrada || a.status === STATUS_ADMISSAO.acompanhamentoEncerrado;
+        return f.status_atendimento === 'TODOS' || (f.status_atendimento === 'INATIVOS' ? inativa : !inativa);
+      }
       if (a.status === STATUS_ADMISSAO.encerrada) return false;
-      if (a.status === STATUS_ADMISSAO.acompanhamentoEncerrado && f.incluir_encerrados !== 'SIM') return false;
+      if (a.status === STATUS_ADMISSAO.acompanhamentoEncerrado && f.incluir_encerrados !== 'SIM' &&
+        !(aux.interconsultasPorAdmissao[a.id] || []).some(function (i) { return i.pendente; })) return false;
       return true;
     }).map(function (a) { return itemDeGestao(a, aux); }).filter(function (a) {
       if (f.setor_id && a.setor_id !== f.setor_id) return false;
@@ -2560,16 +3252,15 @@ function apiGestao(filtros) {
     var resumo = { pacientes: itens.length, aguardando_primeiro: 0, interconsultas_pendentes: 0, atrasados: 0, vencem_hoje: 0 };
     itens.forEach(function (a) {
       if (a.prazos.primeiro.estado === 'PENDENTE') resumo.aguardando_primeiro++;
-      if (a.prazos.interconsulta.estado === 'PENDENTE') resumo.interconsultas_pendentes++;
+      resumo.interconsultas_pendentes += a.interconsultas_pendentes || 0;
       if (a.prazos.proximo && a.prazos.proximo.situacao === 'ATRASADO') resumo.atrasados++;
       if (a.prazos.proximo && a.prazos.proximo.situacao === 'VENCE HOJE') resumo.vencem_hoje++;
     });
     return { itens: itens, resumo: resumo, hoje: aux.hoje, agora: aux.agora };
-  });
 }
 
 /**
- * Interconsultas (solicitações com prazo de resposta).
+ * Interconsultas: uma linha por solicitação, inclusive quando não há prazo configurado.
  * filtros: { situacao: 'PENDENTES' | 'RESPONDIDAS' | 'TODAS', dias (período das respondidas, padrão 30),
  *            setor_id, unidade_id, prioridade }
  */
@@ -2580,12 +3271,15 @@ function apiInterconsultas(filtros) {
     var aux = auxiliaresGestao();
     var dias = Number(f.dias) || 30;
     var desde = adicionarDias(aux.hoje, -dias);
-    var itens = listar('ADMISSOES').filter(function (a) {
-      return a.resposta_no_prazo && a.resposta_no_prazo !== 'SEM PRAZO';
-    }).map(function (a) { return itemDeGestao(a, aux); }).filter(function (a) {
-      var pendente = a.prazos.interconsulta.estado === 'PENDENTE';
+    var itens = aux.interconsultas.map(function (i) {
+      var adm = buscarPorId('ADMISSOES', i.admissao_id);
+      var unidade = aux.unidades[i.unidade_id] || {};
+      return Object.assign({}, resumoAdmissao(adm, aux), i, { id: adm.id, interconsulta_id: i.id,
+        unidade_nome: unidade.nome || '', setor_id: unidade.setor_id || '', prazos: { interconsulta: i.prazo } });
+    }).filter(function (a) {
+      var pendente = a.pendente;
       if (f.situacao === 'PENDENTES' && !pendente) return false;
-      if (f.situacao === 'RESPONDIDAS' && pendente) return false;
+      if (f.situacao === 'RESPONDIDAS' && !a.momento_resposta) return false;
       if (!pendente && normalizarData(a.data_solicitacao) < desde) return false;
       if (f.setor_id && a.setor_id !== f.setor_id) return false;
       if (f.unidade_id && a.unidade_id !== f.unidade_id) return false;
@@ -2593,17 +3287,21 @@ function apiInterconsultas(filtros) {
       return true;
     });
     itens.sort(function (a, b) {
-      var pa = a.prazos.interconsulta.estado === 'PENDENTE' ? 0 : 1;
-      var pb = b.prazos.interconsulta.estado === 'PENDENTE' ? 0 : 1;
+      var pa = a.pendente ? 0 : 1;
+      var pb = b.pendente ? 0 : 1;
       if (pa !== pb) return pa - pb;
-      if (!pa) return a.prazo_resposta < b.prazo_resposta ? -1 : 1;
+      if (!pa) return String(a.prazo_resposta || '9999').localeCompare(String(b.prazo_resposta || '9999'));
       return String(b.data_solicitacao + b.hora_solicitacao).localeCompare(String(a.data_solicitacao + a.hora_solicitacao));
     });
-    var resumo = { pendentes: 0, atrasadas: 0, respondidas: 0, no_prazo: 0 };
+    var resumo = { pendentes: 0, atrasadas: 0, respondidas: 0, respondidas_com_prazo: 0, no_prazo: 0 };
     itens.forEach(function (a) {
       var i = a.prazos.interconsulta;
-      if (i.estado === 'PENDENTE') { resumo.pendentes++; if (i.situacao === 'ATRASADO') resumo.atrasadas++; }
-      if (i.estado === 'CUMPRIDO') { resumo.respondidas++; if (i.resultado === 'NO PRAZO') resumo.no_prazo++; }
+      if (a.pendente) { resumo.pendentes++; if (i.situacao === 'ATRASADO') resumo.atrasadas++; }
+      if (i.estado === 'CUMPRIDO') {
+        resumo.respondidas++;
+        if (a.prazo_resposta) resumo.respondidas_com_prazo++;
+        if (i.resultado === 'NO PRAZO') resumo.no_prazo++;
+      }
     });
     return { itens: itens, resumo: resumo, dias: dias, agora: aux.agora };
   });
@@ -2665,7 +3363,7 @@ function testarSistema() {
     item = daAdmissao(dados(apiInterconsultas({ situacao: 'PENDENTES' }), 'Gestão: interconsultas pendentes'));
     verificar(item && item.prazos.interconsulta.estado === 'PENDENTE', 'Gestão: interconsulta aparece aguardando resposta');
 
-    det = dados(apiRegistrarAtendimento({ admissao_id: adm.id, data: hojeIso, hora: horaAgora, publico: 'PACIENTE' }), 'Atendimento: registro ao paciente');
+    det = dados(apiRegistrarAtendimento({ tipo_atendimento: 'BUSCA ATIVA', admissao_id: adm.id, data: hojeIso, hora: horaAgora, publico: 'PACIENTE' }), 'Atendimento: registro ao paciente');
     adm = det && det.admissao;
     verificar(adm && adm.primeiro_no_prazo === 'SIM', '1º atendimento dentro do prazo da admissão', adm && adm.primeiro_no_prazo);
     verificar(adm && adm.resposta_no_prazo === 'SIM', 'Resposta à solicitação dentro de 24h', adm && adm.resposta_no_prazo);
@@ -2676,7 +3374,7 @@ function testarSistema() {
     verificar(item && item.prazos.retorno.estado === 'PENDENTE' && item.prazos.retorno.prazo === adm.proximo_prazo,
       'Gestão: próximo retorno pela matriz de seguimento');
 
-    det = dados(apiRegistrarAtendimento({
+    det = dados(apiRegistrarAtendimento({ tipo_atendimento: 'BUSCA ATIVA',
       admissao_id: adm.id, data: hojeIso, hora: horaAgora, publico: 'FAMÍLIA', quantidade: 2, paciente_impossibilitado: 'NÃO'
     }), 'Atendimento: registro à família (2 pessoas)');
     verificar(det && det.atendimentos.some(function (a) { return a.publico === 'FAMÍLIA' && a.conta_prazo === 'NÃO'; }),
@@ -2814,7 +3512,7 @@ function medirDesempenho() {
     var n = 0;
     comparar('Registrar atendimento', function () {
       n++;
-      return apiRegistrarAtendimento({ admissao_id: adm.id, data: adicionarDias(hojeIso, -1), hora: '08:' + (n < 10 ? '0' : '') + n, publico: 'PACIENTE' });
+      return apiRegistrarAtendimento({ tipo_atendimento: 'BUSCA ATIVA', admissao_id: adm.id, data: adicionarDias(hojeIso, -1), hora: '08:' + (n < 10 ? '0' : '') + n, publico: 'PACIENTE' });
     });
     comparar('Salvar admissão', function () {
       n++;

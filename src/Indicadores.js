@@ -140,20 +140,21 @@ function montarCompilado(dados, op) {
   var nomesPrioridade = function (tipo) {
     return prioridades.filter(function (p) { return p.tipo === tipo; }).map(function (p) { return p.nome; });
   };
+  var solicitacoes = dados.interconsultas ? dados.interconsultas.filter(function (a) { return aceita(a.data_solicitacao, a.unidade_id); }) : adms;
   var comSolicitacao = function (a) { return Boolean(a.motivo_solicitacao_id || a.data_solicitacao); };
   [
-    ['Tipo de solicitação', function (a) { return a.tipo_solicitacao; }, listas.TIPO_SOLICITACAO, adms],
+    ['Tipo de solicitação', function (a) { return a.tipo_solicitacao; }, listas.TIPO_SOLICITACAO, solicitacoes],
     ['Motivo da solicitação', function (a) { return (motivos[a.motivo_solicitacao_id] || {}).nome; },
-      (dados.motivos || []).map(function (m) { return m.nome; }), adms.filter(comSolicitacao)],
+      (dados.motivos || []).map(function (m) { return m.nome; }), solicitacoes.filter(comSolicitacao)],
     ['Prioridade da solicitação', function (a) { return a.prioridade_solicitacao || 'SEM PRIORIDADE'; },
-      nomesPrioridade(TIPOS_PRIORIDADE.solicitacao), adms.filter(comSolicitacao)],
-    ['Solicitação para', function (a) { return a.para_quem; }, PARA_QUEM_SOLICITACAO, adms.filter(comSolicitacao)],
+      nomesPrioridade(TIPOS_PRIORIDADE.solicitacao), solicitacoes.filter(comSolicitacao)],
+    ['Solicitação para', function (a) { return a.para_quem; }, PARA_QUEM_SOLICITACAO, solicitacoes.filter(comSolicitacao)],
     ['Descrição da demanda', function (a) { return a.descricao_demanda; }, listas.DESCRICAO_DEMANDA, adms],
     ['Prioridade da demanda (seguimento)', function (a) { return a.prioridade_demanda || 'SEM PRIORIDADE'; },
       nomesPrioridade(TIPOS_PRIORIDADE.seguimento), adms],
     ['Necessidade de acompanhamento', function (a) { return a.necessidade_acompanhamento; }, listas.NECESSIDADE_ACOMPANHAMENTO, adms]
   ].forEach(function (d) {
-    secao(d[0], distribuicao(d[3], d[1], d[2], chaveAdm), { nota: notaServico });
+    secao(d[0], distribuicao(d[3], d[1], d[2], (!dados.interconsultas || d[3] === adms) ? chaveAdm : function (a) { return chave(a.data_solicitacao, a.unidade_id); }), { nota: notaServico });
   });
 
   // 3. 1º atendimento em até N dias úteis da admissão
@@ -180,7 +181,7 @@ function montarCompilado(dados, op) {
   });
 
   // 3b. Resposta à solicitação no prazo da prioridade (matriz de atendimento), pela data da solicitação.
-  var sols = dados.admissoes.filter(function (a) { return a.resposta_no_prazo && aceita(a.data_solicitacao, a.unidade_id); });
+  var sols = (dados.interconsultas || dados.admissoes).filter(function (a) { return a.resposta_no_prazo && aceita(a.data_solicitacao, a.unidade_id); });
   var chaveSol = function (a) { return chave(a.data_solicitacao, a.unidade_id); };
   var rSim = linhaCompilado('NO PRAZO');
   var rNao = linhaCompilado('FORA DO PRAZO');
@@ -191,7 +192,7 @@ function montarCompilado(dados, op) {
   rPct.num = rSim;
   rPct.den = [rSim, rNao];
   rPct.destaque = true;
-  var rMedia = linhaCompilado('MÉDIA DE HORAS ATÉ A RESPOSTA', 'media');
+  var rMedia = linhaCompilado('MÉDIA DE HORAS ÚTEIS ATÉ A RESPOSTA', 'media');
   var mapaResp = { 'SIM': rSim, 'NÃO': rNao, 'EM ANDAMENTO': rAnd, 'NÃO SE APLICA': rNsa, 'SEM PRAZO': rSem };
   // % no prazo por prioridade
   var porPrioridade = {};
@@ -216,7 +217,7 @@ function montarCompilado(dados, op) {
   });
   var linhasPorPrioridade = ordemPrioridade.map(function (n) { return porPrioridade[n].pct; });
   secao('Resposta à solicitação no prazo da prioridade', [rSim, rNao, rAnd, rNsa, rSem, rPct].concat(linhasPorPrioridade).concat([rMedia]), {
-    nota: [notaServico, 'Horas corridas entre a solicitação e o primeiro atendimento depois dela, pela data da solicitação.']
+    nota: [notaServico, 'Horas úteis entre a solicitação e a resposta, sem sábados, domingos e feriados, pela data da solicitação.']
       .filter(Boolean).join(' ')
   });
 

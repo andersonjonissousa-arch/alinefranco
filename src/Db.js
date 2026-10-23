@@ -4,6 +4,25 @@
  */
 
 var _cacheTabelas = {};
+var _indicesTabelas = {};
+
+/** Índice por id em memória, refeito sozinho quando a tabela é lida ou gravada de novo. */
+function indicePorId_(nome) {
+  var lista = listar(nome);
+  var indice = _indicesTabelas[nome];
+  if (!indice || indice.lista !== lista) {
+    var mapa = Object.create(null);
+    lista.forEach(function (r) { if (!mapa[String(r.id)]) mapa[String(r.id)] = r; });
+    indice = _indicesTabelas[nome] = { lista: lista, mapa: mapa };
+  }
+  return indice.mapa;
+}
+
+function agruparPor_(registros, campo) {
+  var grupos = Object.create(null);
+  registros.forEach(function (r) { (grupos[r[campo]] = grupos[r[campo]] || []).push(r); });
+  return grupos;
+}
 
 var _banco = null;
 // Usado só pelo autoteste: aponta o sistema para uma planilha de teste durante a execução.
@@ -42,6 +61,7 @@ var _apiIndisponivel = false;
 /**
  * Lê numa consulta só, pela API do Google Planilhas, todas as tabelas que ainda não estão no cache.
  * Cada consulta ao Google custa um tempo fixo, então ler tudo junto é bem mais rápido que aba por aba.
+ * A leitura traz o cabeçalho: se faltar coluna ou aba nova, ela é acrescentada sem mexer nos dados.
  * Se a API não estiver disponível, lê só a tabela pedida, aba por aba.
  */
 function carregarTabelas(pedida) {
@@ -49,14 +69,11 @@ function carregarTabelas(pedida) {
   if (!_forcarLeituraPorAba && !_apiIndisponivel && typeof Sheets !== 'undefined') {
     var nomes = Object.keys(TABELAS).filter(function (n) { return !_cacheTabelas[n]; });
     try {
-      var resposta = Sheets.Spreadsheets.Values.batchGet(idDoBanco(), {
-        ranges: nomes.map(intervaloDaTabela),
-        valueRenderOption: 'UNFORMATTED_VALUE',
-        dateTimeRenderOption: 'SERIAL_NUMBER'
-      });
-      var faixas = resposta.valueRanges || [];
+      var faixas = lerPelaApi(nomes);
+      var migrar = nomes.filter(function (nome, i) { return precisaPrepararAba(nome, ((faixas[i] && faixas[i].values) || [])[0]); });
+      if (migrar.length) prepararAbas(migrar);
       nomes.forEach(function (nome, i) {
-        _cacheTabelas[nome] = registrosDe(nome, (faixas[i] && faixas[i].values) || []);
+        _cacheTabelas[nome] = registrosDe(nome, ((faixas[i] && faixas[i].values) || []).slice(1));
       });
       _modoLeitura = 'API';
       return;
@@ -65,10 +82,56 @@ function carregarTabelas(pedida) {
       if (!_semRegistroDeErros) console.warn('Leitura pela API do Google Planilhas falhou; lendo aba por aba. ' + e.message);
     }
   }
-  var aba = abaDaTabela(pedida);
+  var aba = abrirBanco().getSheetByName(pedida);
+  if (!aba) {
+    prepararAbas([pedida]);
+    aba = abaDaTabela(pedida);
+  }
+  var colunas = TABELAS[pedida];
   var ultima = aba.getLastRow();
-  _cacheTabelas[pedida] = registrosDe(pedida, ultima < 2 ? [] : aba.getRange(2, 1, ultima - 1, TABELAS[pedida].length).getValues());
+  var valores = ultima < 1 ? [] : aba.getRange(1, 1, ultima, colunas.length).getValues();
+  if (precisaPrepararAba(pedida, valores[0])) prepararAbas([pedida]);
+  _cacheTabelas[pedida] = registrosDe(pedida, valores.slice(1));
   _modoLeitura = 'ABAS';
+}
+
+/** Uma consulta pela API. Se alguma aba ainda não existir (versão nova do sistema), cria e tenta de novo. */
+function lerPelaApi(nomes) {
+  // Dentro de uma gravação, o que ainda não foi para a planilha vai antes da leitura.
+  if (_pendenteNaPlanilha) {
+    SpreadsheetApp.flush();
+    _pendenteNaPlanilha = false;
+  }
+  if (_travaAtiva) enviarGravacoes();
+  var consulta = function () {
+    return Sheets.Spreadsheets.Values.batchGet(idDoBanco(), {
+      ranges: nomes.map(intervaloDaTabela),
+      valueRenderOption: 'UNFORMATTED_VALUE',
+      dateTimeRenderOption: 'SERIAL_NUMBER'
+    }).valueRanges || [];
+  };
+  try {
+    return consulta();
+  } catch (e) {
+    var existentes = abrirBanco().getSheets().map(function (a) { return a.getName(); });
+    var faltando = nomes.filter(function (n) { return existentes.indexOf(n) === -1; });
+    if (!faltando.length) throw e;
+    prepararAbas(faltando);
+    return consulta();
+  }
+}
+
+/** O cabeçalho da aba não tem todas as colunas da tabela (coluna ou aba nova). */
+function precisaPrepararAba(nome, cabecalho) {
+  return TABELAS[nome].some(function (col, i) { return !cabecalho || cabecalho[i] !== col; });
+}
+
+/** Cria a aba ou acrescenta as colunas que faltam no cabeçalho (ver prepararAba, em Setup.js). */
+function prepararAbas(nomes) {
+  comTrava(function () {
+    nomes.forEach(function (nome) { prepararAba(abrirBanco(), nome); });
+    SpreadsheetApp.flush();
+  });
 }
 
 var _idBanco = '';
@@ -79,9 +142,9 @@ function idDoBanco() {
   return _idBanco;
 }
 
-/** Ex.: 'ATENDIMENTOS'!A2:R — da segunda linha até o fim, só as colunas da tabela. */
+/** Ex.: 'ATENDIMENTOS'!A1:R — do cabeçalho até o fim, só as colunas da tabela. */
 function intervaloDaTabela(nome) {
-  return "'" + nome + "'!A2:" + letraDaColuna(TABELAS[nome].length);
+  return "'" + nome + "'!A1:" + letraDaColuna(TABELAS[nome].length);
 }
 
 function letraDaColuna(n) {
@@ -132,11 +195,7 @@ function normalizarDataHora(coluna, valor) {
 }
 
 function buscarPorId(nome, id) {
-  var lista = listar(nome);
-  for (var i = 0; i < lista.length; i++) {
-    if (String(lista[i].id) === String(id)) return lista[i];
-  }
-  return null;
+  return indicePorId_(nome)[String(id)] || null;
 }
 
 function novoId() {
@@ -188,6 +247,7 @@ function inserir(nome, registro) {
     if (_cacheTabelas[nome] && linha) {
       _cacheTabelas[nome].push(registroDeValores(colunas, valores));
       _linhas[nome][String(obj.id)] = Number(linha[1]);
+      delete _indicesTabelas[nome];
     } else {
       // Sem saber a linha nova, a aba vai ser lida de novo: o que estava para gravar vai antes.
       enviarGravacoes();
@@ -236,6 +296,7 @@ function atualizarVarios(nome, mudancas, unico) {
       lista[i] = registroDeValores(colunas, valores);
       gravados.push(lista[i]);
     });
+    delete _indicesTabelas[nome];
     return gravados;
   });
 }
@@ -351,6 +412,7 @@ function comTrava(fn) {
   trava.waitLock(20000);
   _travaAtiva = true;
   _cacheTabelas = {};
+  _indicesTabelas = {};
   _gravacoes = {};
   try {
     var resultado = fn();

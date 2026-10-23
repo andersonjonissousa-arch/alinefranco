@@ -15,12 +15,7 @@ function doGet() {
  * ficar dentro de um <script>. Sem acesso, leva o erro, e a tela mostra a mensagem.
  */
 function dadosIniciaisDaPagina() {
-  var r = responder(function () {
-    var dados = apiInicio();
-    if (!dados.ok) throw new Error(dados.erro);
-    var gestao = apiGestao({});
-    return Object.assign(dados.dados, { gestao: gestao.ok ? gestao.dados : null });
-  });
+  var r = apiInicio(true);
   return JSON.stringify(r).replace(/</g, '\\u003c').replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029');
 }
 
