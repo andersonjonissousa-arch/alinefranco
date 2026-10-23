@@ -434,27 +434,37 @@ test('admissões: histórico de outras internações abre seus próprios IDs sem
   assert.equal(tela.todos().some(el => el.name === 'publico'), false);
 });
 
-test('atendimentos: filtros enviam unidade e setor e respostas antigas não substituem a busca nova', async () => {
+test('atendimentos: setor, unidade e busca filtram na tela; só a situação busca de novo, e resposta antiga não substitui a nova', async () => {
   const tela = carregar();
   tela.ctx.telaAtendimentos();
+  assert.equal(tela.pedidos.length, 1);
+  assert.deepEqual(tela.pedidos[0].args[0], { status_atendimento: 'ATIVOS' });
   const form = formularioCom(tela, 'termo');
   preencher(form, 'setor_id', 's1');
   preencher(form, 'unidade_id', 'u1');
   preencher(form, 'termo', 'nova busca');
   preencher(form, 'status_atendimento', 'INATIVOS');
   form.emitir('input');
+  form.emitir('change');
+  // Mudou a situação: uma busca nova (e só uma), com a situação; o resto é filtrado na tela.
+  assert.equal(tela.pedidos.length, 2);
+  assert.equal(tela.pedidos[1].nome, 'apiGestao');
+  assert.deepEqual(tela.pedidos[1].args[0], { status_atendimento: 'INATIVOS' });
   await tela.responder(0, gestao([itemDeGestao({ paciente_nome: 'RESPOSTA ANTERIOR AO FILTRO' })]));
   assert.doesNotMatch(tela.conteudo.textContent, /RESPOSTA ANTERIOR AO FILTRO/);
-  tela.dispararTimers();
-  assert.equal(tela.pedidos[1].nome, 'apiGestao');
-  assert.deepEqual(tela.pedidos[1].args[0], { setor_id: 's1', unidade_id: 'u1', termo: 'nova busca', status_atendimento: 'INATIVOS', pendencia: '' });
-  preencher(form, 'termo', 'última busca');
+  await tela.responder(1, gestao([
+    itemDeGestao({ id: 'a1', paciente_nome: 'NOVA BUSCA DA SILVA' }),
+    itemDeGestao({ id: 'a2', paciente_nome: 'NOVA BUSCA EM OUTRA UNIDADE', unidade_id: 'u2' }),
+    itemDeGestao({ id: 'a3', paciente_nome: 'OUTRO NOME' })
+  ]));
+  assert.match(tela.conteudo.textContent, /NOVA BUSCA DA SILVA/);
+  assert.doesNotMatch(tela.conteudo.textContent, /NOVA BUSCA EM OUTRA UNIDADE|OUTRO NOME/);
+  // Digitar não vai ao servidor nem espera: a lista muda na hora.
+  preencher(form, 'termo', 'outro');
   form.emitir('input');
-  tela.dispararTimers();
-  await tela.responder(2, gestao([itemDeGestao({ paciente_nome: 'RESULTADO ATUAL' })]));
-  await tela.responder(1, gestao([itemDeGestao({ paciente_nome: 'RESULTADO OBSOLETO' })]));
-  assert.match(tela.conteudo.textContent, /RESULTADO ATUAL/);
-  assert.doesNotMatch(tela.conteudo.textContent, /RESULTADO OBSOLETO/);
+  assert.equal(tela.pedidos.length, 2);
+  assert.match(tela.conteudo.textContent, /OUTRO NOME/);
+  assert.doesNotMatch(tela.conteudo.textContent, /NOVA BUSCA DA SILVA/);
 });
 
 test('atendimentos: retomada reabre trabalho diário na mesma admissão hospitalar', async () => {
@@ -650,4 +660,86 @@ test('botão de excluir interconsulta aparece só para autor ou coordenação', 
   d.interconsultas[0].criado_por = 'prof1';
   tela.ctx.desenharAtendimento(d);
   botao(tela, /^Excluir interconsulta$/);
+});
+
+test('gestão: filtros de setor, unidade, busca e pendência não vão ao servidor; incluir desfecho psicológico busca de novo', async () => {
+  const tela = carregar();
+  tela.ctx.telaGestao({ aba: 'unidades' });
+  assert.equal(tela.pedidos.length, 1);
+  assert.deepEqual(tela.pedidos[0].args[0], { incluir_encerrados: '' });
+  await tela.responder(0, gestao([
+    itemDeGestao({ id: 'a1', paciente_nome: 'MARIA ATRASADA', prazos: undefined }),
+    itemDeGestao({ id: 'a2', paciente_nome: 'JOAO EM DIA' })
+  ].map((a, i) => i === 0 ? { ...a, prazos: { ...itemDeGestao().prazos, proximo: { tipo: 'RETORNO', prazo: '2026-10-19', situacao: 'ATRASADO' } } } : a)));
+  assert.match(tela.conteudo.textContent, /MARIA ATRASADA/);
+  assert.match(tela.conteudo.textContent, /JOAO EM DIA/);
+  const form = formularioCom(tela, 'pendencia');
+  preencher(form, 'pendencia', 'ATRASADOS');
+  form.emitir('input');
+  form.emitir('change');
+  assert.equal(tela.pedidos.length, 1, 'Trocar a opção não busca no servidor (nem duas vezes)');
+  assert.match(tela.conteudo.textContent, /MARIA ATRASADA/);
+  assert.doesNotMatch(tela.conteudo.textContent, /JOAO EM DIA/);
+  preencher(form, 'pendencia', '');
+  preencher(form, 'termo', 'joão');
+  form.emitir('input');
+  assert.equal(tela.pedidos.length, 1);
+  assert.match(tela.conteudo.textContent, /JOAO EM DIA/);
+  assert.doesNotMatch(tela.conteudo.textContent, /MARIA ATRASADA/);
+  const caixa = form.elements.find(el => el.type === 'checkbox') || tela.todos().find(el => el.type === 'checkbox');
+  caixa.checked = true;
+  form.emitir('change');
+  assert.equal(tela.pedidos.length, 2);
+  assert.deepEqual(tela.pedidos[1].args[0], { incluir_encerrados: 'SIM' });
+});
+
+test('interconsultas: uma busca só (todas, 90 dias); situação, período e prioridade filtram na tela', async () => {
+  const tela = carregar();
+  tela.ctx.telaGestao({ aba: 'interconsultas' });
+  assert.equal(tela.pedidos.length, 1);
+  assert.deepEqual(tela.pedidos[0].args[0], { situacao: 'TODAS', dias: '90' });
+  const base = { ...itemDeGestao(), unidade_nome: 'UNIDADE TESTE', motivo_nome: 'MOTIVO' };
+  const pendente = { ...base, id: 'a1', paciente_nome: 'PENDENTE ALTA', pendente: true, prioridade_solicitacao: 'ALTA', data_solicitacao: '2026-10-20',
+    prazo_resposta: '2026-10-21 08:00', prazos: { interconsulta: { estado: 'PENDENTE', situacao: 'NO PRAZO', prazo: '2026-10-21 08:00' } } };
+  const respondida = { ...base, id: 'a2', paciente_nome: 'RESPONDIDA ANTIGA', pendente: false, momento_resposta: '2026-09-01 10:00',
+    prioridade_solicitacao: 'BAIXA', data_solicitacao: '2026-09-01', prazo_resposta: '2026-09-04 08:00',
+    prazos: { interconsulta: { estado: 'CUMPRIDO', resultado: 'NO PRAZO', prazo: '2026-09-04 08:00' } } };
+  await tela.responder(0, { itens: [pendente, respondida], dias: 90, agora: '2026-10-20 12:00', resumo: {} });
+  // Padrão: aguardando resposta.
+  assert.match(tela.conteudo.textContent, /PENDENTE ALTA/);
+  assert.doesNotMatch(tela.conteudo.textContent, /RESPONDIDA ANTIGA/);
+  const form = formularioCom(tela, 'situacao');
+  preencher(form, 'situacao', 'TODAS');
+  preencher(form, 'dias', '90');
+  form.emitir('change');
+  assert.equal(tela.pedidos.length, 1);
+  assert.match(tela.conteudo.textContent, /RESPONDIDA ANTIGA/);
+  preencher(form, 'dias', '30');
+  form.emitir('change');
+  assert.doesNotMatch(tela.conteudo.textContent, /RESPONDIDA ANTIGA/, 'Respondida há mais de 30 dias sai do período');
+  assert.match(tela.conteudo.textContent, /PENDENTE ALTA/, 'Pendente aparece em qualquer período');
+  preencher(form, 'prioridade', 'BAIXA');
+  form.emitir('change');
+  assert.doesNotMatch(tela.conteudo.textContent, /PENDENTE ALTA/);
+  assert.equal(tela.pedidos.length, 1);
+});
+
+test('admissões: trocar abertas e encerradas faz uma busca só; setor e busca filtram na tela', async () => {
+  const tela = carregar();
+  tela.ctx.telaAdmissoes();
+  assert.equal(tela.pedidos.length, 1);
+  assert.deepEqual(tela.pedidos[0].args[0], { abertas: 'SIM', limite: 300 });
+  await tela.responder(0, [detalhe().admissao, { ...detalhe().admissao, id: 'adm2', paciente_nome: 'OUTRA PACIENTE', prontuario: '999' }]);
+  assert.match(tela.conteudo.textContent, /OUTRA PACIENTE/);
+  const form = formularioCom(tela, 'abertas');
+  const busca = preencher(form, 'termo', '999');
+  form.listeners.input.forEach(fn => fn({ target: busca }));
+  assert.equal(tela.pedidos.length, 1);
+  assert.match(tela.conteudo.textContent, /OUTRA PACIENTE/);
+  assert.doesNotMatch(tela.conteudo.textContent, /PACIENTE DE TESTE/);
+  const abertas = preencher(form, 'abertas', 'NÃO');
+  form.listeners.input.forEach(fn => fn({ target: abertas }));
+  form.listeners.change.forEach(fn => fn({ target: abertas }));
+  assert.equal(tela.pedidos.length, 2, 'Uma busca só ao trocar a opção');
+  assert.deepEqual(tela.pedidos[1].args[0], { abertas: 'NÃO', limite: 300 });
 });

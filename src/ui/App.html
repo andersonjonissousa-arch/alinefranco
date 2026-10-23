@@ -39,6 +39,44 @@
     return e;
   }
 
+  // ---------- Filtros na própria tela ----------
+  // As listas são buscadas uma vez; setor, unidade, busca e pendência filtram aqui, sem ir ao servidor.
+  // As regras repetem as do servidor (dadosDeGestao_ em Gestao.js, apiInterconsultas e apiListarAdmissoes).
+
+  /** Como normalizarTexto (Regras.js): maiúsculas, sem acentos e sem espaços repetidos. */
+  function textoBusca(v) {
+    return String(v || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().replace(/\s+/g, ' ').trim();
+  }
+
+  /** Como normalizarProntuario (Regras.js): só os números. */
+  function prontuarioBusca(v) {
+    return v === null || v === undefined ? '' : String(v).trim().replace(/\.0+$/, '').replace(/\D/g, '');
+  }
+
+  /** Parte do nome ou o prontuário completo. */
+  function casaBusca(a, termo) {
+    var t = textoBusca(termo);
+    var p = prontuarioBusca(termo);
+    return !t || textoBusca(a.paciente_nome).indexOf(t) !== -1 || Boolean(p && prontuarioBusca(a.prontuario) === p);
+  }
+
+  /** Setor, unidade, pendência e busca sobre os itens de apiGestao. */
+  function filtrarGestao(itens, f) {
+    return itens.filter(function (a) {
+      if (f.setor_id && a.setor_id !== f.setor_id) return false;
+      if (f.unidade_id && a.unidade_id !== f.unidade_id) return false;
+      if (f.pendencia === 'ATRASADOS' && !(a.prazos.proximo && a.prazos.proximo.situacao === 'ATRASADO')) return false;
+      if (f.pendencia === 'PENDENTES' && !a.prazos.proximo) return false;
+      return casaBusca(a, f.termo);
+    });
+  }
+
+  /** 'AAAA-MM-DD' menos n dias. */
+  function diasAntes(iso, n) {
+    var d = new Date(Date.UTC(Number(iso.slice(0, 4)), Number(iso.slice(5, 7)) - 1, Number(iso.slice(8, 10)) - n));
+    return d.toISOString().slice(0, 10);
+  }
+
   /** Cria elementos sem usar innerHTML: h('td', { class: 'x' }, 'texto', filho...). */
   function h(tag, attrs) {
     var el = document.createElement(tag);
@@ -301,7 +339,7 @@
     mostrar((arg && arg.aba) || telaGestao.aba || 'unidades');
   }
 
-  /** Filtros comuns: setor, unidade, busca e pendência. Chama aoMudar com os valores. */
+  /** Filtros comuns: setor, unidade, busca e pendência. Chama aoMudar, que filtra na tela. */
   function filtrosDeGestao(alvo, extras, aoMudar) {
     var setores = estado.cad.setores.map(function (x) { return { valor: x.id, rotulo: x.nome }; });
     var form = h('form', { class: 'linha' },
@@ -311,9 +349,9 @@
       campo('Mostrar', seletor('pendencia', [{ valor: 'PENDENTES', rotulo: 'Só com prazo pendente' }, { valor: 'ATRASADOS', rotulo: 'Só atrasados' }],
         filtrosGestao.pendencia, 'Todos os pacientes')),
       extras || null);
-    var espera;
+    // Filtrar na tela é instantâneo: cada tecla ou opção redesenha a lista, sem esperar nem ir ao servidor.
     var mudar = function () { filtrosGestao = Object.assign(filtrosGestao, lerFormulario(form)); aoMudar(); };
-    form.addEventListener('input', function () { clearTimeout(espera); espera = setTimeout(mudar, 350); });
+    form.addEventListener('input', mudar);
     form.addEventListener('change', mudar);
     form.addEventListener('submit', function (ev) { ev.preventDefault(); mudar(); });
     alvo.appendChild(h('div', { class: 'cartao' }, form));
@@ -324,15 +362,33 @@
     var incluir = h('label', { class: 'marcacao' },
       h('input', { type: 'checkbox', checked: filtrosGestao.incluir_encerrados === 'SIM' }), ' Incluir quem teve desfecho psicológico e segue internado');
     var lista = h('div', null, h('p', { class: 'carregando' }, 'Carregando…'));
+    // Busca uma vez; só busca de novo quando "Incluir quem teve desfecho psicológico" muda o conjunto.
+    var dados = null;
+    var carregadoCom = null;
+    function marcado() { return incluir.querySelector('input').checked ? 'SIM' : ''; }
     function carregar() {
-      filtrosGestao.incluir_encerrados = incluir.querySelector('input').checked ? 'SIM' : '';
-      chamar('apiGestao', filtrosGestao).then(function (g) {
+      var pedido = carregadoCom = filtrosGestao.incluir_encerrados = marcado();
+      dados = null;
+      lista.textContent = '';
+      lista.appendChild(h('p', { class: 'carregando' }, 'Carregando…'));
+      chamar('apiGestao', { incluir_encerrados: pedido }).then(function (g) {
+        if (pedido !== carregadoCom) return;
+        dados = g;
+        desenhar();
+      }).catch(function (e) { avisar(e.message, 'erro'); });
+    }
+    function aplicar() {
+      if (marcado() !== carregadoCom) return carregar();
+      if (dados) desenhar();
+    }
+    function desenhar() {
+        var itensFiltrados = filtrarGestao(dados.itens, filtrosGestao);
         lista.textContent = '';
-        lista.appendChild(h('p', { class: 'suave' }, g.itens.length + ' paciente(s) em acompanhamento, sem desfecho.'));
-        if (!g.itens.length) return;
+        lista.appendChild(h('p', { class: 'suave' }, itensFiltrados.length + ' paciente(s) em acompanhamento, sem desfecho.'));
+        if (!itensFiltrados.length) return;
         // Agrupa por setor e unidade, na ordem dos cadastros.
         var porUnidade = {};
-        g.itens.forEach(function (a) { (porUnidade[a.unidade_id] = porUnidade[a.unidade_id] || []).push(a); });
+        itensFiltrados.forEach(function (a) { (porUnidade[a.unidade_id] = porUnidade[a.unidade_id] || []).push(a); });
         estado.cad.setores.forEach(function (s) {
           var unidades = estado.cad.unidades.filter(function (u) { return u.setor_id === s.id && porUnidade[u.id]; });
           if (!unidades.length) return;
@@ -361,18 +417,24 @@
                 })))));
           });
         });
-      }).catch(function (e) { avisar(e.message, 'erro'); });
     }
-    var form = filtrosDeGestao(alvo, h('div', { class: 'campo' }, h('label', null, ' '), incluir), carregar);
-    void form;
+    filtrosDeGestao(alvo, h('div', { class: 'campo' }, h('label', null, ' '), incluir), aplicar);
     alvo.appendChild(lista);
     carregar();
   }
 
   function gestaoPrazos(alvo) {
     var lista = h('div', { class: 'cartao tabela-rolagem' }, h('p', { class: 'carregando' }, 'Carregando…'));
+    var dados = null;
     function carregar() {
-      chamar('apiGestao', Object.assign({}, filtrosGestao, { incluir_encerrados: '' })).then(function (g) {
+      chamar('apiGestao', { incluir_encerrados: '' }).then(function (g) {
+        dados = g;
+        desenhar();
+      }).catch(function (e) { avisar(e.message, 'erro'); });
+    }
+    function desenhar() {
+        if (!dados) return;
+        var g = { itens: filtrarGestao(dados.itens, filtrosGestao) };
         lista.textContent = '';
         lista.appendChild(h('p', { class: 'suave' },
           'Prazos de cada paciente: 1º atendimento em até ' + parametroPrazoPrimeiro() + ' dia(s) útil(eis) da admissão, ' +
@@ -390,9 +452,8 @@
               h('td', null, a.prazos.retorno.prioridade ? h('div', { class: 'suave' }, a.prazos.retorno.prioridade.toLowerCase() + (a.periodicidade ? ' · ' + a.periodicidade : '')) : '',
                 celulaPrazo(a.prazos.retorno, false)));
           }))));
-      }).catch(function (e) { avisar(e.message, 'erro'); });
     }
-    filtrosDeGestao(alvo, null, carregar);
+    filtrosDeGestao(alvo, null, desenhar);
     alvo.appendChild(lista);
     carregar();
   }
@@ -415,10 +476,40 @@
       campo('Setor', seletor('setor_id', setores, f.setor_id, 'Todos')));
     var resumo = h('div', { class: 'indicadores' });
     var lista = h('div', { class: 'cartao tabela-rolagem' }, h('p', { class: 'carregando' }, 'Carregando…'));
+    // Busca todas as solicitações dos últimos 90 dias (o maior período) e filtra aqui.
+    var todas = null;
     function carregar() {
-      filtrosInterconsultas = lerFormulario(form);
-      chamar('apiInterconsultas', filtrosInterconsultas).then(function (d) {
-        var r = d.resumo;
+      chamar('apiInterconsultas', { situacao: 'TODAS', dias: '90' }).then(function (d) {
+        todas = d;
+        desenhar();
+      }).catch(function (e) { avisar(e.message, 'erro'); });
+    }
+    function desenhar() {
+        if (!todas) return;
+        filtrosInterconsultas = lerFormulario(form);
+        var f = filtrosInterconsultas;
+        var dias = Number(f.dias) || 30;
+        var desde = diasAntes(todas.agora.slice(0, 10), dias);
+        var itens = todas.itens.filter(function (a) {
+          if (f.situacao === 'PENDENTES' && !a.pendente) return false;
+          if (f.situacao === 'RESPONDIDAS' && !a.momento_resposta) return false;
+          if (!a.pendente && String(a.data_solicitacao || '').slice(0, 10) < desde) return false;
+          if (f.setor_id && a.setor_id !== f.setor_id) return false;
+          if (f.unidade_id && a.unidade_id !== f.unidade_id) return false;
+          if (f.prioridade && a.prioridade_solicitacao !== f.prioridade) return false;
+          return true;
+        });
+        var r = { pendentes: 0, atrasadas: 0, respondidas: 0, respondidas_com_prazo: 0, no_prazo: 0 };
+        itens.forEach(function (a) {
+          var i = a.prazos.interconsulta;
+          if (a.pendente) { r.pendentes++; if (i.situacao === 'ATRASADO') r.atrasadas++; }
+          if (i.estado === 'CUMPRIDO') {
+            r.respondidas++;
+            if (a.prazo_resposta) r.respondidas_com_prazo++;
+            if (i.resultado === 'NO PRAZO') r.no_prazo++;
+          }
+        });
+        var d = { itens: itens, dias: dias };
         resumo.textContent = '';
         resumo.appendChild(h('div', { class: 'indicador' }, h('div', { class: 'numero' }, r.pendentes), h('div', null, 'Aguardando resposta')));
         resumo.appendChild(h('div', { class: 'indicador atrasado' }, h('div', { class: 'numero' }, r.atrasadas), h('div', null, 'Atrasadas')));
@@ -439,9 +530,8 @@
               h('td', null, dataHoraBr(dataHoraSolicitacao(a))),
               h('td', null, h('div', { class: 'suave' }, 'até ' + dataHoraBr(i.prazo)), celulaPrazo(i, true)));
           }))));
-      }).catch(function (e) { avisar(e.message, 'erro'); });
     }
-    form.addEventListener('change', carregar);
+    form.addEventListener('change', desenhar);
     alvo.appendChild(h('div', { class: 'cartao' }, form));
     alvo.appendChild(resumo);
     alvo.appendChild(lista);
@@ -597,30 +687,53 @@
     var pedido = 0;
     var navegacao = estado.navegacao;
     var espera;
+    // Busca uma vez por "Admissões" (abertas, encerradas ou todas) e filtra na tela. Se a lista veio
+    // cortada no limite do servidor, a filtragem volta a ser no servidor, para não esconder ninguém.
+    var LIMITE = 300;
+    var dados = null;
+    var carregadoCom = null;
+    function chave(f) { return f.abertas + (dados && dados.cortada ? '|' + f.termo + '|' + f.setor_id + '|' + f.unidade_id : ''); }
     function carregar() {
       clearTimeout(espera);
-      filtrosAdmissoes = lerFormulario(form);
+      var f = filtrosAdmissoes = lerFormulario(form);
+      var cortada = dados && dados.cortada;
+      var consulta = cortada ? Object.assign({ limite: LIMITE }, f) : { abertas: f.abertas, limite: LIMITE };
       var atual = ++pedido;
       lista.textContent = 'Carregando admissões…';
-      chamar('apiListarAdmissoes', filtrosAdmissoes).then(function (adms) {
+      chamar('apiListarAdmissoes', consulta).then(function (adms) {
         if (atual !== pedido || navegacao !== estado.navegacao) return;
-        lista.textContent = '';
-        lista.appendChild(h('p', { class: 'suave' }, adms.length ? adms.length + ' admissão(ões)' : 'Nenhuma admissão encontrada.'));
-        if (adms.length) lista.appendChild(tabelaAdmissoes(adms));
+        dados = { adms: adms, cortada: cortada || adms.length >= LIMITE, filtrada: cortada };
+        carregadoCom = chave(f);
+        desenhar();
       }).catch(function (e) {
         if (atual !== pedido || navegacao !== estado.navegacao) return;
         lista.textContent = 'Não foi possível carregar as admissões. ' + e.message;
         avisar(e.message, 'erro');
       });
     }
-    form.addEventListener('input', function () {
+    function desenhar() {
+      var f = filtrosAdmissoes;
+      var adms = dados.filtrada ? dados.adms : dados.adms.filter(function (a) {
+        if (f.setor_id && a.setor_id !== f.setor_id) return false;
+        if (f.unidade_id && a.unidade_id !== f.unidade_id) return false;
+        return casaBusca(a, f.termo);
+      });
+      lista.textContent = '';
+      lista.appendChild(h('p', { class: 'suave' }, adms.length ? adms.length + ' admissão(ões)' : 'Nenhuma admissão encontrada.'));
+      if (adms.length) lista.appendChild(tabelaAdmissoes(adms));
+    }
+    function aplicar(texto) {
+      filtrosAdmissoes = lerFormulario(form);
+      if (dados && chave(filtrosAdmissoes) === carregadoCom) return desenhar();
+      // No servidor, a busca por nome espera a digitação parar.
       clearTimeout(espera);
-      pedido++;
-      lista.textContent = 'Carregando admissões…';
-      espera = setTimeout(carregar, 350);
-    });
-    form.addEventListener('change', carregar);
-    form.addEventListener('submit', function (ev) { ev.preventDefault(); carregar(); });
+      if (texto) espera = setTimeout(carregar, 350);
+      else carregar();
+    }
+    // O campo de busca responde a cada tecla; as opções de seleção, uma vez, quando mudam.
+    form.addEventListener('input', function (ev) { if (ev.target.type === 'search') aplicar(true); });
+    form.addEventListener('change', function (ev) { if (ev.target.type !== 'search') aplicar(false); });
+    form.addEventListener('submit', function (ev) { ev.preventDefault(); aplicar(false); });
     main.appendChild(h('div', { class: 'cartao' }, form));
     main.appendChild(lista);
     carregar();
@@ -693,16 +806,31 @@
         filtrosAtendimentos.pendencia, 'Todos os pacientes')),
       campo('Situação do acompanhamento', seletor('status_atendimento', [{ valor: 'ATIVOS', rotulo: 'Ativos — sem desfecho' }, { valor: 'INATIVOS', rotulo: 'Inativos — com desfecho' }, { valor: 'TODOS', rotulo: 'Todos' }], filtrosAtendimentos.status_atendimento, false)));
     var lista = h('div', { class: 'cartao tabela-rolagem' });
-    var pedido = 0;
     var navegacao = estado.navegacao;
-    var espera;
+    // Busca uma vez por situação do acompanhamento (ativos, inativos ou todos); o resto filtra na tela.
+    var dados = null;
+    var carregadoCom = null;
     function carregar() {
-      clearTimeout(espera);
-      filtrosAtendimentos = lerFormulario(form);
-      var atual = ++pedido;
+      var situacao = carregadoCom = lerFormulario(form).status_atendimento;
+      dados = null;
       lista.textContent = 'Carregando pacientes…';
-      chamar('apiGestao', filtrosAtendimentos).then(function (g) {
-        if (atual !== pedido || navegacao !== estado.navegacao) return;
+      chamar('apiGestao', { status_atendimento: situacao }).then(function (g) {
+        if (situacao !== carregadoCom || navegacao !== estado.navegacao) return;
+        dados = g;
+        desenhar();
+      }).catch(function (e) {
+        if (situacao !== carregadoCom || navegacao !== estado.navegacao) return;
+        lista.textContent = 'Não foi possível carregar os pacientes. ' + e.message;
+        avisar(e.message, 'erro');
+      });
+    }
+    function aplicar() {
+      filtrosAtendimentos = lerFormulario(form);
+      if (filtrosAtendimentos.status_atendimento !== carregadoCom) return carregar();
+      if (dados) desenhar();
+    }
+    function desenhar() {
+        var g = { itens: filtrarGestao(dados.itens, filtrosAtendimentos), hoje: dados.hoje };
         lista.textContent = '';
         lista.appendChild(h('p', { class: 'suave' }, g.itens.length ? g.itens.length + ' admissão(ões) para acompanhamento' : 'Nenhum paciente encontrado.'));
         if (!g.itens.length) return;
@@ -719,20 +847,10 @@
               h('td', null, proximo ? h('div', null, h('div', { class: 'suave' }, ROTULO_TIPO_PRAZO[proximo.tipo]),
                 proximo.prazo.length > 10 ? dataHoraBr(proximo.prazo) : dataBr(proximo.prazo), ' ', selo(proximo.situacao)) : '—'));
           }))));
-      }).catch(function (e) {
-        if (atual !== pedido || navegacao !== estado.navegacao) return;
-        lista.textContent = 'Não foi possível carregar os pacientes. ' + e.message;
-        avisar(e.message, 'erro');
-      });
     }
-    form.addEventListener('input', function () {
-      clearTimeout(espera);
-      pedido++;
-      lista.textContent = 'Carregando pacientes…';
-      espera = setTimeout(carregar, 350);
-    });
-    form.addEventListener('change', carregar);
-    form.addEventListener('submit', function (ev) { ev.preventDefault(); carregar(); });
+    form.addEventListener('input', aplicar);
+    form.addEventListener('change', aplicar);
+    form.addEventListener('submit', function (ev) { ev.preventDefault(); aplicar(); });
     main.appendChild(h('div', { class: 'cartao' }, form));
     main.appendChild(lista);
     carregar();

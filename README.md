@@ -206,6 +206,12 @@ Google Planilhas (serviço avançado "Sheets", ligado no `appsscript.json`):
   juntas numa chamada no fim. O que foi gravado já fica na memória, sem ler a planilha de novo.
 - **Abertura:** os dados da primeira tela (usuário, cadastros e o painel do Início) já vão dentro da
   página gerada pelo `doGet`, e o navegador não precisa pedir nada ao abrir.
+- **Filtros na tela:** Atendimentos, Gestão (pacientes por unidade, interconsultas e prazos) e
+  Admissões buscam a lista uma vez. Setor, unidade, busca por nome ou prontuário, pendência,
+  período e prioridade filtram na própria tela, na hora. Só vão ao servidor os filtros que mudam o
+  conjunto de dados: situação do acompanhamento (ativos, inativos, todos), "incluir quem teve desfecho
+  psicológico" e admissões abertas ou encerradas. Se a lista de admissões vier cortada no limite de
+  300, a filtragem volta a ser no servidor.
 - Se a operação falhar no meio, as linhas alteradas nela não são gravadas.
 - Se a API não responder, o sistema volta a ler e gravar aba por aba, mais devagar.
 
