@@ -50,15 +50,48 @@ class AbaFalsa {
   }
 }
 
+// Planilhas criadas, por id, para a API do Google Planilhas achar pelo id.
+const planilhasPorId = {};
+let contadorPlanilhas = 0;
+
 class PlanilhaFalsa {
-  constructor(nome) { this.abas = [new AbaFalsa('Página1')]; this.nome = nome || 'Banco'; }
+  constructor(nome) {
+    this.abas = [new AbaFalsa('Página1')];
+    this.nome = nome || 'Banco';
+    this.id = contadorPlanilhas++ ? 'planilha-falsa-' + contadorPlanilhas : 'planilha-falsa';
+    planilhasPorId[this.id] = this;
+  }
   getName() { return this.nome; }
-  getId() { return 'planilha-falsa'; }
-  getUrl() { return 'https://docs.google.com/spreadsheets/d/planilha-falsa'; }
+  getId() { return this.id; }
+  getUrl() { return 'https://docs.google.com/spreadsheets/d/' + this.id; }
   getSheets() { return this.abas; }
   getSheetByName(nome) { return this.abas.find((a) => a.nome === nome) || null; }
   insertSheet(nome) { const a = new AbaFalsa(nome); this.abas.push(a); return a; }
   deleteSheet(aba) { this.abas = this.abas.filter((a) => a !== aba); }
+}
+
+/**
+ * Imita Sheets.Spreadsheets.Values.batchGet: lê intervalos 'ABA'!A2:R e, como a API de verdade,
+ * omite as células vazias do fim de cada linha e as linhas vazias do fim.
+ */
+function batchGetFalso(id, opcoes) {
+  const planilha = planilhasPorId[id];
+  if (!planilha) throw new Error('Planilha não encontrada: ' + id);
+  return {
+    valueRanges: opcoes.ranges.map((faixa) => {
+      const m = /^'(.+)'!A(\d+):([A-Z]+)$/.exec(faixa);
+      const aba = m && planilha.getSheetByName(m[1]);
+      if (!aba) throw new Error('Unable to parse range: ' + faixa);
+      const nColunas = m[3].split('').reduce((n, c) => n * 26 + c.charCodeAt(0) - 64, 0);
+      const linhas = aba.linhas.slice(Number(m[2]) - 1).map((l) => {
+        const r = l.slice(0, nColunas);
+        while (r.length && (r[r.length - 1] === '' || r[r.length - 1] === undefined)) r.pop();
+        return r;
+      });
+      while (linhas.length && !linhas[linhas.length - 1].length) linhas.pop();
+      return linhas.length ? { range: faixa, values: linhas } : { range: faixa };
+    })
+  };
 }
 
 function criarGoogleFalso({ email = 'coordenacao@exemplo.com' } = {}) {
@@ -75,6 +108,7 @@ function criarGoogleFalso({ email = 'coordenacao@exemplo.com' } = {}) {
       Logger: { log() {} },
       SpreadsheetApp: {
         getActiveSpreadsheet: () => planilha,
+        flush: () => {},
         openById: () => planilha,
         // O banco é a planilha ativa; create só é usado nas exportações.
         create: (nome) => {
@@ -83,6 +117,7 @@ function criarGoogleFalso({ email = 'coordenacao@exemplo.com' } = {}) {
           return nova;
         }
       },
+      Sheets: { Spreadsheets: { Values: { batchGet: batchGetFalso } } },
       PropertiesService: {
         getScriptProperties: () => ({
           getProperty: (k) => props[k] || null,
@@ -93,7 +128,9 @@ function criarGoogleFalso({ email = 'coordenacao@exemplo.com' } = {}) {
       LockService: { getScriptLock: () => ({ waitLock() {}, releaseLock() {} }) },
       Utilities: {
         getUuid: () => crypto.randomUUID(),
-        formatDate: (d, tz, formato) => (/HH:mm/.test(formato) ? d.toISOString().slice(0, 16).replace('T', ' ') : d.toISOString().slice(0, 10))
+        formatDate: (d, tz, formato) => (/HH:mm/.test(formato) ? d.toISOString().slice(0, 16).replace('T', ' ') : d.toISOString().slice(0, 10)),
+        // Os testes usam o relógio em UTC: a data e a hora do texto viram as mesmas em UTC.
+        parseDate: (texto) => new Date(texto.replace(' ', 'T') + 'Z')
       }
     }
   };

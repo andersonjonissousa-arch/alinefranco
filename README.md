@@ -107,6 +107,7 @@ src/
   Compilado.js      compilado, exportação, reuniões e atividades gerenciais
   Gestao.js         telas de gestão: pacientes por unidade, interconsultas e prazos
   Autoteste.js      testarSistema: teste do fluxo inteiro no Google de verdade
+  Desempenho.js     medirDesempenho: tempo de cada ação, antes e depois da leitura pela API
   ui/               tela (HTML, CSS e JavaScript, sem bibliotecas externas)
 dist/               o mesmo código em 4 arquivos, para instalar copiando e colando (npm run empacotar)
 tests/              testes com Node, com os serviços do Google simulados
@@ -179,6 +180,17 @@ com solicitação, telas de gestão, atendimentos, desfechos, retomada, registro
 exportação e tela) e
 mostra no **registro de execução** o que passou e o que falhou. No fim, apague do Drive as duas
 planilhas de teste listadas no registro.
+
+## Desempenho
+
+Cada consulta ao Google tem um custo fixo de tempo, então o sistema lê o banco numa consulta só pela
+API do Google Planilhas (serviço avançado "Sheets", ligado no `appsscript.json`): todas as abas de uma
+vez, uma vez por execução. Se a API não responder, o sistema volta a ler aba por aba, mais devagar.
+
+Para medir na conta do Google, rode `medirDesempenho` no editor do Apps Script. Ela mostra no registro
+de execução o tempo de cada ação lendo aba por aba (como era antes) e pela API (como é agora). As
+leituras usam o banco real sem alterar nada; as gravações usam uma planilha de teste, que pode ser
+apagada do Drive depois.
 
 ## Testes
 

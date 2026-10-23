@@ -1038,24 +1038,94 @@ function abaDaTabela(nome) {
   return aba;
 }
 
-/** Todas as linhas da tabela, como objetos. Lê a aba uma vez por execução. */
+/** Todas as linhas da tabela, como objetos. Lê o banco uma vez por execução. */
 function listar(nome) {
-  if (_cacheTabelas[nome]) return _cacheTabelas[nome];
-  var colunas = TABELAS[nome];
-  var aba = abaDaTabela(nome);
+  if (!_cacheTabelas[nome]) carregarTabelas(nome);
+  return _cacheTabelas[nome];
+}
+
+// Como a última leitura foi feita: 'API' (uma consulta para todas as abas) ou 'ABAS' (aba por aba).
+var _modoLeitura = '';
+// Usado só pela medição de desempenho, para comparar com a leitura aba por aba.
+var _forcarLeituraPorAba = false;
+// Se a API falhar uma vez, o resto da execução lê aba por aba sem tentar de novo.
+var _apiIndisponivel = false;
+
+/**
+ * Lê numa consulta só, pela API do Google Planilhas, todas as tabelas que ainda não estão no cache.
+ * Cada consulta ao Google custa um tempo fixo, então ler tudo junto é bem mais rápido que aba por aba.
+ * Se a API não estiver disponível, lê só a tabela pedida, aba por aba.
+ */
+function carregarTabelas(pedida) {
+  if (!TABELAS[pedida]) throw new Error('Tabela desconhecida: ' + pedida);
+  if (!_forcarLeituraPorAba && !_apiIndisponivel && typeof Sheets !== 'undefined') {
+    var nomes = Object.keys(TABELAS).filter(function (n) { return !_cacheTabelas[n]; });
+    try {
+      var resposta = Sheets.Spreadsheets.Values.batchGet(idDoBanco(), {
+        ranges: nomes.map(intervaloDaTabela),
+        valueRenderOption: 'UNFORMATTED_VALUE',
+        dateTimeRenderOption: 'SERIAL_NUMBER'
+      });
+      var faixas = resposta.valueRanges || [];
+      nomes.forEach(function (nome, i) {
+        _cacheTabelas[nome] = registrosDe(nome, (faixas[i] && faixas[i].values) || []);
+      });
+      _modoLeitura = 'API';
+      return;
+    } catch (e) {
+      _apiIndisponivel = true;
+      if (!_semRegistroDeErros) console.warn('Leitura pela API do Google Planilhas falhou; lendo aba por aba. ' + e.message);
+    }
+  }
+  var aba = abaDaTabela(pedida);
   var ultima = aba.getLastRow();
-  var linhas = ultima < 2 ? [] : aba.getRange(2, 1, ultima - 1, colunas.length).getValues();
+  _cacheTabelas[pedida] = registrosDe(pedida, ultima < 2 ? [] : aba.getRange(2, 1, ultima - 1, TABELAS[pedida].length).getValues());
+  _modoLeitura = 'ABAS';
+}
+
+var _idBanco = '';
+
+function idDoBanco() {
+  if (_bancoTeste) return _bancoTeste.getId();
+  if (!_idBanco) _idBanco = PropertiesService.getScriptProperties().getProperty(APP.propDbId) || abrirBanco().getId();
+  return _idBanco;
+}
+
+/** Ex.: 'ATENDIMENTOS'!A2:R — da segunda linha até o fim, só as colunas da tabela. */
+function intervaloDaTabela(nome) {
+  return "'" + nome + "'!A2:" + letraDaColuna(TABELAS[nome].length);
+}
+
+function letraDaColuna(n) {
+  var letras = '';
+  for (; n > 0; n = Math.floor((n - 1) / 26)) letras = String.fromCharCode(65 + (n - 1) % 26) + letras;
+  return letras;
+}
+
+// Colunas de data e hora. Se a planilha converteu o texto em data, a API devolve o número de série.
+var COLUNA_DE_DATA = /^(data(_.*)?|prazo_(primeiro_atendimento|limite|resposta)|primeiro_atendimento|ultimo_contato|proximo_prazo|retomado_em|momento_resposta|hora(_.*)?|.*_em)$/;
+
+/** Linhas da aba (sem o cabeçalho) viram objetos. A API omite as células vazias do fim; aqui voltam como ''. */
+function registrosDe(nome, linhas) {
+  var colunas = TABELAS[nome];
   var registros = [];
   linhas.forEach(function (linha) {
-    if (linha[0] === '') return;
+    if (linha[0] === '' || linha[0] === undefined) return;
     var obj = {};
     colunas.forEach(function (col, i) {
-      obj[col] = linha[i] instanceof Date ? normalizarDataHora(col, linha[i]) : linha[i];
+      var v = linha[i] === undefined ? '' : linha[i];
+      if (typeof v === 'number' && COLUNA_DE_DATA.test(col)) v = dataDoNumeroDeSerie(v);
+      obj[col] = Object.prototype.toString.call(v) === '[object Date]' ? normalizarDataHora(col, v) : v;
     });
     registros.push(obj);
   });
-  _cacheTabelas[nome] = registros;
   return registros;
+}
+
+/** Número de série da planilha (dias desde 30/12/1899, no fuso do hospital) para Date. */
+function dataDoNumeroDeSerie(serie) {
+  var relogio = new Date(Math.round((serie - 25569) * 86400000)).toISOString().slice(0, 19).replace('T', ' ');
+  return Utilities.parseDate(relogio, APP.fusoHorario, 'yyyy-MM-dd HH:mm:ss');
 }
 
 /** Datas lidas da planilha voltam como texto: 'AAAA-MM-DD' ou data e hora ISO nos carimbos *_em. */
@@ -1186,6 +1256,8 @@ function comTrava(fn) {
   try {
     return fn();
   } finally {
+    // Grava de fato antes de soltar a trava: a próxima leitura (pela API) já vê o que foi gravado.
+    SpreadsheetApp.flush();
     trava.releaseLock();
   }
 }
@@ -1201,6 +1273,8 @@ function configurar() {
   var banco = obterOuCriarBanco();
   Object.keys(TABELAS).forEach(function (nome) { prepararAba(banco, nome); });
   removerAbaPadrao(banco);
+  // As abas novas precisam existir de fato antes da primeira leitura pela API.
+  SpreadsheetApp.flush();
   semearSetoresEUnidades();
   semearListas();
   semearMatrizes();
@@ -2514,6 +2588,115 @@ function testarSistema() {
     falhas ? 'RESULTADO: ' + falhas + ' FALHA(S) — copie este registro e envie para correção.' : 'RESULTADO: TUDO OK (' + resultados.length + ' verificações).',
     ''
   ].concat(resultados).concat(['', 'Planilhas de teste criadas (pode apagar do Drive):']).concat(criadas);
+  Logger.log(resumo.join('\n'));
+  return resumo.join('\n');
+}
+
+// ===== Desempenho.js =====
+/**
+ * Medição de desempenho. Rode "medirDesempenho" no editor do Apps Script.
+ * Mede o tempo de cada ação da tela duas vezes: lendo a planilha aba por aba (como era antes)
+ * e lendo tudo numa consulta só pela API do Google Planilhas (como é agora).
+ * As leituras usam o banco real, sem alterar nada. As gravações usam uma planilha de teste nova,
+ * que pode ser apagada do Drive no fim.
+ */
+function medirDesempenho() {
+  var vezes = 3;
+  var linhas = [];
+  var criadas = [];
+  var apiFalhou = false;
+  var novaExecucao = function () {
+    _cacheTabelas = {};
+    _banco = null;
+    _idBanco = '';
+    _apiIndisponivel = false;
+  };
+  var medir = function (fn) {
+    var total = 0;
+    var erro = '';
+    for (var i = 0; i < vezes; i++) {
+      novaExecucao();
+      var inicio = Date.now();
+      var r = fn();
+      total += Date.now() - inicio;
+      if (r && r.ok === false) erro = r.erro;
+    }
+    return { ms: total / vezes, erro: erro };
+  };
+  var segundos = function (ms) { return (ms / 1000).toFixed(1).replace('.', ',') + ' s'; };
+  var comparar = function (rotulo, fn) {
+    _forcarLeituraPorAba = true;
+    var antes = medir(fn);
+    _forcarLeituraPorAba = false;
+    var depois = medir(fn);
+    if (_modoLeitura !== 'API') apiFalhou = true;
+    var ganho = antes.ms ? Math.round((1 - depois.ms / antes.ms) * 100) : 0;
+    linhas.push((rotulo + '                                  ').slice(0, 34) +
+      ('      ' + segundos(antes.ms)).slice(-8) + ('      ' + segundos(depois.ms)).slice(-10) +
+      ('      ' + ganho + '%').slice(-9) + (antes.erro || depois.erro ? '   erro: ' + (depois.erro || antes.erro) : ''));
+  };
+
+  _semRegistroDeErros = true;
+  try {
+    linhas.push('Leituras no banco real (nada é alterado)');
+    linhas.push('Ação                                 antes     agora   ganho');
+    var hojeIso = hoje();
+    var aberta = listar('ADMISSOES').filter(function (a) { return a.status !== STATUS_ADMISSAO.encerrada; })[0];
+    comparar('Abrir o sistema', function () { return apiInicio(); });
+    comparar('Início e Gestão', function () { return apiGestao({}); });
+    comparar('Interconsultas', function () { return apiInterconsultas({ situacao: 'TODAS' }); });
+    comparar('Lista de admissões', function () { return apiListarAdmissoes({ abertas: 'SIM' }); });
+    if (aberta) comparar('Abrir um paciente', function () { return apiObterAdmissao(aberta.id); });
+    comparar('Buscar paciente', function () { return apiBuscarPacientes('A'); });
+    comparar('Compilado do mês', function () {
+      return apiCompilado({ ano: hojeIso.slice(0, 4), mes: String(Number(hojeIso.slice(5, 7))), eixo: 'UNIDADE', grupo: 'TODOS' });
+    });
+
+    linhas.push('');
+    linhas.push('Gravações numa planilha de teste');
+    var teste = SpreadsheetApp.create('TESTE DE DESEMPENHO — Gestão da Psicologia — pode apagar');
+    criadas.push(teste.getUrl());
+    _bancoTeste = teste;
+    novaExecucao();
+    configurar();
+    novaExecucao();
+    var paciente = apiSalvarPaciente({ prontuario: '999000222', nome: 'Paciente Teste de Desempenho' }).dados;
+    var base = {
+      paciente_id: paciente.id, unidade_id: listar('UNIDADES')[0].id, data_admissao: adicionarDias(hojeIso, -7),
+      necessidade_acompanhamento: 'PACIENTE', justificativa_id: listar('JUSTIFICATIVAS')[0].id
+    };
+    novaExecucao();
+    var adm = apiSalvarAdmissao(base).dados.admissao;
+    var n = 0;
+    comparar('Registrar atendimento', function () {
+      n++;
+      return apiRegistrarAtendimento({ admissao_id: adm.id, data: adicionarDias(hojeIso, -1), hora: '08:' + (n < 10 ? '0' : '') + n, publico: 'PACIENTE' });
+    });
+    comparar('Salvar admissão', function () {
+      n++;
+      return apiSalvarAdmissao(Object.assign({ id: adm.id, observacoes: 'Medição ' + n }, base));
+    });
+    comparar('Cadastrar paciente', function () {
+      n++;
+      return apiSalvarPaciente({ prontuario: '999000' + (300 + n), nome: 'Paciente Teste ' + n });
+    });
+  } catch (e) {
+    linhas.push('Medição interrompida: ' + e.message);
+  } finally {
+    _semRegistroDeErros = false;
+    _forcarLeituraPorAba = false;
+    _bancoTeste = null;
+    novaExecucao();
+  }
+
+  var resumo = [
+    'MEDIÇÃO DE DESEMPENHO (média de ' + vezes + ' vezes, tempo no servidor)',
+    'antes = lendo a planilha aba por aba · agora = lendo tudo numa consulta só',
+    'Na tela, cada clique soma cerca de 0,5 a 1,5 s de ida e volta do navegador.',
+    ''
+  ];
+  if (apiFalhou) resumo.splice(3, 0, 'ATENÇÃO: a API do Google Planilhas não respondeu, e o sistema leu aba por aba. Envie este registro para correção.');
+  resumo = resumo.concat(linhas).concat(criadas.length ? ['', 'Planilha de teste criada (pode apagar do Drive):'].concat(criadas) : []);
   Logger.log(resumo.join('\n'));
   return resumo.join('\n');
 }

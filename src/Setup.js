@@ -8,6 +8,8 @@ function configurar() {
   var banco = obterOuCriarBanco();
   Object.keys(TABELAS).forEach(function (nome) { prepararAba(banco, nome); });
   removerAbaPadrao(banco);
+  // As abas novas precisam existir de fato antes da primeira leitura pela API.
+  SpreadsheetApp.flush();
   semearSetoresEUnidades();
   semearListas();
   semearMatrizes();

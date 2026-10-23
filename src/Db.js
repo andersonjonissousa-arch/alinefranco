@@ -26,24 +26,94 @@ function abaDaTabela(nome) {
   return aba;
 }
 
-/** Todas as linhas da tabela, como objetos. Lê a aba uma vez por execução. */
+/** Todas as linhas da tabela, como objetos. Lê o banco uma vez por execução. */
 function listar(nome) {
-  if (_cacheTabelas[nome]) return _cacheTabelas[nome];
-  var colunas = TABELAS[nome];
-  var aba = abaDaTabela(nome);
+  if (!_cacheTabelas[nome]) carregarTabelas(nome);
+  return _cacheTabelas[nome];
+}
+
+// Como a última leitura foi feita: 'API' (uma consulta para todas as abas) ou 'ABAS' (aba por aba).
+var _modoLeitura = '';
+// Usado só pela medição de desempenho, para comparar com a leitura aba por aba.
+var _forcarLeituraPorAba = false;
+// Se a API falhar uma vez, o resto da execução lê aba por aba sem tentar de novo.
+var _apiIndisponivel = false;
+
+/**
+ * Lê numa consulta só, pela API do Google Planilhas, todas as tabelas que ainda não estão no cache.
+ * Cada consulta ao Google custa um tempo fixo, então ler tudo junto é bem mais rápido que aba por aba.
+ * Se a API não estiver disponível, lê só a tabela pedida, aba por aba.
+ */
+function carregarTabelas(pedida) {
+  if (!TABELAS[pedida]) throw new Error('Tabela desconhecida: ' + pedida);
+  if (!_forcarLeituraPorAba && !_apiIndisponivel && typeof Sheets !== 'undefined') {
+    var nomes = Object.keys(TABELAS).filter(function (n) { return !_cacheTabelas[n]; });
+    try {
+      var resposta = Sheets.Spreadsheets.Values.batchGet(idDoBanco(), {
+        ranges: nomes.map(intervaloDaTabela),
+        valueRenderOption: 'UNFORMATTED_VALUE',
+        dateTimeRenderOption: 'SERIAL_NUMBER'
+      });
+      var faixas = resposta.valueRanges || [];
+      nomes.forEach(function (nome, i) {
+        _cacheTabelas[nome] = registrosDe(nome, (faixas[i] && faixas[i].values) || []);
+      });
+      _modoLeitura = 'API';
+      return;
+    } catch (e) {
+      _apiIndisponivel = true;
+      if (!_semRegistroDeErros) console.warn('Leitura pela API do Google Planilhas falhou; lendo aba por aba. ' + e.message);
+    }
+  }
+  var aba = abaDaTabela(pedida);
   var ultima = aba.getLastRow();
-  var linhas = ultima < 2 ? [] : aba.getRange(2, 1, ultima - 1, colunas.length).getValues();
+  _cacheTabelas[pedida] = registrosDe(pedida, ultima < 2 ? [] : aba.getRange(2, 1, ultima - 1, TABELAS[pedida].length).getValues());
+  _modoLeitura = 'ABAS';
+}
+
+var _idBanco = '';
+
+function idDoBanco() {
+  if (_bancoTeste) return _bancoTeste.getId();
+  if (!_idBanco) _idBanco = PropertiesService.getScriptProperties().getProperty(APP.propDbId) || abrirBanco().getId();
+  return _idBanco;
+}
+
+/** Ex.: 'ATENDIMENTOS'!A2:R — da segunda linha até o fim, só as colunas da tabela. */
+function intervaloDaTabela(nome) {
+  return "'" + nome + "'!A2:" + letraDaColuna(TABELAS[nome].length);
+}
+
+function letraDaColuna(n) {
+  var letras = '';
+  for (; n > 0; n = Math.floor((n - 1) / 26)) letras = String.fromCharCode(65 + (n - 1) % 26) + letras;
+  return letras;
+}
+
+// Colunas de data e hora. Se a planilha converteu o texto em data, a API devolve o número de série.
+var COLUNA_DE_DATA = /^(data(_.*)?|prazo_(primeiro_atendimento|limite|resposta)|primeiro_atendimento|ultimo_contato|proximo_prazo|retomado_em|momento_resposta|hora(_.*)?|.*_em)$/;
+
+/** Linhas da aba (sem o cabeçalho) viram objetos. A API omite as células vazias do fim; aqui voltam como ''. */
+function registrosDe(nome, linhas) {
+  var colunas = TABELAS[nome];
   var registros = [];
   linhas.forEach(function (linha) {
-    if (linha[0] === '') return;
+    if (linha[0] === '' || linha[0] === undefined) return;
     var obj = {};
     colunas.forEach(function (col, i) {
-      obj[col] = linha[i] instanceof Date ? normalizarDataHora(col, linha[i]) : linha[i];
+      var v = linha[i] === undefined ? '' : linha[i];
+      if (typeof v === 'number' && COLUNA_DE_DATA.test(col)) v = dataDoNumeroDeSerie(v);
+      obj[col] = Object.prototype.toString.call(v) === '[object Date]' ? normalizarDataHora(col, v) : v;
     });
     registros.push(obj);
   });
-  _cacheTabelas[nome] = registros;
   return registros;
+}
+
+/** Número de série da planilha (dias desde 30/12/1899, no fuso do hospital) para Date. */
+function dataDoNumeroDeSerie(serie) {
+  var relogio = new Date(Math.round((serie - 25569) * 86400000)).toISOString().slice(0, 19).replace('T', ' ');
+  return Utilities.parseDate(relogio, APP.fusoHorario, 'yyyy-MM-dd HH:mm:ss');
 }
 
 /** Datas lidas da planilha voltam como texto: 'AAAA-MM-DD' ou data e hora ISO nos carimbos *_em. */
@@ -174,6 +244,8 @@ function comTrava(fn) {
   try {
     return fn();
   } finally {
+    // Grava de fato antes de soltar a trava: a próxima leitura (pela API) já vê o que foi gravado.
+    SpreadsheetApp.flush();
     trava.releaseLock();
   }
 }

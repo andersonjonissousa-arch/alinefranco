@@ -490,3 +490,62 @@ test('gestão: pacientes ativos por unidade, interconsultas pendentes e respondi
   assert.equal(resp.dados.resumo.no_prazo, 1);
   assert.equal(Number(resp.dados.itens[0].prazos.interconsulta.horas), 3);
 });
+
+test('leitura pela API: uma consulta para todas as abas, com o mesmo resultado da leitura aba por aba', () => {
+  const { ctx, admitir, atender } = sistemaComAdmissao();
+  const adm = admitir().dados.admissao;
+  atender(adm, { publico: 'FAMÍLIA', quantidade: 2, paciente_impossibilitado: 'SIM' });
+  const original = vm.runInContext('Sheets.Spreadsheets.Values.batchGet', ctx);
+  let consultas = 0;
+  ctx.contarConsulta = (id, op) => { consultas++; return original(id, op); };
+  vm.runInContext('Sheets.Spreadsheets.Values.batchGet = contarConsulta', ctx);
+
+  ctx.novaExecucao();
+  assert.equal(ctx.apiGestao({}).ok, true);
+  assert.equal(consultas, 1);
+  assert.equal(vm.runInContext('_modoLeitura', ctx), 'API');
+
+  const tudo = () => JSON.stringify(Object.keys(ctx.TABELAS).map((t) => ctx.listar(t)));
+  ctx.novaExecucao();
+  const pelaApi = tudo();
+  vm.runInContext('_forcarLeituraPorAba = true', ctx);
+  ctx.novaExecucao();
+  const porAba = tudo();
+  assert.equal(vm.runInContext('_modoLeitura', ctx), 'ABAS');
+  assert.equal(pelaApi, porAba);
+});
+
+test('leitura pela API: se a API falhar, o sistema lê aba por aba e continua funcionando', () => {
+  const { ctx, admitir } = sistemaComAdmissao();
+  admitir();
+  ctx.falhas = 0;
+  vm.runInContext("Sheets.Spreadsheets.Values.batchGet = function () { falhas++; throw new Error('API desativada'); }", ctx);
+  ctx.novaExecucao();
+  const r = ctx.apiGestao({});
+  assert.equal(r.ok, true, r.erro);
+  assert.equal(vm.runInContext('falhas', ctx), 1); // tenta a API uma vez só por execução
+  assert.equal(r.dados.itens.length, 1);
+  assert.equal(vm.runInContext('_modoLeitura', ctx), 'ABAS');
+});
+
+test('leitura pela API: data que a planilha converteu em número de série volta como AAAA-MM-DD', () => {
+  const { ctx, google, admitir } = sistemaComAdmissao();
+  const adm = admitir().dados.admissao;
+  const aba = google.planilha.getSheetByName('ADMISSOES');
+  const linha = aba.linhas.find((l) => l[0] === adm.id);
+  linha[ctx.TABELAS.ADMISSOES.indexOf('data_admissao')] = 46315.5; // 20/10/2026 ao meio-dia
+  ctx.novaExecucao();
+  assert.equal(ctx.buscarPorId('ADMISSOES', adm.id).data_admissao, '2026-10-20');
+});
+
+test('medição de desempenho roda as ações sem erro e não mexe no banco real', () => {
+  const { ctx, google } = carregarSistema();
+  ctx.configurar();
+  ctx.novaExecucao();
+  const abasAntes = google.planilha.getSheets().map((a) => a.linhas.length).join(',');
+  const saida = ctx.medirDesempenho();
+  assert.doesNotMatch(saida, /erro|interrompida|ATENÇÃO/, saida);
+  assert.match(saida, /Registrar atendimento/);
+  assert.equal(google.planilha.getSheets().map((a) => a.linhas.length).join(','), abasAntes);
+  assert.equal(google.criadas.length, 1);
+});
