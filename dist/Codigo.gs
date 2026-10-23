@@ -1532,11 +1532,27 @@ function semearCoordenacao() {
 /** Ponto de entrada do aplicativo web e controle de acesso. */
 
 function doGet() {
-  return HtmlService.createTemplateFromFile('ui/Index')
-    .evaluate()
+  var pagina = HtmlService.createTemplateFromFile('ui/Index');
+  // Os dados da primeira tela já vão junto com a página: o navegador não precisa pedir de novo.
+  pagina.dadosIniciais = dadosIniciaisDaPagina();
+  return pagina.evaluate()
     .setTitle(APP.nome)
     .addMetaTag('viewport', 'width=device-width, initial-scale=1')
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.DEFAULT);
+}
+
+/**
+ * O que a tela precisa para abrir (usuário, cadastros e o painel do Início), como JSON seguro para
+ * ficar dentro de um <script>. Sem acesso, leva o erro, e a tela mostra a mensagem.
+ */
+function dadosIniciaisDaPagina() {
+  var r = responder(function () {
+    var dados = apiInicio();
+    if (!dados.ok) throw new Error(dados.erro);
+    var gestao = apiGestao({});
+    return Object.assign(dados.dados, { gestao: gestao.ok ? gestao.dados : null });
+  });
+  return JSON.stringify(r).replace(/</g, '\\u003c').replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029');
 }
 
 /** Usado nos templates HTML: <?!= incluir('ui/Estilo') ?> */
@@ -2770,7 +2786,7 @@ function medirDesempenho() {
     linhas.push('Ação                                 antes     agora   ganho');
     var hojeIso = hoje();
     var aberta = listar('ADMISSOES').filter(function (a) { return a.status !== STATUS_ADMISSAO.encerrada; })[0];
-    comparar('Abrir o sistema', function () { return apiInicio(); });
+    comparar('Abrir o sistema', function () { return JSON.parse(dadosIniciaisDaPagina()); });
     comparar('Início e Gestão', function () { return apiGestao({}); });
     comparar('Interconsultas', function () { return apiInterconsultas({ situacao: 'TODAS' }); });
     comparar('Lista de admissões', function () { return apiListarAdmissoes({ abertas: 'SIM' }); });

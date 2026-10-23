@@ -190,6 +190,8 @@ Google Planilhas (serviço avançado "Sheets", ligado no `appsscript.json`):
 - **Gravação:** cada operação (registrar atendimento, salvar admissão...) roda inteira com uma trava
   só. A linha nova vai numa chamada, e as linhas alteradas (inclusive os prazos recalculados) vão
   juntas numa chamada no fim. O que foi gravado já fica na memória, sem ler a planilha de novo.
+- **Abertura:** os dados da primeira tela (usuário, cadastros e o painel do Início) já vão dentro da
+  página gerada pelo `doGet`, e o navegador não precisa pedir nada ao abrir.
 - Se a operação falhar no meio, as linhas alteradas nela não são gravadas.
 - Se a API não responder, o sistema volta a ler e gravar aba por aba, mais devagar.
 

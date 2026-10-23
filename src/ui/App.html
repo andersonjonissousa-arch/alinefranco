@@ -1,5 +1,5 @@
 <script>
-  var estado = { usuario: null, cad: null, tela: 'inicio' };
+  var estado = { usuario: null, cad: null, tela: 'inicio', gestaoInicial: null };
 
   var NOMES_LISTAS = {
     TIPO_SOLICITACAO: 'Tipo de solicitação',
@@ -216,7 +216,10 @@
     var lista = h('div', { class: 'cartao tabela-rolagem' });
     main.appendChild(resumo);
     main.appendChild(lista);
-    chamar('apiGestao', {}).then(function (g) {
+    // Na abertura, o painel já veio com a página; nas próximas vezes, busca de novo.
+    var painel = estado.gestaoInicial ? Promise.resolve(estado.gestaoInicial) : chamar('apiGestao', {});
+    estado.gestaoInicial = null;
+    painel.then(function (g) {
       var r = g.resumo;
       resumo.textContent = '';
       resumo.appendChild(cartaoIndicador(r.pacientes, 'Pacientes em acompanhamento', '', function () { abrir('gestao', { aba: 'unidades' }); }));
@@ -1346,9 +1349,17 @@
     if (b) abrir(b.dataset.tela);
   });
 
-  chamar('apiInicio').then(function (dados) {
+  /** Os dados de abertura vêm com a página (DADOS_INICIAIS); se não vierem, busca no servidor. */
+  function abertura() {
+    var d = typeof DADOS_INICIAIS !== 'undefined' ? DADOS_INICIAIS : null;
+    if (!d) return chamar('apiInicio');
+    return d.ok ? Promise.resolve(d.dados) : Promise.reject(new Error(d.erro));
+  }
+
+  abertura().then(function (dados) {
     estado.usuario = dados.usuario;
     estado.cad = dados;
+    estado.gestaoInicial = dados.gestao || null;
     document.getElementById('usuario').textContent = dados.usuario.nome + ' · ' + dados.usuario.perfil.toLowerCase();
     if (!ehCoordenacao()) document.querySelectorAll('[data-coordenacao]').forEach(function (b) { b.remove(); });
     abrir('inicio');

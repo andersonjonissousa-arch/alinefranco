@@ -47,7 +47,7 @@ function medirDesempenho() {
     linhas.push('Ação                                 antes     agora   ganho');
     var hojeIso = hoje();
     var aberta = listar('ADMISSOES').filter(function (a) { return a.status !== STATUS_ADMISSAO.encerrada; })[0];
-    comparar('Abrir o sistema', function () { return apiInicio(); });
+    comparar('Abrir o sistema', function () { return JSON.parse(dadosIniciaisDaPagina()); });
     comparar('Início e Gestão', function () { return apiGestao({}); });
     comparar('Interconsultas', function () { return apiInterconsultas({ situacao: 'TODAS' }); });
     comparar('Lista de admissões', function () { return apiListarAdmissoes({ abertas: 'SIM' }); });

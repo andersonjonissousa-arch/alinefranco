@@ -632,3 +632,29 @@ test('gravação pela API: a operação lê de novo depois de pegar a trava e n�
   assert.equal(ctx.buscarPorId('PACIENTES', outro.id).nome, 'NOME MUDADO POR OUTRA PESSOA');
   assert.equal(ctx.buscarPorId('PACIENTES', paciente.id).nome, 'FRANCISCA KELYANE SOUZA');
 });
+
+test('abertura: os dados da primeira tela vão junto com a página, como JSON seguro dentro de <script>', () => {
+  const { ctx, admitir } = sistemaComAdmissao();
+  admitir({ observacoes: 'texto com </script><b>' });
+  ctx.novaExecucao();
+  const json = ctx.dadosIniciaisDaPagina();
+  assert.doesNotMatch(json, /</);
+  const r = JSON.parse(json);
+  assert.equal(r.ok, true, r.erro);
+  assert.equal(r.dados.usuario.perfil, 'COORDENAÇÃO');
+  assert.ok(r.dados.unidades.length > 0);
+  assert.equal(r.dados.gestao.itens.length, 1);
+  assert.equal(r.dados.gestao.itens[0].observacoes, 'texto com </script><b>');
+  const pagina = fs.readFileSync(path.join(__dirname, '..', 'src', 'ui', 'Index.html'), 'utf8');
+  assert.match(pagina, /var DADOS_INICIAIS = <\?!= typeof dadosIniciais === 'undefined' \? 'null' : dadosIniciais \?>;/);
+});
+
+test('abertura: sem acesso, a página leva o erro para a tela mostrar', () => {
+  const { ctx, google } = carregarSistema();
+  ctx.configurar();
+  ctx.novaExecucao();
+  google.sessao.email = 'sem.cadastro@exemplo.com';
+  const r = JSON.parse(ctx.dadosIniciaisDaPagina());
+  assert.equal(r.ok, false);
+  assert.match(r.erro, /não tem acesso/);
+});
