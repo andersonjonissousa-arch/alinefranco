@@ -52,3 +52,8 @@ function responder(fn) {
     return { ok: false, erro: e.message || String(e) };
   }
 }
+
+/** Para as funções que gravam: a operação inteira roda com a trava (ver comTrava, em Db.js). */
+function responderGravando(fn) {
+  return responder(function () { return comTrava(fn); });
+}

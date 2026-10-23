@@ -94,6 +94,27 @@ function batchGetFalso(id, opcoes) {
   };
 }
 
+/** Imita Values.append com INSERT_ROWS e RAW: acrescenta a linha depois da última preenchida, sem converter os valores. */
+function appendFalso(corpo, id, faixa) {
+  const aba = planilhasPorId[id] && planilhasPorId[id].getSheetByName(/^'(.+)'!/.exec(faixa)[1]);
+  if (!aba) throw new Error('Unable to parse range: ' + faixa);
+  corpo.values.forEach((l) => aba.linhas.push(l.slice()));
+  const n = aba.linhas.length;
+  return { updates: { updatedRange: `'${aba.nome}'!A${n}:Z${n}` } };
+}
+
+/** Imita Values.batchUpdate com RAW: grava cada intervalo 'ABA'!A7:R7 sem converter os valores. */
+function batchUpdateFalso(corpo, id) {
+  const planilha = planilhasPorId[id];
+  corpo.data.forEach((d) => {
+    const m = /^'(.+)'!A(\d+):[A-Z]+(\d+)$/.exec(d.range);
+    const aba = m && planilha.getSheetByName(m[1]);
+    if (!aba) throw new Error('Unable to parse range: ' + d.range);
+    d.values.forEach((l, i) => { aba.linhas[Number(m[2]) - 1 + i] = l.slice(); });
+  });
+  return { totalUpdatedRows: corpo.data.length };
+}
+
 function criarGoogleFalso({ email = 'coordenacao@exemplo.com' } = {}) {
   const planilha = new PlanilhaFalsa();
   const props = {};
@@ -117,7 +138,7 @@ function criarGoogleFalso({ email = 'coordenacao@exemplo.com' } = {}) {
           return nova;
         }
       },
-      Sheets: { Spreadsheets: { Values: { batchGet: batchGetFalso } } },
+      Sheets: { Spreadsheets: { Values: { batchGet: batchGetFalso, append: appendFalso, batchUpdate: batchUpdateFalso } } },
       PropertiesService: {
         getScriptProperties: () => ({
           getProperty: (k) => props[k] || null,

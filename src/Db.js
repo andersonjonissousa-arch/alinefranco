@@ -34,7 +34,7 @@ function listar(nome) {
 
 // Como a última leitura foi feita: 'API' (uma consulta para todas as abas) ou 'ABAS' (aba por aba).
 var _modoLeitura = '';
-// Usado só pela medição de desempenho, para comparar com a leitura aba por aba.
+// Usado só pela medição de desempenho, para comparar com a leitura e a gravação aba por aba.
 var _forcarLeituraPorAba = false;
 // Se a API falhar uma vez, o resto da execução lê aba por aba sem tentar de novo.
 var _apiIndisponivel = false;
@@ -93,12 +93,20 @@ function letraDaColuna(n) {
 // Colunas de data e hora. Se a planilha converteu o texto em data, a API devolve o número de série.
 var COLUNA_DE_DATA = /^(data(_.*)?|prazo_(primeiro_atendimento|limite|resposta)|primeiro_atendimento|ultimo_contato|proximo_prazo|retomado_em|momento_resposta|hora(_.*)?|.*_em)$/;
 
-/** Linhas da aba (sem o cabeçalho) viram objetos. A API omite as células vazias do fim; aqui voltam como ''. */
+// Linha de cada registro na aba, por tabela e id ({ ATENDIMENTOS: { id: 7 } }). Vem junto com a leitura.
+var _linhas = {};
+
+/**
+ * Linhas da aba (a partir da linha 2) viram objetos. A API omite as células vazias do fim; aqui voltam como ''.
+ * Guarda também em que linha da aba está cada id, para gravar sem precisar procurar.
+ */
 function registrosDe(nome, linhas) {
   var colunas = TABELAS[nome];
   var registros = [];
-  linhas.forEach(function (linha) {
+  var posicao = _linhas[nome] = {};
+  linhas.forEach(function (linha, i) {
     if (linha[0] === '' || linha[0] === undefined) return;
+    posicao[String(linha[0])] = i + 2;
     var obj = {};
     colunas.forEach(function (col, i) {
       var v = linha[i] === undefined ? '' : linha[i];
@@ -149,6 +157,16 @@ function hoje() {
   return Utilities.formatDate(new Date(), APP.fusoHorario, 'yyyy-MM-dd');
 }
 
+/** A gravação pode usar a API do Google Planilhas? (Senão, usa a planilha aba por aba, como antes.) */
+function gravarPelaApi() {
+  return !_forcarLeituraPorAba && !_apiIndisponivel && typeof Sheets !== 'undefined';
+}
+
+// Linhas alteradas na operação atual, enviadas de uma vez só quando a operação termina: { intervalo: valores }.
+var _gravacoes = {};
+// Houve gravação pela planilha (SpreadsheetApp) que ainda precisa ser enviada antes de soltar a trava.
+var _pendenteNaPlanilha = false;
+
 /** Insere o registro (gera id se faltar) e devolve o registro gravado. */
 function inserir(nome, registro) {
   return comTrava(function () {
@@ -156,68 +174,142 @@ function inserir(nome, registro) {
     var obj = Object.assign({}, registro);
     if (!obj.id) obj.id = novoId();
     if (colunas.indexOf('criado_em') !== -1 && !obj.criado_em) obj.criado_em = agoraIso();
-    abaDaTabela(nome).appendRow(linhaDe(colunas, obj));
-    delete _cacheTabelas[nome];
+    var valores = linhaDe(colunas, obj);
+    if (!gravarPelaApi()) {
+      abaDaTabela(nome).appendRow(valores);
+      _pendenteNaPlanilha = true;
+      delete _cacheTabelas[nome];
+      return obj;
+    }
+    // RAW: grava o texto como está, sem a planilha converter datas e números.
+    var r = Sheets.Spreadsheets.Values.append({ values: [valores] }, idDoBanco(), "'" + nome + "'!A1",
+      { valueInputOption: 'RAW', insertDataOption: 'INSERT_ROWS' });
+    var linha = /(\d+)$/.exec(String(r.updates && r.updates.updatedRange));
+    if (_cacheTabelas[nome] && linha) {
+      _cacheTabelas[nome].push(registroDeValores(colunas, valores));
+      _linhas[nome][String(obj.id)] = Number(linha[1]);
+    } else {
+      // Sem saber a linha nova, a aba vai ser lida de novo: o que estava para gravar vai antes.
+      enviarGravacoes();
+      delete _cacheTabelas[nome];
+    }
     return obj;
   });
 }
 
-/** Atualiza só os campos enviados do registro com esse id. */
+/** Atualiza só os campos enviados do registro com esse id (e marca atualizado_em). */
 function atualizar(nome, id, campos) {
+  var mudancas = {};
+  mudancas[id] = campos;
+  return atualizarVarios(nome, mudancas, true)[0];
+}
+
+/**
+ * Atualiza vários registros de uma vez: { id: { campo: valor } }. Devolve os registros como ficaram.
+ * unico = true (vindo de atualizar): o registro tem que existir e atualizado_em é marcado.
+ * Sem ele (recálculos), quem não existe é ignorado e atualizado_em fica como está.
+ * Pela API, a linha já conhecida é gravada no fim da operação, junto com as outras, e a leitura em
+ * memória é atualizada na hora: quem ler depois já vê o valor novo, sem consultar a planilha de novo.
+ */
+function atualizarVarios(nome, mudancas, unico) {
+  var ids = Object.keys(mudancas);
+  if (!ids.length) return [];
   return comTrava(function () {
     var colunas = TABELAS[nome];
-    var aba = abaDaTabela(nome);
-    var linha = numeroDaLinha(aba, id);
-    if (!linha) throw new Error('Registro não encontrado: ' + id);
-    var atual = aba.getRange(linha, 1, 1, colunas.length).getValues()[0];
-    var obj = {};
-    colunas.forEach(function (col, i) { obj[col] = atual[i]; });
-    Object.keys(campos).forEach(function (col) {
-      if (col !== 'id' && colunas.indexOf(col) !== -1) obj[col] = campos[col];
+    if (!gravarPelaApi()) return atualizarNaPlanilha(nome, mudancas, unico);
+    var lista = listar(nome);
+    var indice = {};
+    lista.forEach(function (r, i) { indice[String(r.id)] = i; });
+    var gravados = [];
+    ids.forEach(function (id) {
+      var i = indice[String(id)];
+      var linha = _linhas[nome][String(id)];
+      if (i === undefined || !linha) {
+        if (unico) throw new Error('Registro não encontrado: ' + id);
+        return;
+      }
+      var obj = Object.assign({}, lista[i]);
+      aplicarCampos(colunas, obj, mudancas[id], unico);
+      var valores = linhaDe(colunas, obj);
+      _gravacoes["'" + nome + "'!A" + linha + ':' + letraDaColuna(colunas.length) + linha] = valores;
+      // Objeto novo: quem guardou o registro antigo continua vendo o antigo, como numa leitura nova.
+      lista[i] = registroDeValores(colunas, valores);
+      gravados.push(lista[i]);
     });
-    if (colunas.indexOf('atualizado_em') !== -1) obj.atualizado_em = agoraIso();
-    aba.getRange(linha, 1, 1, colunas.length).setValues([linhaDe(colunas, obj)]);
-    delete _cacheTabelas[nome];
-    return obj;
+    return gravados;
   });
 }
 
-/** Atualiza vários registros de uma vez: { id: { campo: valor } }. Lê e grava a aba uma vez só. */
-function atualizarVarios(nome, mudancas) {
-  var ids = Object.keys(mudancas);
-  if (!ids.length) return 0;
-  return comTrava(function () {
-    var colunas = TABELAS[nome];
-    var aba = abaDaTabela(nome);
-    var ultima = aba.getLastRow();
-    if (ultima < 2) return 0;
-    var intervalo = aba.getRange(2, 1, ultima - 1, colunas.length);
-    var valores = intervalo.getValues();
-    var alteradas = 0;
-    valores.forEach(function (linha) {
-      var campos = mudancas[String(linha[0])];
-      if (!campos) return;
-      Object.keys(campos).forEach(function (col) {
-        var i = colunas.indexOf(col);
-        if (i > 0) linha[i] = campos[col] === undefined || campos[col] === null ? '' : campos[col];
-      });
-      alteradas++;
-    });
-    if (alteradas) intervalo.setValues(valores);
-    delete _cacheTabelas[nome];
-    return alteradas;
+function aplicarCampos(colunas, obj, campos, marcarAtualizacao) {
+  Object.keys(campos).forEach(function (col) {
+    if (col !== 'id' && colunas.indexOf(col) !== -1) obj[col] = campos[col] === undefined || campos[col] === null ? '' : campos[col];
   });
+  if (marcarAtualizacao && colunas.indexOf('atualizado_em') !== -1) obj.atualizado_em = agoraIso();
+}
+
+/** Como era antes da API: lê a aba, muda as linhas e grava a aba inteira de volta. */
+function atualizarNaPlanilha(nome, mudancas, unico) {
+  var colunas = TABELAS[nome];
+  var aba = abaDaTabela(nome);
+  var ultima = aba.getLastRow();
+  var intervalo = ultima < 2 ? null : aba.getRange(2, 1, ultima - 1, colunas.length);
+  var valores = intervalo ? intervalo.getValues() : [];
+  var gravados = [];
+  valores.forEach(function (linha) {
+    var campos = mudancas[String(linha[0])];
+    if (!campos) return;
+    var obj = {};
+    colunas.forEach(function (col, i) { obj[col] = linha[i]; });
+    aplicarCampos(colunas, obj, campos, unico);
+    colunas.forEach(function (col, i) { linha[i] = obj[col]; });
+    gravados.push(obj);
+  });
+  if (unico && gravados.length < Object.keys(mudancas).length) {
+    throw new Error('Registro não encontrado: ' + Object.keys(mudancas).join(', '));
+  }
+  if (gravados.length) {
+    intervalo.setValues(valores);
+    _pendenteNaPlanilha = true;
+  }
+  delete _cacheTabelas[nome];
+  return gravados;
 }
 
 function excluir(nome, id) {
   return comTrava(function () {
+    var linha = 0;
+    if (gravarPelaApi()) {
+      listar(nome);
+      linha = _linhas[nome][String(id)] || 0;
+      // As linhas abaixo sobem uma posição: o que estava para gravar vai antes.
+      enviarGravacoes();
+    }
     var aba = abaDaTabela(nome);
-    var linha = numeroDaLinha(aba, id);
+    if (!linha) linha = numeroDaLinha(aba, id);
     if (!linha) throw new Error('Registro não encontrado: ' + id);
     aba.deleteRow(linha);
-    delete _cacheTabelas[nome];
+    // Exclui de fato agora: as próximas leituras e gravações pela API contam com as linhas já no lugar.
+    SpreadsheetApp.flush();
+    if (gravarPelaApi() && _cacheTabelas[nome]) {
+      // Tira da memória e sobe uma posição as linhas que estavam abaixo, sem ler a aba de novo.
+      _cacheTabelas[nome] = _cacheTabelas[nome].filter(function (r) { return String(r.id) !== String(id); });
+      var posicao = _linhas[nome];
+      delete posicao[String(id)];
+      Object.keys(posicao).forEach(function (k) { if (posicao[k] > linha) posicao[k]--; });
+    } else {
+      delete _cacheTabelas[nome];
+    }
     return true;
   });
+}
+
+/** Envia de uma vez, pela API, as linhas alteradas na operação. */
+function enviarGravacoes() {
+  var intervalos = Object.keys(_gravacoes);
+  if (!intervalos.length) return;
+  var dados = intervalos.map(function (faixa) { return { range: faixa, values: [_gravacoes[faixa]] }; });
+  _gravacoes = {};
+  Sheets.Spreadsheets.Values.batchUpdate({ valueInputOption: 'RAW', data: dados }, idDoBanco());
 }
 
 function numeroDaLinha(aba, id) {
@@ -237,15 +329,42 @@ function linhaDe(colunas, obj) {
   });
 }
 
-/** Garante que duas pessoas não gravem na mesma aba ao mesmo tempo. */
+/** O registro como ele volta numa leitura: as colunas da tabela, nesta ordem. */
+function registroDeValores(colunas, valores) {
+  var obj = {};
+  colunas.forEach(function (col, i) { obj[col] = valores[i]; });
+  return obj;
+}
+
+// A operação atual já está com a trava (uma trava só por operação, mesmo com várias gravações).
+var _travaAtiva = false;
+
+/**
+ * Garante que duas pessoas não gravem ao mesmo tempo. A operação inteira roda com a trava:
+ * o que ela lê já vem depois da trava (nada lido antes é reaproveitado), e o que ela grava
+ * vai para a planilha antes de soltar a trava. Se a operação falhar, as linhas alteradas
+ * que ainda não foram enviadas são descartadas.
+ */
 function comTrava(fn) {
+  if (_travaAtiva) return fn();
   var trava = LockService.getScriptLock();
   trava.waitLock(20000);
+  _travaAtiva = true;
+  _cacheTabelas = {};
+  _gravacoes = {};
   try {
-    return fn();
+    var resultado = fn();
+    enviarGravacoes();
+    return resultado;
+  } catch (e) {
+    _gravacoes = {};
+    throw e;
   } finally {
-    // Grava de fato antes de soltar a trava: a próxima leitura (pela API) já vê o que foi gravado.
-    SpreadsheetApp.flush();
+    _travaAtiva = false;
+    if (_pendenteNaPlanilha) {
+      SpreadsheetApp.flush();
+      _pendenteNaPlanilha = false;
+    }
     trava.releaseLock();
   }
 }

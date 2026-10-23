@@ -87,7 +87,7 @@ function dadosRegistroGeral(dados, usuario, lista) {
 }
 
 function apiRegistrarReuniao(dados) {
-  return responder(function () {
+  return responderGravando(function () {
     var usuario = usuarioAtual();
     var registro = dadosRegistroGeral(dados, usuario, 'REUNIAO_EQUIPE');
     if (!buscarPorId('UNIDADES', dados.unidade_id)) throw new Error('Escolha a unidade.');
@@ -98,7 +98,7 @@ function apiRegistrarReuniao(dados) {
 }
 
 function apiRegistrarGerencial(dados) {
-  return responder(function () {
+  return responderGravando(function () {
     var usuario = usuarioAtual();
     inserir('GERENCIAIS', dadosRegistroGeral(dados, usuario, 'ATIVIDADE_GERENCIAL'));
     return registrosDoMes(dados.data);
@@ -131,7 +131,7 @@ function apiRegistrosDoMes(data) {
 }
 
 function apiExcluirReuniao(id) {
-  return responder(function () {
+  return responderGravando(function () {
     var usuario = usuarioAtual();
     var r = buscarPorId('REUNIOES', id);
     if (!r) throw new Error('Registro não encontrado.');
@@ -142,7 +142,7 @@ function apiExcluirReuniao(id) {
 }
 
 function apiExcluirGerencial(id) {
-  return responder(function () {
+  return responderGravando(function () {
     var usuario = usuarioAtual();
     var r = buscarPorId('GERENCIAIS', id);
     if (!r) throw new Error('Registro não encontrado.');

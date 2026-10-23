@@ -216,7 +216,7 @@ function detalheAdmissao(adm) {
 }
 
 function apiSalvarAdmissao(dados) {
-  return responder(function () {
+  return responderGravando(function () {
     var usuario = usuarioAtual();
     var adm = {};
     CAMPOS_ADMISSAO_EDITAVEIS.forEach(function (c) {
@@ -302,7 +302,7 @@ function registrarDesfecho(adm, usuario) {
 
 /** Paciente teve desfecho psicológico e continua internado: o acompanhamento recomeça na mesma admissão. */
 function apiRetomarAcompanhamento(dados) {
-  return responder(function () {
+  return responderGravando(function () {
     var usuario = usuarioAtual();
     var adm = buscarPorId('ADMISSOES', dados.id);
     if (!adm) throw new Error('Admissão não encontrada.');
@@ -362,7 +362,7 @@ function inteiroEntre(valor, min, max, padrao) {
 }
 
 function apiRegistrarAtendimento(dados) {
-  return responder(function () {
+  return responderGravando(function () {
     var usuario = usuarioAtual();
     var adm = admissaoParaRegistro(dados.admissao_id);
     var data = normalizarData(dados.data);
@@ -404,7 +404,7 @@ function exigirAutorOuCoordenacao(registro, usuario) {
 }
 
 function apiExcluirAtendimento(id) {
-  return responder(function () {
+  return responderGravando(function () {
     var usuario = usuarioAtual();
     var atendimento = buscarPorId('ATENDIMENTOS', id);
     if (!atendimento) throw new Error('Atendimento não encontrado.');
@@ -415,7 +415,7 @@ function apiExcluirAtendimento(id) {
 }
 
 function apiRegistrarAtividade(dados) {
-  return responder(function () {
+  return responderGravando(function () {
     var usuario = usuarioAtual();
     var adm = admissaoParaRegistro(dados.admissao_id);
     var data = normalizarData(dados.data);
@@ -434,7 +434,7 @@ function apiRegistrarAtividade(dados) {
 }
 
 function apiExcluirAtividade(id) {
-  return responder(function () {
+  return responderGravando(function () {
     var usuario = usuarioAtual();
     var atividade = buscarPorId('ATIVIDADES', id);
     if (!atividade) throw new Error('Atividade não encontrada.');

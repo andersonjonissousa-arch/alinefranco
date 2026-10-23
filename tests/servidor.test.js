@@ -549,3 +549,86 @@ test('medição de desempenho roda as ações sem erro e não mexe no banco real
   assert.equal(google.planilha.getSheets().map((a) => a.linhas.length).join(','), abasAntes);
   assert.equal(google.criadas.length, 1);
 });
+
+/** Conta as chamadas ao Google feitas pela função, como numa execução nova. */
+function contarChamadas(ctx, fn) {
+  const nomes = ['batchGet', 'append', 'batchUpdate'];
+  const originais = {};
+  const cont = { batchGet: 0, append: 0, batchUpdate: 0, trava: 0 };
+  nomes.forEach((n) => {
+    originais[n] = vm.runInContext('Sheets.Spreadsheets.Values.' + n, ctx);
+    ctx['__' + n] = (...a) => { cont[n]++; return originais[n](...a); };
+    vm.runInContext('Sheets.Spreadsheets.Values.' + n + ' = __' + n, ctx);
+  });
+  const lock = vm.runInContext('LockService.getScriptLock', ctx);
+  ctx.__lock = () => { cont.trava++; return lock(); };
+  vm.runInContext('LockService.getScriptLock = __lock', ctx);
+  ctx.novaExecucao();
+  const r = fn();
+  nomes.forEach((n) => { ctx['__orig'] = originais[n]; vm.runInContext('Sheets.Spreadsheets.Values.' + n + ' = __orig', ctx); });
+  ctx.__orig = lock;
+  vm.runInContext('LockService.getScriptLock = __orig', ctx);
+  return { r, cont };
+}
+
+test('gravação pela API: registrar atendimento lê uma vez, grava uma linha nova e atualiza o resto de uma vez', () => {
+  const { ctx, admitir } = sistemaComAdmissao();
+  const adm = admitir().dados.admissao;
+  const { r, cont } = contarChamadas(ctx, () =>
+    ctx.apiRegistrarAtendimento({ admissao_id: adm.id, data: '2026-10-14', hora: '10:00', publico: 'PACIENTE' }));
+  assert.equal(r.ok, true, r.erro);
+  assert.deepEqual({ ...cont }, { batchGet: 1, append: 1, batchUpdate: 1, trava: 1 });
+  assert.equal(r.dados.admissao.primeiro_atendimento, '2026-10-14');
+});
+
+test('gravação pela API: o que fica na memória depois de gravar e excluir é igual ao que está na planilha', () => {
+  const { ctx, admitir, atender } = sistemaComAdmissao();
+  const adm = admitir().dados.admissao;
+  atender(adm, { data: '2026-10-13' });
+  const tudo = () => JSON.stringify(Object.keys(ctx.TABELAS).map((t) => ctx.listar(t)));
+  const verificar = (fn) => {
+    ctx.novaExecucao();
+    const r = fn();
+    assert.equal(r.ok, true, r.erro);
+    const naMemoria = tudo();
+    ctx.novaExecucao();
+    assert.equal(naMemoria, tudo());
+    return r.dados;
+  };
+  const det = verificar(() => ctx.apiRegistrarAtendimento({ admissao_id: adm.id, data: '2026-10-15', hora: '09:00', publico: 'PACIENTE' }));
+  verificar(() => ctx.apiRegistrarAtividade({ admissao_id: adm.id, data: '2026-10-15', tipo: 'DISCUSSÃO DE CASO', quantidade: 1 }));
+  const primeiro = det.atendimentos.find((a) => a.data === '2026-10-13');
+  const depois = verificar(() => ctx.apiExcluirAtendimento(primeiro.id));
+  assert.equal(depois.atendimentos.length, 1);
+  assert.equal(depois.admissao.primeiro_atendimento, '2026-10-15');
+  verificar(() => ctx.apiSalvarAdmissao({ ...depois.admissao, observacoes: 'depois da exclusão' }));
+  ctx.novaExecucao();
+  assert.equal(ctx.buscarPorId('ADMISSOES', adm.id).observacoes, 'depois da exclusão');
+});
+
+test('gravação pela API: se a operação falhar, as linhas alteradas nela não são gravadas', () => {
+  const { ctx, paciente } = sistemaComAdmissao();
+  ctx.novaExecucao();
+  assert.throws(() => ctx.comTrava(() => {
+    ctx.atualizar('PACIENTES', paciente.id, { nome: 'NOME ERRADO' });
+    throw new Error('falhou no meio');
+  }), /falhou no meio/);
+  ctx.novaExecucao();
+  assert.equal(ctx.buscarPorId('PACIENTES', paciente.id).nome, paciente.nome);
+});
+
+test('gravação pela API: a operação lê de novo depois de pegar a trava e não desfaz o que outra pessoa gravou', () => {
+  const { ctx, google, paciente } = sistemaComAdmissao();
+  ctx.novaExecucao();
+  const outro = ctx.apiSalvarPaciente({ prontuario: '777', nome: 'Outro Paciente' }).dados;
+  ctx.novaExecucao();
+  ctx.listar('PACIENTES'); // leitura feita antes, nesta execução
+  // Outra pessoa muda o outro paciente direto na planilha.
+  const aba = google.planilha.getSheetByName('PACIENTES');
+  aba.linhas.find((l) => l[0] === outro.id)[ctx.TABELAS.PACIENTES.indexOf('nome')] = 'NOME MUDADO POR OUTRA PESSOA';
+  const r = ctx.apiSalvarPaciente({ id: paciente.id, prontuario: paciente.prontuario, nome: 'Francisca Kelyane Souza' });
+  assert.equal(r.ok, true, r.erro);
+  ctx.novaExecucao();
+  assert.equal(ctx.buscarPorId('PACIENTES', outro.id).nome, 'NOME MUDADO POR OUTRA PESSOA');
+  assert.equal(ctx.buscarPorId('PACIENTES', paciente.id).nome, 'FRANCISCA KELYANE SOUZA');
+});

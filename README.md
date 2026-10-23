@@ -183,12 +183,18 @@ planilhas de teste listadas no registro.
 
 ## Desempenho
 
-Cada consulta ao Google tem um custo fixo de tempo, então o sistema lê o banco numa consulta só pela
-API do Google Planilhas (serviço avançado "Sheets", ligado no `appsscript.json`): todas as abas de uma
-vez, uma vez por execução. Se a API não responder, o sistema volta a ler aba por aba, mais devagar.
+Cada consulta ao Google tem um custo fixo de tempo, então o sistema conversa com o banco pela API do
+Google Planilhas (serviço avançado "Sheets", ligado no `appsscript.json`):
+
+- **Leitura:** todas as abas numa consulta só, uma vez por execução.
+- **Gravação:** cada operação (registrar atendimento, salvar admissão...) roda inteira com uma trava
+  só. A linha nova vai numa chamada, e as linhas alteradas (inclusive os prazos recalculados) vão
+  juntas numa chamada no fim. O que foi gravado já fica na memória, sem ler a planilha de novo.
+- Se a operação falhar no meio, as linhas alteradas nela não são gravadas.
+- Se a API não responder, o sistema volta a ler e gravar aba por aba, mais devagar.
 
 Para medir na conta do Google, rode `medirDesempenho` no editor do Apps Script. Ela mostra no registro
-de execução o tempo de cada ação lendo aba por aba (como era antes) e pela API (como é agora). As
+de execução o tempo de cada ação lendo e gravando aba por aba (como era antes) e pela API (como é agora). As
 leituras usam o banco real sem alterar nada; as gravações usam uma planilha de teste, que pode ser
 apagada do Drive depois.
 

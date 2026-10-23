@@ -5,6 +5,10 @@
  */
 
 function configurar() {
+  return comTrava(configurarComTrava);
+}
+
+function configurarComTrava() {
   var banco = obterOuCriarBanco();
   Object.keys(TABELAS).forEach(function (nome) { prepararAba(banco, nome); });
   removerAbaPadrao(banco);

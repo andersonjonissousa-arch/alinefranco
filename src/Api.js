@@ -63,7 +63,7 @@ function apiBuscarPacientes(termo) {
 }
 
 function apiSalvarPaciente(dados) {
-  return responder(function () {
+  return responderGravando(function () {
     usuarioAtual();
     var paciente = {
       id: dados.id || '',
@@ -82,7 +82,7 @@ function apiSalvarPaciente(dados) {
 // ---------- Cadastros da coordenação ----------
 
 function apiSalvarProfissional(dados) {
-  return responder(function () {
+  return responderGravando(function () {
     exigirCoordenacao();
     var prof = {
       nome: formatarNome(dados.nome),
@@ -106,7 +106,7 @@ function apiSalvarProfissional(dados) {
 }
 
 function apiSalvarSetor(dados) {
-  return responder(function () {
+  return responderGravando(function () {
     exigirCoordenacao();
     var setor = { nome: formatarNome(dados.nome), ordem: Number(dados.ordem) || 99, ativo: dados.ativo === 'NÃO' ? 'NÃO' : 'SIM' };
     if (!setor.nome) throw new Error('Informe o nome do setor.');
@@ -117,7 +117,7 @@ function apiSalvarSetor(dados) {
 }
 
 function apiSalvarUnidade(dados) {
-  return responder(function () {
+  return responderGravando(function () {
     exigirCoordenacao();
     var unidade = {
       nome: formatarNome(dados.nome),
@@ -134,7 +134,7 @@ function apiSalvarUnidade(dados) {
 }
 
 function apiSalvarItemLista(dados) {
-  return responder(function () {
+  return responderGravando(function () {
     exigirCoordenacao();
     if (!LISTAS_INICIAIS[dados.lista]) throw new Error('Lista desconhecida.');
     var item = {
@@ -159,7 +159,7 @@ function validarPrioridadeDoTipo(prioridadeId, tipo) {
 
 /** Justificativa de acompanhamento ligada a uma prioridade de seguimento (sem prioridade = sem prazo). */
 function apiSalvarJustificativa(dados) {
-  return responder(function () {
+  return responderGravando(function () {
     exigirCoordenacao();
     var item = {
       nome: formatarNome(dados.nome),
@@ -177,7 +177,7 @@ function apiSalvarJustificativa(dados) {
 
 /** Motivo da solicitação ligado a uma prioridade de solicitação (sem prioridade = sem prazo). */
 function apiSalvarMotivo(dados) {
-  return responder(function () {
+  return responderGravando(function () {
     exigirCoordenacao();
     var item = {
       nome: formatarNome(dados.nome),
@@ -195,7 +195,7 @@ function apiSalvarMotivo(dados) {
 
 /** Prioridade de solicitação (prazo em horas) ou de seguimento (prazo em dias úteis). */
 function apiSalvarPrioridade(dados) {
-  return responder(function () {
+  return responderGravando(function () {
     exigirCoordenacao();
     var tipos = [TIPOS_PRIORIDADE.solicitacao, TIPOS_PRIORIDADE.seguimento];
     var atual = dados.id ? buscarPorId('PRIORIDADES', dados.id) : null;
@@ -222,7 +222,7 @@ function apiSalvarPrioridade(dados) {
 }
 
 function apiSalvarFeriado(dados) {
-  return responder(function () {
+  return responderGravando(function () {
     exigirCoordenacao();
     var feriado = { data: normalizarData(dados.data), descricao: formatarNome(dados.descricao) };
     if (!feriado.data) throw new Error('Informe a data do feriado.');
@@ -236,7 +236,7 @@ function apiSalvarFeriado(dados) {
 }
 
 function apiExcluirFeriado(id) {
-  return responder(function () {
+  return responderGravando(function () {
     exigirCoordenacao();
     excluir('FERIADOS', id);
     recalcularAdmissoesAbertas();
@@ -245,7 +245,7 @@ function apiExcluirFeriado(id) {
 }
 
 function apiSalvarDesfecho(dados) {
-  return responder(function () {
+  return responderGravando(function () {
     exigirCoordenacao();
     var item = {
       nome: formatarNome(dados.nome),
@@ -268,7 +268,7 @@ function apiSalvarDesfecho(dados) {
 }
 
 function apiSalvarParametro(dados) {
-  return responder(function () {
+  return responderGravando(function () {
     exigirCoordenacao();
     var param = listar('PARAMETROS').filter(function (p) { return p.id === dados.id; })[0];
     if (!param) throw new Error('Parâmetro não encontrado.');

@@ -1,7 +1,7 @@
 /**
  * Medição de desempenho. Rode "medirDesempenho" no editor do Apps Script.
- * Mede o tempo de cada ação da tela duas vezes: lendo a planilha aba por aba (como era antes)
- * e lendo tudo numa consulta só pela API do Google Planilhas (como é agora).
+ * Mede o tempo de cada ação da tela duas vezes: lendo e gravando a planilha aba por aba (como era antes)
+ * e pela API do Google Planilhas, com uma leitura e uma gravação por operação (como é agora).
  * As leituras usam o banco real, sem alterar nada. As gravações usam uma planilha de teste nova,
  * que pode ser apagada do Drive no fim.
  */
@@ -96,7 +96,7 @@ function medirDesempenho() {
 
   var resumo = [
     'MEDIÇÃO DE DESEMPENHO (média de ' + vezes + ' vezes, tempo no servidor)',
-    'antes = lendo a planilha aba por aba · agora = lendo tudo numa consulta só',
+    'antes = lendo e gravando aba por aba · agora = pela API, uma leitura e uma gravação por operação',
     'Na tela, cada clique soma cerca de 0,5 a 1,5 s de ida e volta do navegador.',
     ''
   ];
