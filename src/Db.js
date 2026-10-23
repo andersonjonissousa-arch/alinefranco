@@ -4,6 +4,40 @@
  */
 
 var _cacheTabelas = {};
+var _indicesTabelas = {};
+
+// Cache somente das opções da interface. Regras clínicas e permissões leem o banco.
+var TABELAS_CADASTRO_CACHE = ['LISTAS', 'SETORES', 'UNIDADES', 'PROFISSIONAIS',
+  'JUSTIFICATIVAS', 'MOTIVOS_SOLICITACAO', 'PRIORIDADES', 'DESFECHOS', 'PARAMETROS', 'FERIADOS'];
+
+function chaveCacheCadastro_() {
+  var props = PropertiesService.getScriptProperties();
+  return 'cadastro-v1:' + abrirBanco().getId() + ':' + (props.getProperty('VERSAO_CACHE_CADASTRO') || '0');
+}
+
+function invalidarCacheCadastro_(nome) {
+  if (TABELAS_CADASTRO_CACHE.indexOf(nome) !== -1 && !_bancoTeste) {
+    PropertiesService.getScriptProperties().setProperty('VERSAO_CACHE_CADASTRO', Utilities.getUuid());
+  }
+}
+
+/** Índice em memória, reconstruído automaticamente depois de uma gravação. */
+function indicePorId_(nome) {
+  var lista = listar(nome);
+  var indice = _indicesTabelas[nome];
+  if (!indice || indice.lista !== lista) {
+    var mapa = Object.create(null);
+    lista.forEach(function (r) { if (!mapa[String(r.id)]) mapa[String(r.id)] = r; });
+    indice = _indicesTabelas[nome] = { lista: lista, mapa: mapa };
+  }
+  return indice.mapa;
+}
+
+function agruparPor_(registros, campo) {
+  var grupos = Object.create(null);
+  registros.forEach(function (r) { (grupos[r[campo]] = grupos[r[campo]] || []).push(r); });
+  return grupos;
+}
 
 var _banco = null;
 // Usado só pelo autoteste: aponta o sistema para uma planilha de teste durante a execução.
@@ -31,6 +65,16 @@ function listar(nome) {
   if (_cacheTabelas[nome]) return _cacheTabelas[nome];
   var colunas = TABELAS[nome];
   var aba = abaDaTabela(nome);
+  if (nome === 'PACIENTES') {
+    var novasColunas = aba.getRange(1, 6, 1, 2).getValues()[0];
+    if (novasColunas[0] !== 'sexo' || novasColunas[1] !== 'data_nascimento') {
+      // Acrescenta as colunas no banco existente sem deslocar IDs ou carimbos de data.
+      comTrava(function () { prepararAba(abrirBanco(), 'PACIENTES'); });
+    }
+  }
+  if (nome === 'ATENDIMENTOS' && aba.getRange(1, colunas.length).getValues()[0][0] !== 'tipo_atendimento') {
+    comTrava(function () { prepararAba(abrirBanco(), 'ATENDIMENTOS'); });
+  }
   var ultima = aba.getLastRow();
   var linhas = ultima < 2 ? [] : aba.getRange(2, 1, ultima - 1, colunas.length).getValues();
   var registros = [];
@@ -54,11 +98,7 @@ function normalizarDataHora(coluna, valor) {
 }
 
 function buscarPorId(nome, id) {
-  var lista = listar(nome);
-  for (var i = 0; i < lista.length; i++) {
-    if (String(lista[i].id) === String(id)) return lista[i];
-  }
-  return null;
+  return indicePorId_(nome)[String(id)] || null;
 }
 
 function novoId() {
@@ -88,6 +128,7 @@ function inserir(nome, registro) {
     if (colunas.indexOf('criado_em') !== -1 && !obj.criado_em) obj.criado_em = agoraIso();
     abaDaTabela(nome).appendRow(linhaDe(colunas, obj));
     delete _cacheTabelas[nome];
+    invalidarCacheCadastro_(nome);
     return obj;
   });
 }
@@ -108,6 +149,7 @@ function atualizar(nome, id, campos) {
     if (colunas.indexOf('atualizado_em') !== -1) obj.atualizado_em = agoraIso();
     aba.getRange(linha, 1, 1, colunas.length).setValues([linhaDe(colunas, obj)]);
     delete _cacheTabelas[nome];
+    invalidarCacheCadastro_(nome);
     return obj;
   });
 }
@@ -135,6 +177,7 @@ function atualizarVarios(nome, mudancas) {
     });
     if (alteradas) intervalo.setValues(valores);
     delete _cacheTabelas[nome];
+    if (alteradas) invalidarCacheCadastro_(nome);
     return alteradas;
   });
 }
@@ -146,6 +189,7 @@ function excluir(nome, id) {
     if (!linha) throw new Error('Registro não encontrado: ' + id);
     aba.deleteRow(linha);
     delete _cacheTabelas[nome];
+    invalidarCacheCadastro_(nome);
     return true;
   });
 }

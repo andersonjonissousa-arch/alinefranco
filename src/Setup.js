@@ -79,6 +79,7 @@ function semearListas() {
     var aba = abaDaTabela('LISTAS');
     aba.getRange(aba.getLastRow() + 1, 1, linhas.length, linhas[0].length).setValues(linhas);
     delete _cacheTabelas.LISTAS;
+    invalidarCacheCadastro_('LISTAS');
   });
 }
 

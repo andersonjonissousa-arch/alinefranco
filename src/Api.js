@@ -8,14 +8,26 @@ function porOrdem(a, b) {
 }
 
 /** Tudo o que a tela precisa para abrir: usuário, listas, setores, unidades e profissionais. */
-function apiInicio() {
+function apiInicio(incluirPainel) {
   return responder(function () {
     var usuario = usuarioAtual();
-    return Object.assign({ usuario: usuario }, dadosDeCadastro(usuario.perfil === 'COORDENAÇÃO'));
+    var dados = Object.assign({ usuario: usuario }, dadosDeCadastro(usuario.perfil === 'COORDENAÇÃO'));
+    if (incluirPainel === true) dados.painel = dadosDeGestao_({});
+    return dados;
   });
 }
 
 function dadosDeCadastro(incluirInativos) {
+  var cache = null;
+  var chave = '';
+  try {
+    if (!_bancoTeste && typeof CacheService !== 'undefined') {
+      cache = CacheService.getScriptCache();
+      chave = chaveCacheCadastro_() + ':' + (incluirInativos ? 'todos' : 'ativos');
+      var salvo = cache.get(chave);
+      if (salvo) return Object.assign(JSON.parse(salvo), { hoje: hoje(), agora: agora() });
+    }
+  } catch (e) { cache = null; }
   var ativo = function (x) { return incluirInativos || x.ativo === 'SIM'; };
   var listas = {};
   listar('LISTAS').filter(ativo).sort(porOrdem).forEach(function (item) {
@@ -30,7 +42,7 @@ function dadosDeCadastro(incluirInativos) {
   var profissionais = listar('PROFISSIONAIS').filter(ativo).sort(function (a, b) {
     return String(a.nome).localeCompare(String(b.nome));
   });
-  return {
+  var dados = {
     listas: listas,
     setores: setores,
     unidades: unidades,
@@ -49,11 +61,48 @@ function dadosDeCadastro(incluirInativos) {
     categorias: CATEGORIAS_PROFISSIONAL,
     perfis: PERFIS,
     publicos: PUBLICOS_ATENDIMENTO,
+    sexos_paciente: SEXOS_PACIENTE,
+    tipos_atendimento: TIPOS_ATENDIMENTO,
+    inicio_indicador_primeiro: APP.inicioIndicadorPrimeiro,
     hoje: hoje()
   };
+  // Cache é opcional: indisponibilidade ou limite de tamanho não impede o uso.
+  if (cache) {
+    try { cache.put(chave, JSON.stringify(dados), 120); } catch (e) { /* usa o banco */ }
+  }
+  return dados;
 }
 
 // ---------- Pacientes ----------
+
+/** Lista a página de pacientes, inclusive quando não há termo de busca. */
+function apiListarPacientes(filtros) {
+  return responder(function () {
+    usuarioAtual();
+    filtros = filtros || {};
+    var termo = String(filtros.termo || '').trim();
+    var pacientes = listar('PACIENTES');
+    pacientes = termo ? filtrarPacientes(pacientes, termo, pacientes.length) : pacientes.slice();
+    pacientes.sort(function (a, b) {
+      return normalizarTexto(a.nome).localeCompare(normalizarTexto(b.nome))
+        || String(a.prontuario).localeCompare(String(b.prontuario))
+        || String(a.id).localeCompare(String(b.id));
+    });
+    var tamanho = 20;
+    var total = pacientes.length;
+    var paginas = Math.max(1, Math.ceil(total / tamanho));
+    var pagina = Number(filtros.pagina);
+    if (!isFinite(pagina) || pagina < 1) pagina = 1;
+    pagina = Math.min(paginas, Math.floor(pagina));
+    return {
+      pacientes: pacientes.slice((pagina - 1) * tamanho, pagina * tamanho),
+      pagina: pagina,
+      paginas: paginas,
+      total: total,
+      tamanho_pagina: tamanho
+    };
+  });
+}
 
 function apiBuscarPacientes(termo) {
   return responder(function () {
@@ -72,6 +121,18 @@ function apiSalvarPaciente(dados) {
     };
     if (!paciente.prontuario) throw new Error('Informe o prontuário (somente números).');
     if (!paciente.nome) throw new Error('Informe o nome do paciente.');
+    if (Object.prototype.hasOwnProperty.call(dados, 'sexo')) {
+      paciente.sexo = String(dados.sexo || '').trim().toUpperCase();
+      if (paciente.sexo && SEXOS_PACIENTE.indexOf(paciente.sexo) === -1) throw new Error('Selecione um sexo válido.');
+    }
+    if (Object.prototype.hasOwnProperty.call(dados, 'data_nascimento')) {
+      var nascimento = String(dados.data_nascimento || '').trim();
+      paciente.data_nascimento = normalizarData(nascimento);
+      if (nascimento && (!/^(\d{4}-\d{2}-\d{2}|\d{1,2}\/\d{1,2}\/\d{4})$/.test(nascimento) || !paciente.data_nascimento)) {
+        throw new Error('Data de nascimento inválida.');
+      }
+      if (paciente.data_nascimento > hoje()) throw new Error('A data de nascimento não pode estar no futuro.');
+    }
     var duplicado = acharDuplicado(listar('PACIENTES'), paciente);
     if (duplicado) throw new Error('Já existe paciente com o prontuário ' + paciente.prontuario + ': ' + duplicado.nome + '.');
     if (paciente.id) return atualizar('PACIENTES', paciente.id, paciente);

@@ -28,13 +28,13 @@
     });
   }
 
-  /** Erro de armazenamento do Google (código INTERNAL): quase sempre mais de uma conta Google no navegador. */
+  /** Erro de armazenamento do Google (código INTERNAL): instabilidade do Google ou mais de uma conta no navegador. */
   function erroDoGoogle(e) {
     var msg = String((e && e.message) || e || '');
     if (/INTERNAL|armazenamento|storage/i.test(msg)) {
-      return new Error('O Google não conseguiu identificar sua conta (código INTERNAL). Isso acontece quando há mais de ' +
-        'uma conta Google aberta no navegador. Abra o sistema numa janela anônima, ou num perfil do Chrome só com a ' +
-        'conta cadastrada, ou saia das outras contas Google e tente de novo.');
+      return new Error('O Google não respondeu (código INTERNAL). Espere alguns minutos e atualize a página. ' +
+        'Se continuar, pode ser mais de uma conta Google aberta no navegador: abra o sistema numa janela anônima ' +
+        'ou num perfil do Chrome só com a conta cadastrada.');
     }
     return e;
   }
@@ -147,7 +147,7 @@
   /** Texto do prazo de uma prioridade: "ALTA · até 24h" ou "MODERADA · até 3 dias úteis (2x por semana ou mais)". */
   function rotuloPrioridade(p) {
     if (!p) return 'sem prazo definido';
-    if (p.tipo === estado.cad.tipos_prioridade.solicitacao) return p.nome + ' · até ' + p.prazo + 'h';
+    if (p.tipo === estado.cad.tipos_prioridade.solicitacao) return p.nome + ' · até ' + p.prazo + 'h úteis';
     return p.nome + ' · até ' + p.prazo + ' dia(s) útil(eis)' + (p.periodicidade ? ' (' + p.periodicidade + ')' : '');
   }
 
@@ -187,13 +187,16 @@
     gestao: telaGestao,
     pacientes: telaPacientes,
     admissoes: telaAdmissoes,
+    atendimentos: telaAtendimentos,
     registro: telaRegistro,
+    indicadores: telaIndicadores,
     compilado: telaCompilado,
     cadastros: telaCadastros
   };
 
   function abrir(nome, arg) {
     estado.tela = nome;
+    estado.navegacao = (estado.navegacao || 0) + 1;
     document.querySelectorAll('#menu button').forEach(function (b) {
       b.classList.toggle('ativo', b.dataset.tela === nome);
     });
@@ -209,14 +212,14 @@
       h('div', { class: 'numero' }, numero), h('div', null, rotulo));
   }
 
-  function telaInicio() {
+  function telaInicio(painelInicial) {
     var primeiro = estado.usuario.nome.split(' ')[0].toLowerCase().replace(/^./, function (c) { return c.toUpperCase(); });
     var main = tela('Olá, ' + primeiro);
     var resumo = h('div', { class: 'indicadores' }, h('p', { class: 'carregando' }, 'Carregando…'));
     var lista = h('div', { class: 'cartao tabela-rolagem' });
     main.appendChild(resumo);
     main.appendChild(lista);
-    chamar('apiGestao', {}).then(function (g) {
+    (painelInicial ? Promise.resolve(painelInicial) : chamar('apiGestao', {})).then(function (g) {
       var r = g.resumo;
       resumo.textContent = '';
       resumo.appendChild(cartaoIndicador(r.pacientes, 'Pacientes em acompanhamento', '', function () { abrir('gestao', { aba: 'unidades' }); }));
@@ -235,7 +238,7 @@
         h('thead', null, h('tr', null, ['Paciente', 'Unidade', 'O que vence', 'Prazo', 'Situação'].map(function (t) { return h('th', null, t); }))),
         h('tbody', null, urgentes.map(function (a) {
           var p = a.prazos.proximo;
-          return h('tr', { class: 'clicavel', onclick: function () { abrir('admissoes', { id: a.id }); } },
+          return h('tr', { class: 'clicavel', onclick: function () { abrir('atendimentos', { id: a.id }); } },
             h('td', null, h('strong', null, a.paciente_nome), h('div', { class: 'suave' }, 'Pront. ' + a.prontuario)),
             h('td', null, a.unidade_nome),
             h('td', null, ROTULO_TIPO_PRAZO[p.tipo] || p.tipo),
@@ -268,13 +271,13 @@
     if (p.estado === 'PENDENTE') {
       return h('div', null, data(p.prazo), ' ', selo(p.situacao),
         p.horas_restantes !== undefined && p.horas_restantes !== ''
-          ? h('div', { class: 'suave' }, p.horas_restantes >= 0 ? 'faltam ' + textoHoras(p.horas_restantes) : 'atrasada há ' + textoHoras(p.horas_restantes))
+          ? h('div', { class: 'suave' }, (p.horas_restantes >= 0 ? 'faltam ' + textoHoras(p.horas_restantes) : 'atrasada há ' + textoHoras(p.horas_restantes)) + ' úteis')
           : '');
     }
     var classe = p.resultado === 'NO PRAZO' ? 'selo prazo' : 'selo atrasado';
     var quando = p.realizado ? (comHora ? dataHoraBr(p.realizado) : dataBr(p.realizado)) : 'não realizado';
     return h('div', null, quando, ' ', h('span', { class: classe }, p.resultado.toLowerCase()),
-      p.horas !== undefined && p.horas !== '' ? h('div', { class: 'suave' }, 'em ' + String(p.horas).replace('.', ',') + 'h') : '');
+      p.horas !== undefined && p.horas !== '' ? h('div', { class: 'suave' }, 'em ' + String(p.horas).replace('.', ',') + 'h úteis') : '');
   }
 
   function telaGestao(arg) {
@@ -345,7 +348,7 @@
                   .map(function (t) { return h('th', null, t); }))),
                 h('tbody', null, itens.map(function (a) {
                   var p = a.prazos.proximo;
-                  return h('tr', { class: 'clicavel', onclick: function () { abrir('admissoes', { id: a.id }); } },
+                  return h('tr', { class: 'clicavel', onclick: function () { abrir('atendimentos', { id: a.id }); } },
                     h('td', null, h('strong', null, a.paciente_nome),
                       h('div', { class: 'suave' }, 'Pront. ' + a.prontuario + ' · internado há ' + a.dias_internado + ' dia(s)')),
                     h('td', null, seloStatus(a)),
@@ -372,13 +375,13 @@
         lista.textContent = '';
         lista.appendChild(h('p', { class: 'suave' },
           'Prazos de cada paciente: 1º atendimento em até ' + parametroPrazoPrimeiro() + ' dia(s) útil(eis) da admissão, ' +
-          'resposta à interconsulta em horas pela prioridade do motivo, e retorno em dias úteis pela prioridade da justificativa.'));
+          'resposta à interconsulta em horas úteis pela prioridade do motivo, e retorno em dias úteis pela prioridade da justificativa.'));
         if (!g.itens.length) { lista.appendChild(h('p', { class: 'suave' }, 'Nenhum paciente encontrado.')); return; }
         lista.appendChild(h('table', null,
           h('thead', null, h('tr', null, ['Paciente', '1º atendimento', 'Interconsulta', 'Retorno (seguimento)']
             .map(function (t) { return h('th', null, t); }))),
           h('tbody', null, g.itens.map(function (a) {
-            return h('tr', { class: 'clicavel', onclick: function () { abrir('admissoes', { id: a.id }); } },
+            return h('tr', { class: 'clicavel', onclick: function () { abrir('atendimentos', { id: a.id }); } },
               h('td', null, h('strong', null, a.paciente_nome), h('div', { class: 'suave' }, a.unidade_nome + ' · admissão ' + dataBr(a.data_admissao))),
               h('td', null, celulaPrazo(a.prazos.primeiro, false)),
               h('td', null, a.prazos.interconsulta.prioridade ? h('div', { class: 'suave' }, a.prazos.interconsulta.prioridade.toLowerCase()) : '',
@@ -420,7 +423,7 @@
         resumo.appendChild(h('div', { class: 'indicador atrasado' }, h('div', { class: 'numero' }, r.atrasadas), h('div', null, 'Atrasadas')));
         resumo.appendChild(h('div', { class: 'indicador' }, h('div', { class: 'numero' }, r.respondidas), h('div', null, 'Respondidas (' + d.dias + ' dias)')));
         resumo.appendChild(h('div', { class: 'indicador prazo' }, h('div', { class: 'numero' },
-          r.respondidas ? Math.round(r.no_prazo / r.respondidas * 100) + '%' : '—'), h('div', null, 'Respondidas no prazo')));
+          r.respondidas_com_prazo ? Math.round(r.no_prazo / r.respondidas_com_prazo * 100) + '%' : '—'), h('div', null, 'No prazo (entre as com prazo)')));
         lista.textContent = '';
         if (!d.itens.length) { lista.appendChild(h('p', { class: 'suave' }, 'Nenhuma interconsulta encontrada.')); return; }
         lista.appendChild(h('table', null,
@@ -428,7 +431,7 @@
             .map(function (t) { return h('th', null, t); }))),
           h('tbody', null, d.itens.map(function (a) {
             var i = a.prazos.interconsulta;
-            return h('tr', { class: 'clicavel', onclick: function () { abrir('admissoes', { id: a.id }); } },
+            return h('tr', { class: 'clicavel', onclick: function () { abrir('atendimentos', { id: a.id }); } },
               h('td', null, h('strong', null, a.paciente_nome), h('div', { class: 'suave' }, a.unidade_nome + ' · Pront. ' + a.prontuario),
                 a.para_quem === 'FAMILIAR' ? h('div', { class: 'suave' }, 'para ' + [a.familiar_parentesco, a.familiar_nome].filter(Boolean).join(' ').toLowerCase()) : ''),
               h('td', null, a.motivo_nome || '—', h('div', { class: 'suave' }, (i.prioridade || '').toLowerCase())),
@@ -450,29 +453,57 @@
 
   // ---------- Pacientes ----------
 
+  function camposDemograficosPaciente(p) {
+    return [
+      campo('Sexo', seletor('sexo', estado.cad.sexos_paciente, p.sexo || '', 'Não informado')),
+      campo('Data de nascimento', h('input', { name: 'data_nascimento', type: 'date', value: p.data_nascimento || '', max: estado.cad.hoje }))
+    ];
+  }
+
   function telaPacientes() {
     var main = tela('Pacientes');
     var resultado = h('div', { class: 'tabela-rolagem' });
     var busca = h('input', { type: 'search', placeholder: 'Prontuário ou parte do nome', autocomplete: 'off' });
     var formulario = h('div');
+    var pedido = 0;
+    var espera;
 
-    function buscar() {
+    function buscar(pagina) {
       var termo = busca.value.trim();
-      resultado.textContent = '';
-      if (termo.length < 2) return;
-      chamar('apiBuscarPacientes', termo).then(function (lista) {
+      var atual = ++pedido;
+      resultado.textContent = 'Carregando pacientes…';
+      return chamar('apiListarPacientes', { termo: termo, pagina: pagina || 1 }).then(function (dados) {
+        if (atual !== pedido) return;
+        var lista = dados.pacientes;
         resultado.textContent = '';
         if (!lista.length) {
-          resultado.appendChild(h('p', { class: 'suave' }, 'Nenhum paciente encontrado. Cadastre abaixo.'));
+          resultado.appendChild(h('p', { class: 'suave' }, termo
+            ? 'Nenhum paciente encontrado. Confira o prontuário completo ou busque pelo nome.'
+            : 'Nenhum paciente cadastrado. Cadastre abaixo.'));
           return;
         }
+        var primeiro = (dados.pagina - 1) * dados.tamanho_pagina + 1;
+        resultado.appendChild(h('p', { class: 'suave', role: 'status' },
+          'Exibindo ' + primeiro + ' a ' + (primeiro + lista.length - 1) + ' de ' + dados.total + ' paciente(s).'));
         resultado.appendChild(h('table', null,
           h('thead', null, h('tr', null, h('th', null, 'Prontuário'), h('th', null, 'Nome'))),
           h('tbody', null, lista.map(function (p) {
             return h('tr', { class: 'clicavel', onclick: function () { editar(p); } },
               h('td', null, p.prontuario), h('td', null, p.nome));
           }))));
-      }).catch(function (e) { avisar(e.message, 'erro'); });
+        if (dados.paginas > 1) {
+          resultado.appendChild(h('div', { class: 'linha' },
+            h('button', { class: 'btn secundario', type: 'button', disabled: dados.pagina <= 1,
+              onclick: function () { buscar(dados.pagina - 1); } }, 'Anterior'),
+            h('span', null, 'Página ' + dados.pagina + ' de ' + dados.paginas),
+            h('button', { class: 'btn secundario', type: 'button', disabled: dados.pagina >= dados.paginas,
+              onclick: function () { buscar(dados.pagina + 1); } }, 'Próxima')));
+        }
+      }).catch(function (e) {
+        if (atual !== pedido) return;
+        resultado.textContent = 'Não foi possível carregar os pacientes. ' + e.message;
+        avisar(e.message, 'erro');
+      });
     }
 
     function editar(p) {
@@ -480,14 +511,16 @@
       var form = h('form', { class: 'linha' },
         h('input', { type: 'hidden', name: 'id', value: p.id || '' }),
         campo('Prontuário', h('input', { name: 'prontuario', inputmode: 'numeric', value: p.prontuario || '', required: true })),
-        campo('Nome completo', h('input', { name: 'nome', value: p.nome || '', required: true })));
+        campo('Nome completo', h('input', { name: 'nome', value: p.nome || '', required: true })),
+        camposDemograficosPaciente(p));
       var botao = h('button', { class: 'btn', type: 'submit' }, p.id ? 'Salvar alterações' : 'Cadastrar paciente');
       form.appendChild(botao);
       form.addEventListener('submit', function (ev) {
         ev.preventDefault();
         enviar(botao, chamar('apiSalvarPaciente', lerFormulario(form)), 'Paciente salvo.').then(function (salvo) {
+          clearTimeout(espera);
           busca.value = salvo.prontuario;
-          buscar();
+          buscar(1);
           editar({});
         }).catch(function () {});
       });
@@ -495,17 +528,22 @@
       formulario.appendChild(form);
     }
 
-    var espera;
-    busca.addEventListener('input', function () { clearTimeout(espera); espera = setTimeout(buscar, 300); });
+    busca.addEventListener('input', function () {
+      clearTimeout(espera);
+      pedido++;
+      resultado.textContent = 'Carregando pacientes…';
+      espera = setTimeout(function () { buscar(1); }, 300);
+    });
     main.appendChild(h('div', { class: 'cartao' }, campo('Buscar', busca), resultado));
     main.appendChild(h('div', { class: 'cartao' }, formulario));
     editar({});
+    buscar(1);
     busca.focus();
   }
 
   // ---------- Admissões ----------
 
-  var filtrosAdmissoes = { abertas: 'SIM', status: '', termo: '', setor_id: '', unidade_id: '', situacao: '' };
+  var filtrosAdmissoes = { abertas: 'SIM', termo: '', setor_id: '', unidade_id: '' };
 
   var ROTULO_PRIMEIRO = {
     'SIM': ['no prazo', 'selo prazo'],
@@ -525,20 +563,18 @@
     return h('span', { class: classe }, a.status.toLowerCase());
   }
 
+  /** Histórico de entradas hospitalares; cada linha abre os dados daquela admissão. */
   function tabelaAdmissoes(adms) {
     return h('table', null,
-      h('thead', null, h('tr', null, ['Paciente', 'Unidade', 'Admissão', '1º atendimento', 'Próximo prazo', 'Situação', 'Status']
+      h('thead', null, h('tr', null, ['ID da admissão', 'Paciente', 'Unidade', 'Entrada no hospital', 'Desfecho', 'Situação']
         .map(function (t) { return h('th', null, t); }))),
       h('tbody', null, adms.map(function (a) {
         return h('tr', { class: 'clicavel', onclick: function () { abrir('admissoes', { id: a.id }); } },
+          h('td', null, a.id),
           h('td', null, h('strong', null, a.paciente_nome), h('div', { class: 'suave' }, 'Pront. ' + a.prontuario)),
           h('td', null, a.unidade_nome),
           h('td', null, dataBr(a.data_admissao)),
-          h('td', null, a.primeiro_atendimento ? dataBr(a.primeiro_atendimento) + ' ' : '', seloPrimeiro(a.primeiro_no_prazo)),
-          h('td', null, a.aguardando_resposta
-            ? h('span', null, dataHoraBr(a.prazo_resposta), h('div', { class: 'suave' }, 'resposta à solicitação'))
-            : dataBr(a.proximo_prazo)),
-          h('td', null, selo(a.situacao)),
+          h('td', null, a.desfecho_nome || '—', a.data_desfecho ? h('div', { class: 'suave' }, dataBr(a.data_desfecho)) : null),
           h('td', null, seloStatus(a)));
       })));
   }
@@ -547,43 +583,64 @@
     if (arg && arg.id) return abrirAdmissao(arg.id);
     if (arg && arg.nova) return novaAdmissao();
     var main = tela('Admissões');
-    var lista = h('div', { class: 'cartao tabela-rolagem' }, h('p', { class: 'carregando' }, 'Carregando…'));
-    var st = estado.cad.status_admissao;
+    main.appendChild(h('p', { class: 'suave' }, 'Registre a entrada no hospital e consulte as internações anteriores de cada paciente.'));
+    var lista = h('div', { class: 'cartao tabela-rolagem' });
     var setores = estado.cad.setores.map(function (x) { return { valor: x.id, rotulo: x.nome }; });
     var form = h('form', { class: 'linha' },
       campo('Paciente', h('input', { name: 'termo', type: 'search', placeholder: 'Nome ou prontuário', value: filtrosAdmissoes.termo })),
       campo('Admissões', seletor('abertas', [{ valor: 'SIM', rotulo: 'Abertas' }, { valor: 'NÃO', rotulo: 'Encerradas' }],
         filtrosAdmissoes.abertas, 'Todas')),
-      campo('Status', seletor('status', [st.aguardando, st.acompanhamento, st.acompanhamentoEncerrado, st.encerrada]
-        .map(function (x) { return { valor: x, rotulo: x.toLowerCase() }; }), filtrosAdmissoes.status, 'Todos')),
       campo('Setor', seletor('setor_id', setores, filtrosAdmissoes.setor_id, 'Todos')),
       campo('Unidade', seletor('unidade_id', opcoesUnidades(), filtrosAdmissoes.unidade_id, 'Todas')),
-      campo('Situação do prazo', seletor('situacao', ['ATRASADO', 'VENCE HOJE', 'NO PRAZO'], filtrosAdmissoes.situacao, 'Todas')),
       h('button', { class: 'btn', type: 'button', onclick: function () { abrir('admissoes', { nova: true }); } }, 'Nova admissão'));
-
-    function carregar() {
-      filtrosAdmissoes = lerFormulario(form);
-      chamar('apiListarAdmissoes', filtrosAdmissoes).then(function (adms) {
-        lista.textContent = '';
-        lista.appendChild(h('p', { class: 'suave' }, adms.length + ' admissão(ões)'));
-        if (adms.length) lista.appendChild(tabelaAdmissoes(adms));
-      }).catch(function (e) { avisar(e.message, 'erro'); });
-    }
+    var pedido = 0;
+    var navegacao = estado.navegacao;
     var espera;
-    form.addEventListener('input', function () { clearTimeout(espera); espera = setTimeout(carregar, 350); });
+    function carregar() {
+      clearTimeout(espera);
+      filtrosAdmissoes = lerFormulario(form);
+      var atual = ++pedido;
+      lista.textContent = 'Carregando admissões…';
+      chamar('apiListarAdmissoes', filtrosAdmissoes).then(function (adms) {
+        if (atual !== pedido || navegacao !== estado.navegacao) return;
+        lista.textContent = '';
+        lista.appendChild(h('p', { class: 'suave' }, adms.length ? adms.length + ' admissão(ões)' : 'Nenhuma admissão encontrada.'));
+        if (adms.length) lista.appendChild(tabelaAdmissoes(adms));
+      }).catch(function (e) {
+        if (atual !== pedido || navegacao !== estado.navegacao) return;
+        lista.textContent = 'Não foi possível carregar as admissões. ' + e.message;
+        avisar(e.message, 'erro');
+      });
+    }
+    form.addEventListener('input', function () {
+      clearTimeout(espera);
+      pedido++;
+      lista.textContent = 'Carregando admissões…';
+      espera = setTimeout(carregar, 350);
+    });
+    form.addEventListener('change', carregar);
     form.addEventListener('submit', function (ev) { ev.preventDefault(); carregar(); });
     main.appendChild(h('div', { class: 'cartao' }, form));
     main.appendChild(lista);
     carregar();
   }
 
-  function voltarLista() {
-    return h('button', { class: 'btn sec voltar', type: 'button', onclick: function () { abrir('admissoes'); } }, '← Voltar à lista');
+  function voltarLista(destino) {
+    return h('button', { class: 'btn sec voltar', type: 'button', onclick: function () { abrir(destino || 'admissoes'); } }, '← Voltar à lista');
   }
 
   function abrirAdmissao(id) {
-    tela('Admissão').appendChild(h('p', { class: 'carregando' }, 'Carregando…'));
-    chamar('apiObterAdmissao', id).then(desenharAdmissao).catch(function (e) { avisar(e.message, 'erro'); abrir('admissoes'); });
+    var main = tela('Admissão');
+    main.appendChild(h('p', { class: 'carregando' }, 'Carregando…'));
+    var navegacao = estado.navegacao;
+    chamar('apiObterAdmissao', id).then(function (det) {
+      if (navegacao === estado.navegacao) desenharAdmissao(det);
+    }).catch(function (e) {
+      if (navegacao !== estado.navegacao) return;
+      main.textContent = 'Não foi possível carregar a admissão. ' + e.message;
+      main.appendChild(voltarLista());
+      avisar(e.message, 'erro');
+    });
   }
 
   function novaAdmissao() {
@@ -596,36 +653,286 @@
     return h('div', null, h('span', { class: 'suave' }, rotulo + ' '), Array.prototype.slice.call(arguments, 1));
   }
 
+  /** Apenas dados da entrada e consulta do histórico da internação. */
   function desenharAdmissao(det) {
     var a = det.admissao;
-    var st = estado.cad.status_admissao;
-    var main = tela(det.paciente ? det.paciente.nome : 'Admissão');
+    var main = tela('Admissão · ' + (det.paciente ? det.paciente.nome : a.paciente_nome));
     main.appendChild(voltarLista());
     main.appendChild(h('div', { class: 'cartao cabecalho-caso' },
+      info('ID da admissão', a.id),
       info('Prontuário', a.prontuario),
-      info('Unidade', a.unidade_nome),
-      info('Admissão', dataBr(a.data_admissao)),
-      info('1º atendimento', a.primeiro_atendimento ? dataBr(a.primeiro_atendimento) : 'até ' + dataBr(a.prazo_primeiro_atendimento),
-        ' ', seloPrimeiro(a.primeiro_no_prazo)),
-      a.resposta_no_prazo ? info('Solicitação', infoResposta(a)) : null,
-      info('Justificativa', a.justificativa_nome ? a.justificativa_nome + (a.prioridade_demanda ? ' · ' + a.prioridade_demanda.toLowerCase() : '') : '—'),
-      a.status === st.acompanhamento ? info('Próximo retorno', dataBr(a.proximo_prazo) || '—') : null,
-      selo(a.situacao),
-      seloStatus(a)));
-
-    if (a.status === st.acompanhamentoEncerrado) main.appendChild(formularioRetomada(a));
-    else if (a.status !== st.encerrada) main.appendChild(formularioAtendimento(a));
-    main.appendChild(listaAtendimentos(det));
-    main.appendChild(blocoAtividades(det));
+      info('Entrada no hospital', dataBr(a.data_admissao)),
+      info('Unidade da admissão', a.unidade_nome),
+      info('Unidade atual', a.unidade_atual_nome || a.unidade_nome),
+      seloStatus(a),
+      h('button', { class: 'btn', type: 'button', onclick: function () { abrir('atendimentos', { id: a.id }); } },
+        a.status === estado.cad.status_admissao.encerrada ? 'Consultar atendimentos desta admissão' : 'Ir para atendimentos')));
+    main.appendChild(h('div', { class: 'cartao' }, h('h2', null, 'Dados da entrada'), formularioAdmissao(a, desenharAdmissao)));
     if (det.desfechos.length) main.appendChild(historicoDesfechos(det.desfechos));
-    var dados = h('details', { class: 'cartao', open: a.status === st.aguardando && !det.atendimentos.length },
-      h('summary', null, h('h2', { class: 'inline' }, 'Dados da admissão')));
-    dados.appendChild(formularioAdmissao(a, desenharAdmissao));
-    main.appendChild(dados);
     if (det.outras_admissoes.length) {
       main.appendChild(h('div', { class: 'cartao tabela-rolagem' }, h('h2', null, 'Outras admissões deste paciente'),
         tabelaAdmissoes(det.outras_admissoes)));
     }
+  }
+
+  // ---------- Atendimentos: trabalho diário por admissão ----------
+
+  var filtrosAtendimentos = { setor_id: '', unidade_id: '', termo: '', status_atendimento: 'ATIVOS', pendencia: '' };
+
+  function telaAtendimentos(arg) {
+    if (arg && arg.id) return abrirAtendimento(arg.id);
+    var main = tela('Atendimentos');
+    main.appendChild(h('p', { class: 'suave' }, 'Selecione uma internação para registrar atendimentos, acompanhamento, atividades e desfechos.'));
+    var setores = estado.cad.setores.map(function (x) { return { valor: x.id, rotulo: x.nome }; });
+    var form = h('form', { class: 'linha' },
+      campo('Paciente', h('input', { name: 'termo', type: 'search', placeholder: 'Nome ou prontuário', value: filtrosAtendimentos.termo })),
+      campo('Setor', seletor('setor_id', setores, filtrosAtendimentos.setor_id, 'Todos')),
+      campo('Unidade', seletor('unidade_id', opcoesUnidades(), filtrosAtendimentos.unidade_id, 'Todas')),
+      campo('Mostrar', seletor('pendencia', [{ valor: 'PENDENTES', rotulo: 'Com prazo pendente' }, { valor: 'ATRASADOS', rotulo: 'Atrasados' }],
+        filtrosAtendimentos.pendencia, 'Todos os pacientes')),
+      campo('Situação do acompanhamento', seletor('status_atendimento', [{ valor: 'ATIVOS', rotulo: 'Ativos — sem desfecho' }, { valor: 'INATIVOS', rotulo: 'Inativos — com desfecho' }, { valor: 'TODOS', rotulo: 'Todos' }], filtrosAtendimentos.status_atendimento, false)));
+    var lista = h('div', { class: 'cartao tabela-rolagem' });
+    var pedido = 0;
+    var navegacao = estado.navegacao;
+    var espera;
+    function carregar() {
+      clearTimeout(espera);
+      filtrosAtendimentos = lerFormulario(form);
+      var atual = ++pedido;
+      lista.textContent = 'Carregando pacientes…';
+      chamar('apiGestao', filtrosAtendimentos).then(function (g) {
+        if (atual !== pedido || navegacao !== estado.navegacao) return;
+        lista.textContent = '';
+        lista.appendChild(h('p', { class: 'suave' }, g.itens.length ? g.itens.length + ' admissão(ões) para acompanhamento' : 'Nenhum paciente encontrado.'));
+        if (!g.itens.length) return;
+        lista.appendChild(h('table', null,
+          h('thead', null, h('tr', null, ['Paciente', 'Setor / unidade atual', 'Entrada no hospital', 'Situação', 'Próximo prazo'].map(function (t) { return h('th', null, t); }))),
+          h('tbody', null, g.itens.map(function (a) {
+            var proximo = a.prazos.proximo;
+            return h('tr', { class: 'clicavel', onclick: function () { abrir('atendimentos', { id: a.id }); } },
+              h('td', null, h('strong', null, a.paciente_nome),
+                h('div', { class: 'suave' }, 'Pront. ' + a.prontuario + ' · admissão ' + a.id)),
+              h('td', null, a.unidade_atual_nome || a.unidade_nome, a.setor_atual_nome ? h('div', { class: 'suave' }, a.setor_atual_nome) : ''),
+              h('td', null, dataBr(a.data_admissao), a.data_admissao === g.hoje ? h('div', null, h('span', { class: 'selo hoje' }, 'Admitido hoje')) : null),
+              h('td', null, seloStatus(a)),
+              h('td', null, proximo ? h('div', null, h('div', { class: 'suave' }, ROTULO_TIPO_PRAZO[proximo.tipo]),
+                proximo.prazo.length > 10 ? dataHoraBr(proximo.prazo) : dataBr(proximo.prazo), ' ', selo(proximo.situacao)) : '—'));
+          }))));
+      }).catch(function (e) {
+        if (atual !== pedido || navegacao !== estado.navegacao) return;
+        lista.textContent = 'Não foi possível carregar os pacientes. ' + e.message;
+        avisar(e.message, 'erro');
+      });
+    }
+    form.addEventListener('input', function () {
+      clearTimeout(espera);
+      pedido++;
+      lista.textContent = 'Carregando pacientes…';
+      espera = setTimeout(carregar, 350);
+    });
+    form.addEventListener('change', carregar);
+    form.addEventListener('submit', function (ev) { ev.preventDefault(); carregar(); });
+    main.appendChild(h('div', { class: 'cartao' }, form));
+    main.appendChild(lista);
+    carregar();
+  }
+
+  function abrirAtendimento(id) {
+    var main = tela('Atendimentos');
+    main.appendChild(h('p', { class: 'carregando' }, 'Carregando…'));
+    var navegacao = estado.navegacao;
+    chamar('apiObterAdmissao', id).then(function (det) {
+      if (navegacao === estado.navegacao) desenharAtendimento(det);
+    }).catch(function (e) {
+      if (navegacao !== estado.navegacao) return;
+      main.textContent = 'Não foi possível carregar os atendimentos. ' + e.message;
+      main.appendChild(voltarLista('atendimentos'));
+      avisar(e.message, 'erro');
+    });
+  }
+
+  function desenharAtendimento(det) {
+    var a = det.admissao;
+    var st = estado.cad.status_admissao;
+    var main = tela('Atendimentos · ' + (det.paciente ? det.paciente.nome : a.paciente_nome));
+    main.appendChild(voltarLista('atendimentos'));
+    main.appendChild(h('div', { class: 'cartao cabecalho-caso' },
+      info('ID da admissão', a.id),
+      info('Prontuário', a.prontuario),
+      info('Setor atual', a.setor_atual_nome || '—'),
+      info('Unidade atual', a.unidade_atual_nome || a.unidade_nome),
+      info('Unidade da admissão', a.unidade_admissao_nome || a.unidade_nome),
+      info('Entrada no hospital', dataBr(a.data_admissao)),
+      info('1º atendimento', a.primeiro_atendimento ? dataBr(a.primeiro_atendimento) :
+        a.primeiro_em_avaliacao === false ? 'Não registrado' : 'até ' + dataBr(a.prazo_primeiro_atendimento),
+        ' ', a.primeiro_em_avaliacao === false ? h('span', { class: 'selo' }, 'Fora do período de avaliação') : seloPrimeiro(a.primeiro_no_prazo)),
+      a.resposta_no_prazo ? info('Solicitação', infoResposta(a)) : null,
+      info('Justificativa', a.justificativa_nome ? a.justificativa_nome + (a.prioridade_demanda ? ' · ' + a.prioridade_demanda.toLowerCase() : '') : '—'),
+      a.status === st.acompanhamento ? info('Próximo retorno', dataBr(a.proximo_prazo) || '—') : null,
+      selo(a.situacao), seloStatus(a),
+      h('button', { class: 'btn sec', type: 'button', onclick: function () { abrir('admissoes', { id: a.id }); } }, 'Consultar dados da entrada')));
+    main.appendChild(blocoLocalizacao(det));
+    main.appendChild(blocoInterconsultas(det));
+    if (a.status === st.aguardando || a.status === st.acompanhamento) {
+      main.appendChild(formularioAcompanhamento(a));
+      main.appendChild(formularioAtendimento(a, det.interconsultas || [], det.transferencias || []));
+    } else {
+      main.appendChild(h('div', { class: 'cartao' }, h('h2', null, 'Dados do acompanhamento'),
+        info('Descrição da demanda', a.descricao_demanda || '—'),
+        info('Necessidade de acompanhamento', a.necessidade_acompanhamento || '—'),
+        info('Justificativa', a.justificativa_nome || '—')));
+      if (a.status === st.acompanhamentoEncerrado) main.appendChild(formularioRetomada(a));
+      else main.appendChild(h('p', { class: 'suave' }, 'Internação encerrada. Consulte abaixo os registros desta admissão.'));
+    }
+    main.appendChild(listaAtendimentos(det));
+    main.appendChild(blocoAtividades(det));
+    main.appendChild(formularioDesfecho(a));
+    if (det.desfechos.length) main.appendChild(historicoDesfechos(det.desfechos));
+  }
+
+  function blocoLocalizacao(det) {
+    var a = det.admissao, navegacao = estado.navegacao;
+    var historico = det.transferencias || [];
+    var bloco = h('details', { class: 'cartao' }, h('summary', null, 'Localização atual e transferências internas'));
+    if (a.status !== estado.cad.status_admissao.encerrada) {
+      var setor = seletor('setor_id', estado.cad.setores.filter(function (s) { return s.ativo !== 'NÃO'; })
+        .map(function (s) { return { valor: s.id, rotulo: s.nome }; }), a.setor_atual_id || a.setor_id, false);
+      var unidade = seletor('unidade_id', [], '');
+      unidade.required = true;
+      function filtrarUnidades() {
+        unidade.textContent = '';
+        unidade.appendChild(h('option', { value: '' }, 'Selecione o destino…'));
+        estado.cad.unidades.filter(function (u) { return u.ativo !== 'NÃO' && u.setor_id === setor.value; })
+          .forEach(function (u) { unidade.appendChild(h('option', { value: u.id }, u.nome)); });
+        unidade.value = '';
+      }
+      setor.addEventListener('change', filtrarUnidades);
+      filtrarUnidades();
+      var form = h('form', { class: 'linha' },
+        campo('Setor de destino', setor), campo('Unidade de destino', unidade),
+        campo('Data da transferência', h('input', { name: 'data', type: 'date', value: estado.cad.hoje, min: a.data_admissao, max: estado.cad.hoje, required: true })),
+        campo('Hora da transferência', h('input', { name: 'hora', type: 'time', value: horaAgora(), required: true })));
+      var salvar = h('button', { type: 'submit', class: 'btn' }, 'Alterar setor/unidade atual');
+      form.appendChild(salvar);
+      form.addEventListener('submit', function (ev) {
+        ev.preventDefault();
+        enviar(salvar, chamar('apiTransferirPaciente', Object.assign(lerFormulario(form), { admissao_id: a.id })), 'Localização atualizada.')
+          .then(function (d) { if (navegacao === estado.navegacao) desenharAtendimento(d); }).catch(function () {});
+      });
+      bloco.appendChild(form);
+    }
+    if (!historico.length) bloco.appendChild(h('p', { class: 'suave' }, 'Nenhuma transferência interna registrada. A localização atual é a unidade da admissão.'));
+    else bloco.appendChild(h('table', null,
+      h('thead', null, h('tr', null, ['Data e hora', 'Origem', 'Destino', 'Registrado por'].map(function (t) { return h('th', null, t); }))),
+      h('tbody', null, historico.slice().reverse().map(function (t) {
+        return h('tr', null, h('td', null, dataHoraBr(t.data + ' ' + t.hora)), h('td', null, t.origem_nome),
+          h('td', null, t.destino_nome), h('td', null, t.profissional_nome));
+      }))));
+    return bloco;
+  }
+
+  function blocoInterconsultas(det) {
+    var a = det.admissao;
+    var navegacao = estado.navegacao;
+    var itens = det.interconsultas || [];
+    var bloco = h('div', { class: 'cartao' }, h('h2', null, 'Interconsultas (' + itens.length + ')'),
+      h('p', { class: 'suave' }, 'Cada solicitação tem sua própria prioridade e prazo. Ao atender, indique qual solicitação foi respondida.'));
+    if (a.status !== estado.cad.status_admissao.encerrada) {
+      var paraQuem = seletor('para_quem', [{ valor: 'PACIENTE', rotulo: 'Paciente' }, { valor: 'FAMILIAR', rotulo: 'Familiar' }], 'PACIENTE', false);
+      var campoFamiliarNome = campo('Nome do familiar', h('input', { name: 'familiar_nome' }));
+      var campoFamiliarParentesco = campo('Parentesco', h('input', { name: 'familiar_parentesco', placeholder: 'Ex.: mãe, filho' }));
+      var ajustarFamiliar = function () {
+        var familiar = paraQuem.value === 'FAMILIAR';
+        campoFamiliarNome.hidden = !familiar;
+        campoFamiliarParentesco.hidden = !familiar;
+      };
+      paraQuem.addEventListener('change', ajustarFamiliar);
+      ajustarFamiliar();
+      var form = h('form', { class: 'linha' },
+        h('p', { class: 'suave' }, 'Solicitação da equipe'),
+        campo('Motivo (prioridade e prazo)', seletor('motivo_solicitacao_id', opcoesMotivos(), '')),
+        campo('Data da solicitação', h('input', { name: 'data_solicitacao', type: 'date', value: estado.cad.hoje, min: a.data_admissao, max: estado.cad.hoje, required: true })),
+        campo('Hora da solicitação', h('input', { name: 'hora_solicitacao', type: 'time', value: horaAgora(), required: true })),
+        campo('Solicitação para', paraQuem), campoFamiliarNome, campoFamiliarParentesco,
+        campo('Observações da solicitação', h('input', { name: 'observacoes' })));
+      var botao = h('button', { class: 'btn', type: 'submit' }, 'Registrar interconsulta');
+      form.appendChild(botao);
+      form.addEventListener('submit', function (ev) {
+        ev.preventDefault();
+        enviar(botao, chamar('apiRegistrarInterconsulta', Object.assign(lerFormulario(form), { admissao_id: a.id })), 'Interconsulta registrada.')
+          .then(function (d) { if (navegacao === estado.navegacao) desenharAtendimento(d); }).catch(function () {});
+      });
+      bloco.appendChild(h('details', null, h('summary', null, 'Nova interconsulta'), form));
+    }
+    itens.slice().reverse().forEach(function (i) {
+      var linha = h('div', { class: 'cartao' },
+        h('strong', null, dataHoraBr(dataHoraSolicitacao(i)) + ' · ' + i.motivo_nome),
+        h('div', { class: 'suave' }, 'Solicitação ' + i.id + ' · ' + i.tipo_solicitacao),
+        h('div', null, infoResposta(i)),
+        h('div', null, i.momento_resposta ? 'Respondida' : i.pendente ? 'Aguardando resposta' : 'Internação encerrada sem resposta'),
+        i.observacoes ? h('p', null, i.observacoes) : null);
+      if (ehCoordenacao() || i.criado_por === estado.usuario.id) {
+        var excluir = h('button', { class: 'link perigo', type: 'button' }, 'Excluir interconsulta');
+        excluir.addEventListener('click', function () {
+          if (!confirm('Excluir a interconsulta de ' + dataHoraBr(dataHoraSolicitacao(i)) + '? Os atendimentos registrados serão mantidos.')) return;
+          enviar(excluir, chamar('apiExcluirInterconsulta', i.id), 'Interconsulta excluída.')
+            .then(function (d) { if (navegacao === estado.navegacao) desenharAtendimento(d); }).catch(function () {});
+        });
+        linha.appendChild(excluir);
+      }
+      if (!i.momento_resposta && det.atendimentos.length) {
+        var resposta = h('form', { class: 'linha' }, campo('Vincular atendimento já registrado', seletor('atendimento_id',
+          det.atendimentos.filter(function (at) { return at.data + ' ' + at.hora >= dataHoraSolicitacao(i); }).map(function (at) {
+            return { valor: at.id, rotulo: dataHoraBr(at.data + ' ' + at.hora) + ' · ' + at.publico + ' · ' + at.profissional_nome };
+          }), '')));
+        var salvar = h('button', { class: 'btn sec', type: 'submit' }, 'Registrar resposta');
+        resposta.appendChild(salvar);
+        resposta.addEventListener('submit', function (ev) {
+          ev.preventDefault();
+          enviar(salvar, chamar('apiResponderInterconsulta', Object.assign(lerFormulario(resposta), { id: i.id })), 'Resposta vinculada.')
+            .then(function (d) { if (navegacao === estado.navegacao) desenharAtendimento(d); }).catch(function () {});
+        });
+        linha.appendChild(resposta);
+      }
+      bloco.appendChild(linha);
+    });
+    return bloco;
+  }
+
+  function formularioAcompanhamento(a) {
+    var navegacao = estado.navegacao;
+    var bloco = h('details', { class: 'cartao', open: !a.necessidade_acompanhamento },
+      h('summary', null, h('h2', { class: 'inline' }, 'Dados do acompanhamento')));
+    var form = h('form', { class: 'linha' },
+      campo('Descrição da demanda', seletor('descricao_demanda', opcoesLista('DESCRICAO_DEMANDA'), a.descricao_demanda)),
+      campo('Necessidade de acompanhamento', seletor('necessidade_acompanhamento', opcoesLista('NECESSIDADE_ACOMPANHAMENTO'), a.necessidade_acompanhamento)));
+    bloco.appendChild(h('p', { class: 'suave' }, 'Selecione a justificativa ao registrar o atendimento. Ela define o prazo do próximo retorno.'));
+    var botao = h('button', { class: 'btn', type: 'submit' }, 'Salvar acompanhamento');
+    form.appendChild(botao);
+    form.addEventListener('submit', function (ev) {
+      ev.preventDefault();
+      enviar(botao, chamar('apiSalvarAcompanhamento', Object.assign(lerFormulario(form), { id: a.id })), 'Acompanhamento salvo.')
+        .then(function (det) { if (navegacao === estado.navegacao) desenharAtendimento(det); }).catch(function () {});
+    });
+    bloco.appendChild(form);
+    return bloco;
+  }
+
+  function formularioDesfecho(a) {
+    var navegacao = estado.navegacao;
+    var bloco = h('details', { class: 'cartao' }, h('summary', null, h('h2', { class: 'inline' }, 'Desfecho da admissão')));
+    var form = h('form', { class: 'linha' },
+      campo('Desfecho', seletor('desfecho_id', opcoesDesfechos(), a.desfecho_id, 'Sem desfecho')),
+      campo('Data do desfecho', h('input', { name: 'data_desfecho', type: 'date', value: a.data_desfecho || '', max: estado.cad.hoje })));
+    var botao = h('button', { class: 'btn', type: 'submit' }, a.desfecho_id ? 'Salvar desfecho' : 'Registrar desfecho');
+    form.appendChild(botao);
+    form.addEventListener('submit', function (ev) {
+      ev.preventDefault();
+      enviar(botao, chamar('apiSalvarDesfechoAdmissao', Object.assign(lerFormulario(form), { id: a.id })), 'Desfecho salvo.')
+        .then(function (det) { if (navegacao === estado.navegacao) desenharAtendimento(det); }).catch(function () {});
+    });
+    bloco.appendChild(form);
+    return bloco;
   }
 
   function historicoDesfechos(lista) {
@@ -656,12 +963,13 @@
     var partes = [];
     if (a.prioridade_solicitacao) partes.push(a.prioridade_solicitacao.toLowerCase());
     if (a.prazo_resposta) partes.push('até ' + dataHoraBr(a.prazo_resposta));
-    if (a.momento_resposta) partes.push('respondida ' + dataHoraBr(a.momento_resposta) + ' (' + String(a.horas_resposta).replace('.', ',') + 'h)');
+    if (a.momento_resposta) partes.push('respondida ' + dataHoraBr(a.momento_resposta) + ' (' + String(a.horas_resposta).replace('.', ',') + 'h úteis)');
     if (a.para_quem === 'FAMILIAR') partes.push('para ' + [a.familiar_parentesco, a.familiar_nome].filter(Boolean).join(' ').toLowerCase());
     return h('span', null, partes.join(' · ') + ' ', h('span', { class: r[1] }, r[0]));
   }
 
   function formularioRetomada(a) {
+    var navegacao = estado.navegacao;
     var form = h('form', { class: 'linha' },
       campo('Data da retomada', h('input', { name: 'data', type: 'date', value: estado.cad.hoje, max: estado.cad.hoje, required: true })),
       campo('Necessidade de acompanhamento', seletor('necessidade_acompanhamento', opcoesLista('NECESSIDADE_ACOMPANHAMENTO'), a.necessidade_acompanhamento)),
@@ -671,7 +979,7 @@
     form.addEventListener('submit', function (ev) {
       ev.preventDefault();
       enviar(botao, chamar('apiRetomarAcompanhamento', Object.assign(lerFormulario(form), { id: a.id })), 'Acompanhamento retomado.')
-        .then(desenharAdmissao).catch(function () {});
+        .then(function (det) { if (navegacao === estado.navegacao) desenharAtendimento(det); }).catch(function () {});
     });
     return h('div', { class: 'cartao' },
       h('h2', null, 'Acompanhamento encerrado'),
@@ -680,17 +988,49 @@
       form);
   }
 
-  function formularioAtendimento(a) {
+  function formularioAtendimento(a, interconsultas, transferencias) {
+    var navegacao = estado.navegacao;
     var publico = seletor('publico', estado.cad.publicos.map(function (p) {
       return { valor: p, rotulo: p === 'PACIENTE' ? 'Paciente' : 'Família' };
     }), 'PACIENTE', false);
     var quantos = campo('Quantos familiares', h('input', { name: 'quantidade', type: 'number', min: 1, max: 30, value: 1 }));
     var impossibilitado = campo('Paciente impossibilitado de ser atendido?', seletor('paciente_impossibilitado',
       [{ valor: 'NÃO', rotulo: 'Não' }, { valor: 'SIM', rotulo: 'Sim — conta para o prazo do paciente' }], 'NÃO', false));
+    var tipo = seletor('tipo_atendimento', estado.cad.tipos_atendimento, '');
+    tipo.required = true;
+    var interconsulta = seletor('interconsulta_id', (interconsultas || []).filter(function (i) { return i.pendente; })
+      .map(function (i) { return { valor: i.id, rotulo: dataHoraBr(dataHoraSolicitacao(i)) + ' · ' + i.motivo_nome + ' · ' + (i.prioridade_solicitacao || 'sem prioridade') }; }), '', 'Selecione a interconsulta');
+    var campoInterconsulta = campo('Interconsulta respondida', interconsulta);
+    var justificativa = seletor('justificativa_id', opcoesJustificativas(), a.justificativa_id || '');
+    justificativa.required = Boolean(a.necessidade_acompanhamento && ['NÃO', 'N / A'].indexOf(a.necessidade_acompanhamento) === -1);
+    var unidade = seletor('unidade_id', opcoesUnidades(), a.unidade_atual_id || a.unidade_id, false);
+    var dataAtendimento = h('input', { name: 'data', type: 'date', value: estado.cad.hoje, max: estado.cad.hoje, required: true });
+    var horaAtendimento = h('input', { name: 'hora', type: 'time', value: horaAgora(), required: true });
+    function localizarNaData() {
+      var momento = dataAtendimento.value + ' ' + horaAtendimento.value;
+      var id = a.unidade_id;
+      (transferencias || []).forEach(function (t) {
+        if (t.data + ' ' + t.hora <= momento) id = t.destino_unidade_id;
+      });
+      unidade.value = id;
+    }
+    dataAtendimento.addEventListener('change', localizarNaData);
+    horaAtendimento.addEventListener('change', localizarNaData);
+    function ajustarTipo() {
+      var porInterconsulta = tipo.value === 'INTERCONSULTA';
+      campoInterconsulta.hidden = !porInterconsulta;
+      interconsulta.required = porInterconsulta;
+      if (!porInterconsulta) interconsulta.value = '';
+    }
+    tipo.addEventListener('change', ajustarTipo);
+    ajustarTipo();
     var form = h('form', { class: 'linha' },
-      campo('Data', h('input', { name: 'data', type: 'date', value: estado.cad.hoje, max: estado.cad.hoje, required: true })),
-      campo('Hora', h('input', { name: 'hora', type: 'time', value: horaAgora(), required: true })),
+      campo('Data', dataAtendimento),
+      campo('Hora', horaAtendimento),
+      campo('Unidade do atendimento', unidade),
       campo('Atendimento a', publico), quantos, impossibilitado,
+      campo('Tipo da solicitação', tipo), campoInterconsulta,
+      campo('Justificativa do acompanhamento / próximo retorno', justificativa),
       campo('Profissional', seletor('profissional_id', opcoesProfissionais(), estado.usuario.id, false)),
       campo('Observação', h('input', { name: 'observacao', placeholder: 'Opcional' })));
     function ajustar() {
@@ -705,18 +1045,19 @@
     form.addEventListener('submit', function (ev) {
       ev.preventDefault();
       var dados = Object.assign(lerFormulario(form), { admissao_id: a.id });
-      enviar(botao, chamar('apiRegistrarAtendimento', dados), 'Atendimento registrado.').then(desenharAdmissao).catch(function () {});
+      enviar(botao, chamar('apiRegistrarAtendimento', dados), 'Atendimento registrado.').then(function (det) { if (navegacao === estado.navegacao) desenharAtendimento(det); }).catch(function () {});
     });
     var titulo = a.status === estado.cad.status_admissao.aguardando ? 'Registrar 1º atendimento (avaliação)' : 'Registrar atendimento';
     return h('div', { class: 'cartao' }, h('h2', null, titulo), form);
   }
 
   function botaoExcluir(api, id) {
+    var navegacao = estado.navegacao;
     var b = h('button', { class: 'link perigo', type: 'button', title: 'Excluir' }, 'excluir');
     b.addEventListener('click', function (ev) {
       ev.stopPropagation();
       if (!confirm('Excluir este registro?')) return;
-      enviar(b, chamar(api, id), 'Excluído.').then(desenharAdmissao).catch(function () {});
+      enviar(b, chamar(api, id), 'Excluído.').then(function (det) { if (navegacao === estado.navegacao) desenharAtendimento(det); }).catch(function () {});
     });
     return b;
   }
@@ -728,27 +1069,53 @@
       return bloco;
     }
     bloco.appendChild(h('table', null,
-      h('thead', null, h('tr', null, ['Data', 'A quem', 'Profissional', 'Prazo era até', 'No prazo', '', '']
+      h('thead', null, h('tr', null, ['Data', 'Unidade', 'Tipo da solicitação', 'A quem', 'Profissional', 'Justificativa', 'Interconsulta — prazo e resultado', 'Primeiro atendimento / retorno — prazo e resultado', 'Observação', '']
         .map(function (t) { return h('th', null, t); }))),
       h('tbody', null, det.atendimentos.map(function (at) {
         var familia = at.publico === 'FAMÍLIA';
         return h('tr', null,
           h('td', null, dataBr(at.data), at.hora ? h('div', { class: 'suave' }, at.hora) : ''),
+          h('td', null, at.unidade_nome || '—'),
+          h('td', null, at.tipo_atendimento || 'Não informado'),
           h('td', null, familia ? 'Família · ' + at.quantidade + ' pessoa(s)' : 'Paciente',
             familia && at.paciente_impossibilitado === 'SIM' ? h('div', { class: 'suave' }, 'paciente impossibilitado') : ''),
           h('td', null, at.profissional_nome, at.categoria !== 'PROFISSIONAL DA EMPRESA'
             ? h('div', { class: 'suave' }, ROTULO_CATEGORIA[at.categoria] || at.categoria) : ''),
-          h('td', null, dataBr(at.prazo_limite) || '—'),
-          h('td', null, at.conta_prazo === 'NÃO' ? h('span', { class: 'suave' }, 'não conta')
-            : at.no_prazo === 'SIM' ? h('span', { class: 'selo prazo' }, 'sim')
-              : at.no_prazo === 'NÃO' ? h('span', { class: 'selo atrasado' }, 'não') : '—'),
+          h('td', null, at.justificativa_nome || '—'),
+          h('td', null, prazosInterconsultaNoHistorico(at)),
+          h('td', null, prazoClinicoNoHistorico(at)),
           h('td', { class: 'suave' }, at.observacao || ''),
           h('td', null, botaoExcluir('apiExcluirAtendimento', at.id)));
       }))));
     return bloco;
   }
 
+  function resultadoPrazoNoHistorico(valor) {
+    var textos = { 'SIM': 'No prazo', 'NÃO': 'Fora do prazo', 'SEM PRAZO': 'Sem prazo definido',
+      'FORA DO ESCOPO': 'Fora do período de avaliação', 'NÃO CONTA': 'Não conta para o prazo do paciente', 'NÃO AVALIADO': 'Não avaliado' };
+    return h('span', { class: 'selo ' + (valor === 'SIM' ? 'prazo' : valor === 'NÃO' ? 'atrasado' : '') }, textos[valor] || valor);
+  }
+
+  function prazosInterconsultaNoHistorico(at) {
+    var itens = at.interconsultas_respondidas || [];
+    if (!itens.length) return h('span', { class: 'suave' }, at.tipo_atendimento === 'INTERCONSULTA' ? 'Sem interconsulta vinculada' : '—');
+    return h('div', null, itens.map(function (i) {
+      return h('div', null,
+        h('div', { class: 'suave' }, 'Solicitação ' + i.id + (i.prioridade_solicitacao ? ' · ' + i.prioridade_solicitacao.toLowerCase() : '')),
+        i.prazo_resposta ? h('div', null, 'Até ' + dataHoraBr(i.prazo_resposta)) : '',
+        resultadoPrazoNoHistorico(i.resposta_no_prazo));
+    }));
+  }
+
+  function prazoClinicoNoHistorico(at) {
+    var p = at.prazo_acompanhamento || { resultado: 'NÃO AVALIADO' };
+    var titulo = p.tipo === 'PRIMEIRO' ? 'Primeiro atendimento' : p.tipo === 'RETORNO' ? 'Retorno' : 'Prazo do paciente';
+    return h('div', null, h('div', { class: 'suave' }, titulo),
+      p.prazo ? h('div', null, 'Até ' + dataBr(p.prazo)) : '', resultadoPrazoNoHistorico(p.resultado));
+  }
+
   function blocoAtividades(det) {
+    var navegacao = estado.navegacao;
     var a = det.admissao;
     var st = estado.cad.status_admissao;
     var bloco = h('details', { class: 'cartao' }, h('summary', null, h('h2', { class: 'inline' }, 'Atividades assistenciais (' + det.atividades.length + ')')));
@@ -763,7 +1130,7 @@
       form.addEventListener('submit', function (ev) {
         ev.preventDefault();
         enviar(botao, chamar('apiRegistrarAtividade', Object.assign(lerFormulario(form), { admissao_id: a.id })), 'Atividade registrada.')
-          .then(desenharAdmissao).catch(function () {});
+          .then(function (det) { if (navegacao === estado.navegacao) desenharAtendimento(det); }).catch(function () {});
       });
       bloco.appendChild(form);
     }
@@ -793,7 +1160,8 @@
       var soNumeros = /^\d+$/.test(termo);
       var form = h('form', { class: 'linha' },
         campo('Prontuário', h('input', { name: 'prontuario', inputmode: 'numeric', value: soNumeros ? termo : '', required: true })),
-        campo('Nome completo', h('input', { name: 'nome', value: soNumeros ? '' : termo, required: true })));
+        campo('Nome completo', h('input', { name: 'nome', value: soNumeros ? '' : termo, required: true })),
+        camposDemograficosPaciente({}));
       var botao = h('button', { class: 'btn', type: 'submit' }, 'Cadastrar e usar');
       form.appendChild(botao);
       form.addEventListener('submit', function (ev) {
@@ -832,6 +1200,7 @@
   }
 
   function formularioAdmissao(a, aoSalvar) {
+    var navegacao = estado.navegacao;
     var area = h('div');
     var pacienteId = a.paciente_id || '';
     if (!a.id) area.appendChild(seletorPaciente(function (p) { pacienteId = p ? p.id : ''; }));
@@ -844,36 +1213,11 @@
       var campos = Array.prototype.slice.call(arguments, 1);
       return h('fieldset', null, h('legend', null, titulo), h('div', { class: 'linha' }, campos));
     };
-    var paraQuem = seletor('para_quem', [{ valor: 'PACIENTE', rotulo: 'Paciente' }, { valor: 'FAMILIAR', rotulo: 'Familiar' }],
-      v('para_quem') || 'PACIENTE', false);
-    var campoFamiliarNome = campo('Nome do familiar', h('input', { name: 'familiar_nome', value: v('familiar_nome') }));
-    var campoFamiliarParentesco = campo('Parentesco', h('input', { name: 'familiar_parentesco', value: v('familiar_parentesco'), placeholder: 'Ex.: mãe, filho' }));
-    var ajustarFamiliar = function () {
-      var familiar = paraQuem.value === 'FAMILIAR';
-      campoFamiliarNome.hidden = !familiar;
-      campoFamiliarParentesco.hidden = !familiar;
-    };
-    paraQuem.addEventListener('change', ajustarFamiliar);
-    ajustarFamiliar();
     var form = h('form', null,
       grupo('Admissão no hospital',
         data('data_admissao', 'Data da admissão', true),
         campo('Unidade', seletor('unidade_id', opcoesUnidades(), v('unidade_id')))),
-      grupo('Solicitação',
-        lista('tipo_solicitacao', 'Tipo de solicitação', 'TIPO_SOLICITACAO'),
-        campo('Motivo (prioridade e prazo)', seletor('motivo_solicitacao_id', opcoesMotivos(), v('motivo_solicitacao_id'))),
-        data('data_solicitacao', 'Data da solicitação'),
-        campo('Hora da solicitação', h('input', { name: 'hora_solicitacao', type: 'time', value: v('hora_solicitacao') })),
-        campo('Solicitação para', paraQuem),
-        campoFamiliarNome, campoFamiliarParentesco),
-      grupo('Avaliação (1º atendimento)',
-        lista('descricao_demanda', 'Descrição da demanda', 'DESCRICAO_DEMANDA')),
-      grupo('Acompanhamento',
-        lista('necessidade_acompanhamento', 'Necessidade de acompanhamento', 'NECESSIDADE_ACOMPANHAMENTO'),
-        campo('Justificativa', seletor('justificativa_id', opcoesJustificativas(), v('justificativa_id')))),
-      grupo('Desfecho',
-        campo('Desfecho', seletor('desfecho_id', opcoesDesfechos(), v('desfecho_id'), 'Sem desfecho')),
-        data('data_desfecho', 'Data do desfecho'),
+      grupo('Observações da entrada',
         campo('Observações', h('textarea', { name: 'observacoes', rows: 3 }, v('observacoes')))));
     var botao = h('button', { class: 'btn', type: 'submit' }, a.id ? 'Salvar admissão' : 'Registrar admissão');
     form.appendChild(botao);
@@ -881,7 +1225,8 @@
       ev.preventDefault();
       if (!pacienteId) { avisar('Escolha ou cadastre o paciente.', 'erro'); return; }
       var dados = Object.assign(lerFormulario(form), { id: a.id || '', paciente_id: pacienteId });
-      enviar(botao, chamar('apiSalvarAdmissao', dados), 'Admissão salva.').then(aoSalvar).catch(function () {});
+      enviar(botao, chamar('apiSalvarEntradaAdmissao', dados), 'Admissão salva.')
+        .then(function (det) { if (navegacao === estado.navegacao) aoSalvar(det); }).catch(function () {});
     });
     area.appendChild(a.id ? form : h('div', { class: 'cartao' }, form));
     return area;
@@ -948,6 +1293,123 @@
       campo('Atividade', seletor('tipo', opcoesLista('ATIVIDADE_GERENCIAL'), ''))], 'Atividade registrada.'));
     main.appendChild(listas);
     chamar('apiRegistrosDoMes', dataRef).then(desenhar).catch(function (e) { avisar(e.message, 'erro'); });
+  }
+
+  // ---------- Indicadores assistenciais ----------
+
+  var filtrosIndicadores = null;
+  var ROTULO_RESULTADO_INDICADOR = { 'SIM': 'No prazo', 'NÃO': 'Fora do prazo',
+    'EM ANDAMENTO': 'Aguardando, dentro do prazo', 'NÃO SE APLICA': 'Não se aplica',
+    'SEM PRAZO': 'Sem prazo definido', 'DADOS PENDENTES': 'Dados pendentes', 'FORA DO ESCOPO': 'Anterior ao início do indicador' };
+
+  function telaIndicadores() {
+    var main = tela('Indicadores');
+    if (!filtrosIndicadores) filtrosIndicadores = { mes: estado.cad.hoje.slice(0, 7), setor_id: '', unidade_id: '', termo: '' };
+    var f = filtrosIndicadores;
+    main.appendChild(h('p', { class: 'suave' }, 'Qualidade e cumprimento dos prazos assistenciais. Os volumes de produção continuam disponíveis no Compilado.'));
+    var form = h('form', { class: 'linha' },
+      campo('Mês de referência', h('input', { name: 'mes', type: 'month', value: f.mes, required: true })),
+      campo('Setor', seletor('setor_id', estado.cad.setores.map(function (s) { return { valor: s.id, rotulo: s.nome }; }), f.setor_id, 'Todos')),
+      campo('Unidade', seletor('unidade_id', opcoesUnidades(), f.unidade_id, 'Todas')),
+      campo('Paciente', h('input', { name: 'termo', type: 'search', value: f.termo, placeholder: 'Nome ou prontuário' })),
+      h('button', { class: 'btn', type: 'submit' }, 'Atualizar indicadores'));
+    var resultado = h('div');
+    main.appendChild(h('div', { class: 'cartao' }, form));
+    main.appendChild(resultado);
+    var pedido = 0, navegacao = estado.navegacao;
+    function carregar() {
+      var valores = lerFormulario(form);
+      if (!/^\d{4}-\d{2}$/.test(valores.mes)) { avisar('Selecione o mês de referência.', 'erro'); return; }
+      filtrosIndicadores = valores;
+      var partes = valores.mes.split('-'), atual = ++pedido;
+      resultado.textContent = 'Carregando indicadores…';
+      chamar('apiIndicadores', { ano: partes[0], mes: partes[1], setor_id: valores.setor_id,
+        unidade_id: valores.unidade_id, termo: valores.termo }).then(function (d) {
+        if (atual !== pedido || navegacao !== estado.navegacao) return;
+        resultado.textContent = '';
+        resultado.appendChild(h('p', { class: 'suave' }, 'Atualizado em ' + dataHoraBr(d.agora) +
+          '. Primeiro atendimento: início oficial em ' + dataBr(d.inicio_primeiro) + '.'));
+        resultado.appendChild(h('p', { class: 'suave' },
+          '% no prazo = casos no prazo ÷ (no prazo + fora do prazo). Prazos vencidos sem atendimento contam como fora do prazo. ' +
+          'Casos ainda dentro do prazo, sem prazo, não aplicáveis ou com dados pendentes ficam fora do percentual.'));
+        var secoes = [['primeiro', 'Primeiro atendimento', 'Até ' + d.dias_primeiro + ' dia(s) útil(eis) da admissão'],
+          ['interconsultas', 'Interconsultas', 'Resposta no prazo da prioridade'],
+          ['acompanhamento', 'Acompanhamento', 'Retorno no prazo da justificativa']];
+        var cards = h('div', { class: 'painel-indicadores' });
+        secoes.forEach(function (s) { cards.appendChild(cartaoPrazoIndicador(d[s[0]], s[1], s[2])); });
+        resultado.appendChild(cards);
+        secoes.forEach(function (s) {
+          var ind = d[s[0]];
+          if (s[0] !== 'primeiro') resultado.appendChild(tabelaGruposIndicador(ind, s[0] === 'interconsultas' ? 'Interconsultas por prioridade' : 'Acompanhamento por justificativa'));
+          resultado.appendChild(casosIndicador(ind, s[1]));
+        });
+      }).catch(function (e) {
+        if (atual !== pedido || navegacao !== estado.navegacao) return;
+        resultado.textContent = 'Não foi possível carregar os indicadores. ' + e.message;
+        avisar(e.message, 'erro');
+      });
+    }
+    form.addEventListener('submit', function (ev) { ev.preventDefault(); carregar(); });
+    form.addEventListener('change', carregar);
+    carregar();
+  }
+
+  function cartaoPrazoIndicador(ind, titulo, subtitulo) {
+    var r = ind.resumo;
+    var card = h('div', { class: 'cartao' }, h('h2', null, titulo), h('p', { class: 'suave' }, subtitulo),
+      h('div', { class: 'percentual-indicador' }, formatarValor(r.percentual, 'pct')),
+      h('p', null, r.avaliados ? r.no_prazo + ' de ' + r.avaliados + ' casos avaliados no prazo' : 'Sem casos avaliáveis no período'),
+      h('p', { class: 'suave' }, ind.criterio));
+    var total = r.no_prazo + r.fora_prazo + r.em_andamento;
+    if (total) {
+      var barra = h('div', { class: 'barra-indicador', role: 'img', 'aria-label':
+        r.no_prazo + ' no prazo, ' + r.fora_prazo + ' fora do prazo e ' + r.em_andamento + ' aguardando' });
+      [[r.no_prazo, 'cumprido'], [r.fora_prazo, 'atrasado'], [r.em_andamento, 'aguardando']].forEach(function (p) {
+        if (p[0]) barra.appendChild(h('span', { class: p[1], style: 'width:' + p[0] / total * 100 + '%' }));
+      });
+      card.appendChild(barra);
+    }
+    card.appendChild(h('div', { class: 'linha' }, h('span', { class: 'selo prazo' }, r.no_prazo + ' no prazo'),
+      h('span', { class: 'selo atrasado' }, r.fora_prazo + ' fora do prazo'), h('span', { class: 'selo hoje' }, r.em_andamento + ' aguardando')));
+    if (r.atrasados_abertos) card.appendChild(h('p', null, 'Ainda sem atendimento: ' + r.atrasados_abertos + ' caso(s) com prazo vencido.'));
+    var excluidos = [];
+    [[r.nao_se_aplica, 'não se aplica'], [r.sem_prazo, 'sem prazo'], [r.dados_pendentes, 'com dados pendentes'],
+      [r.fora_escopo, 'anteriores ao início do indicador']].forEach(function (p) { if (p[0]) excluidos.push(p[0] + ' ' + p[1]); });
+    if (excluidos.length) card.appendChild(h('p', { class: 'suave' }, 'Fora do percentual: ' + excluidos.join(' · ') + '.'));
+    return card;
+  }
+
+  function tabelaGruposIndicador(ind, titulo) {
+    var bloco = h('div', { class: 'cartao tabela-rolagem' }, h('h2', null, titulo));
+    if (!ind.grupos.length) { bloco.appendChild(h('p', { class: 'suave' }, 'Nenhum caso no período.')); return bloco; }
+    bloco.appendChild(h('table', null,
+      h('thead', null, h('tr', null, ['Grupo', '% no prazo', 'No prazo', 'Fora do prazo', 'Aguardando', 'Fora do percentual'].map(function (t) { return h('th', null, t); }))),
+      h('tbody', null, ind.grupos.map(function (g) {
+        var r = g.resumo;
+        return h('tr', null, h('td', null, g.nome), h('td', null, formatarValor(r.percentual, 'pct')),
+          h('td', null, r.no_prazo), h('td', null, r.fora_prazo), h('td', null, r.em_andamento), h('td', null, r.total - r.avaliados - r.em_andamento));
+      }))));
+    return bloco;
+  }
+
+  function casosIndicador(ind, titulo) {
+    var bloco = h('details', { class: 'cartao tabela-rolagem' }, h('summary', null, titulo + ' — consultar casos (' + ind.total_casos + ')'));
+    if (!ind.casos.length) { bloco.appendChild(h('p', { class: 'suave' }, 'Nenhum caso no período.')); return bloco; }
+    if (ind.total_casos > ind.casos.length) bloco.appendChild(h('p', { class: 'suave' },
+      'Exibindo ' + ind.casos.length + ' de ' + ind.total_casos + ' casos. Use os filtros para localizar um paciente. Os totais incluem todos os casos.'));
+    bloco.appendChild(h('p', { class: 'suave' }, 'Selecione um caso para abrir os atendimentos da internação.'));
+    var data = function (v) { return v && v.length > 10 ? dataHoraBr(v) : dataBr(v) || '—'; };
+    bloco.appendChild(h('table', null,
+      h('thead', null, h('tr', null, ['Paciente / unidade', 'Prioridade ou justificativa', 'Entrada / solicitação / último contato', 'Prazo', 'Realizado', 'Resultado'].map(function (t) { return h('th', null, t); }))),
+      h('tbody', null, ind.casos.map(function (i) {
+        return h('tr', { class: 'clicavel', onclick: function () { abrir('atendimentos', { id: i.admissao_id }); } },
+          h('td', null, h('strong', null, i.paciente_nome), h('div', { class: 'suave' }, 'Pront. ' + i.prontuario + ' · ' + i.unidade_nome)),
+          h('td', null, i.grupo, i.prazo_dias !== null && i.prazo_dias !== undefined ? h('div', { class: 'suave' }, i.prazo_dias + ' dia(s) útil(eis)') : ''),
+          h('td', null, data(i.inicio || i.referencia)), h('td', null, data(i.prazo)), h('td', null, data(i.realizado)),
+          h('td', null, h('span', { class: 'selo ' + (i.resultado === 'SIM' ? 'prazo' : i.resultado === 'NÃO' ? 'atrasado' : '') },
+            ROTULO_RESULTADO_INDICADOR[i.resultado] || i.resultado)));
+      }))));
+    return bloco;
   }
 
   // ---------- Compilado ----------
@@ -1155,7 +1617,7 @@
 
   function cadMotivos(alvo, aoSalvar) {
     alvo.appendChild(h('p', { class: 'suave' },
-      'Matriz de atendimento: cada motivo da solicitação tem uma prioridade, e o prazo de resposta (em horas corridas) é o da prioridade. ' +
+      'Matriz de atendimento: cada motivo da solicitação tem uma prioridade, e o prazo de resposta (em horas úteis, sem sábados, domingos e feriados) é o da prioridade. ' +
       'Motivo sem prioridade fica sem prazo até ser definido.'));
     secaoCadastro(alvo, {
       api: 'apiSalvarMotivo',
@@ -1176,7 +1638,7 @@
 
   function cadPrioridades(alvo, aoSalvar) {
     var tipos = estado.cad.tipos_prioridade;
-    [[tipos.solicitacao, 'Prioridades da solicitação (matriz de atendimento)', 'Prazo em horas', 'horas corridas a partir da solicitação'],
+    [[tipos.solicitacao, 'Prioridades da solicitação (matriz de atendimento)', 'Prazo em horas úteis', 'horas úteis a partir da solicitação; não contam sábados, domingos e feriados'],
       [tipos.seguimento, 'Prioridades do seguimento (matriz de seguimento)', 'Prazo em dias úteis', 'dias úteis entre um atendimento e o próximo']]
       .forEach(function (t) {
         var bloco = h('div');
@@ -1252,7 +1714,7 @@
         enviar(botaoT, chamar('apiSalvarParametro', { id: t.id, valor: valor })).then(aoSalvar).catch(function () {});
       });
       alvo.appendChild(h('div', { class: 'cartao' }, h('h2', null, 'Prazo de resposta à solicitação'),
-        h('p', { class: 'suave' }, 'Tipos de solicitação que têm prazo de resposta pela matriz de atendimento (24h, 48h, 72h…).'),
+        h('p', { class: 'suave' }, 'Tipos de solicitação que têm prazo de resposta pela matriz de atendimento (24h, 48h, 72h úteis…).'),
         h('div', { class: 'linha' }, caixas, botaoT)));
     }
   }
@@ -1346,12 +1808,12 @@
     if (b) abrir(b.dataset.tela);
   });
 
-  chamar('apiInicio').then(function (dados) {
+  chamar('apiInicio', true).then(function (dados) {
     estado.usuario = dados.usuario;
     estado.cad = dados;
     document.getElementById('usuario').textContent = dados.usuario.nome + ' · ' + dados.usuario.perfil.toLowerCase();
     if (!ehCoordenacao()) document.querySelectorAll('[data-coordenacao]').forEach(function (b) { b.remove(); });
-    abrir('inicio');
+    abrir('inicio', dados.painel);
   }).catch(function (e) {
     var main = tela('Sem acesso');
     main.appendChild(h('div', { class: 'cartao' }, h('p', null, e.message)));

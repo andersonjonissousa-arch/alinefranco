@@ -360,6 +360,42 @@ test('calcularResposta: prazo em horas pela prioridade, paciente x familiar, sem
   assert.equal(r.calcularResposta({ ...sol, hora_solicitacao: '' }, [pac], op).resposta_no_prazo, '');
 });
 
+test('horas úteis: prazos de 24h, 48h e 72h pulam fim de semana e feriados sem impor expediente', () => {
+  const feriados = r.conjuntoFeriados([{ data: '2026-11-02' }, { data: '2026-12-25' }]);
+  for (const [inicio, horas, fim] of [
+    ['2026-10-23 10:00', 24, '2026-10-26 10:00'],
+    ['2026-10-22 16:00', 48, '2026-10-26 16:00'],
+    ['2026-10-23 10:00', 72, '2026-10-28 10:00'],
+    ['2026-10-30 10:00', 24, '2026-11-03 10:00'],
+    ['2026-12-24 12:00', 24, '2026-12-28 12:00'],
+    ['2026-10-23 00:00', 24, '2026-10-26 00:00'],
+    ['2026-10-24 10:00', 24, '2026-10-27 00:00'],
+    ['2026-10-23 23:30', 1.5, '2026-10-26 01:00']
+  ]) {
+    assert.equal(r.adicionarHorasUteis(inicio, horas, feriados), fim);
+    assert.equal(r.horasUteisEntre(inicio, fim, feriados), horas);
+    assert.equal(r.horasUteisEntre(fim, inicio, feriados), -horas);
+  }
+  assert.equal(r.horasUteisEntre('2026-10-24 10:00', '2026-10-25 20:00'), 0);
+  assert.equal(r.adicionarHorasUteis('inválido', 24), '');
+  assert.equal(r.adicionarHorasUteis('2026-10-23 10:00', -1), '');
+  assert.equal(r.adicionarHorasUteis('2026-10-23 10:00', Infinity), '');
+});
+
+test('interconsulta: resposta na segunda e contagem restante usam horas úteis; vencimento continua atrasando após o limite', () => {
+  const sol = { tipo_solicitacao: 'EQUIPE', data_solicitacao: '2026-10-23', hora_solicitacao: '10:00', para_quem: 'PACIENTE' };
+  const op = { prioridade: { nome: 'ALTA', prazo: 24 }, tiposComPrazo: ['EQUIPE'], agora: '2026-10-25 12:00' };
+  const pendente = r.calcularResposta(sol, [], op);
+  assert.equal(pendente.prazo_resposta, '2026-10-26 10:00');
+  assert.equal(pendente.resposta_no_prazo, 'EM ANDAMENTO');
+  const prazos = r.prazosDaAdmissao({ ...sol, ...pendente, status: 'AGUARDANDO 1º ATENDIMENTO' }, '2026-10-25', op.agora);
+  assert.equal(prazos.interconsulta.horas_restantes, 10);
+  const resposta = r.calcularResposta(sol, [{ data: '2026-10-26', hora: '09:00', publico: 'PACIENTE' }], op);
+  assert.equal(resposta.resposta_no_prazo, 'SIM');
+  assert.equal(resposta.horas_resposta, 23);
+  assert.equal(r.calcularResposta(sol, [], { ...op, agora: '2026-10-26 10:01' }).resposta_no_prazo, 'NÃO');
+});
+
 test('prazosDaAdmissao: os três prazos e o mais urgente', () => {
   const H = '2026-10-20';
   const A = '2026-10-20 12:00';

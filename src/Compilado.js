@@ -24,6 +24,7 @@ function gerarCompilado(f) {
   return montarCompilado({
     unidades: listar('UNIDADES').slice().sort(porOrdem),
     admissoes: listar('ADMISSOES'),
+    interconsultas: listarInterconsultas_(),
     atendimentos: listar('ATENDIMENTOS'),
     atividades: listar('ATIVIDADES'),
     reunioes: listar('REUNIOES'),
