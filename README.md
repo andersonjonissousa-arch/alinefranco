@@ -28,7 +28,7 @@ gerado automaticamente. Base de dados nova, começando do zero.
 1. **Pacientes:** cadastre nome e prontuário uma única vez. O cadastro pode ser reutilizado em novas internações.
 2. **Admissões > Nova admissão:** selecione o paciente e registre a data de entrada, unidade e observações da entrada. Ao salvar, a internação recebe seu próprio ID. Essa tela também permite corrigir os dados da entrada e consultar internações anteriores.
 3. **Atendimentos:** encontre as internações ativas por paciente, setor ou unidade, incluindo quem aguarda o primeiro atendimento. A marca **Admitido hoje** se refere à data da entrada no hospital, não ao dia em que o registro foi digitado.
-4. Na internação escolhida, salve os **Dados do acompanhamento** (demanda e necessidade), escolha a justificativa ao registrar o primeiro atendimento ou os seguintes e lance atividades assistenciais. Cada registro continua ligado ao mesmo ID da admissão.
+4. Na internação escolhida, registre o **1º atendimento (avaliação)** com a descrição da demanda e a justificativa, depois os atendimentos seguintes (sempre com a justificativa) e as atividades assistenciais. Cada registro continua ligado ao mesmo ID da admissão.
 5. Registre o **Desfecho da admissão** na tela Atendimentos. Alta hospitalar, óbito e transferência encerram a internação. Um desfecho psicológico permite retomar o acompanhamento na mesma admissão quando o paciente permanece internado.
 6. Se o paciente voltar ao hospital depois de uma saída, abra uma **nova admissão**. Os atendimentos e desfechos anteriores continuam no histórico da internação original, acessível em Admissões.
 
@@ -46,16 +46,17 @@ Início e Gestão abrem diretamente a tela Atendimentos ao selecionar um pacient
   paciente teve desfecho dentro do prazo sem ter sido atendido, a admissão fica fora do indicador.
 - **Prazo de retorno:** cada justificativa de acompanhamento tem um prazo em dias úteis (pela prioridade). Depois de cada
   atendimento que conta, o próximo tem que acontecer dentro desse prazo. Sábado, domingo e os feriados
-  cadastrados não contam. Sem prazo quando a necessidade de acompanhamento é "NÃO" ou "N / A" ou a
-  justificativa não tem prazo preenchido.
-- **Atendimento à família:** informa quantos familiares foram atendidos de uma vez. Só conta para os
-  prazos (1º atendimento e retornos) quando o paciente estava impossibilitado de ser atendido.
-- **Matriz de atendimento (solicitação):** cada motivo da solicitação tem uma prioridade (ALTA 24h,
-  MODERADA 48h, BAIXA 72h). Cada solicitação é registrada em **Atendimentos > Interconsultas > Nova interconsulta**, a qualquer momento da internação. A resposta vinculada deve acontecer dentro
-  desse prazo, em **horas úteis** (por isso a solicitação e o atendimento têm hora; sábados, domingos e feriados cadastrados não contam). Vale para os
-  tipos de solicitação marcados em Parâmetros (de início, só EQUIPE). Solicitação para o paciente é
-  respondida por atendimento ao paciente, ou à família com o paciente impossibilitado; solicitação para
-  um familiar (com nome e parentesco) é respondida por qualquer atendimento. Motivo sem prioridade
+  cadastrados não contam. Sem prazo quando a justificativa não tem prazo preenchido ("SEM DEMANDA PARA
+  ACOMPANHAMENTO" ou "SEM CONDIÇÕES CLÍNICAS / SOCIAIS"). Registros antigos com necessidade de acompanhamento
+  "NÃO" ou "N / A" continuam sem prazo.
+- **Atendimento a:** paciente, família ou paciente e família. Informa quantos familiares foram atendidos de
+  uma vez; cada pessoa conta 1 na produção (paciente e família = 1 + nº de familiares). Todo atendimento conta
+  para os prazos (1º atendimento, retornos e resposta à interconsulta), inclusive o feito só à família (v27).
+- **Matriz de atendimento (solicitação):** cada motivo da solicitação tem uma prioridade (ALTA 1 dia útil,
+  MODERADA 2, BAIXA 3). Cada solicitação é registrada em **Atendimentos > Interconsultas > Nova interconsulta**, a qualquer momento da internação. A resposta vinculada deve acontecer dentro
+  desse prazo, em **dias úteis** (veja "Dias úteis das interconsultas" abaixo). Vale para os
+  tipos de solicitação marcados em Parâmetros (de início, só EQUIPE). Qualquer atendimento responde à
+  solicitação: ao paciente, à família ou aos dois (v27). Motivo sem prioridade
   (TRIAGEM PSICOLÓGICA, REABILITA SEPSE) fica sem prazo até a coordenação definir.
 - **Matriz de seguimento:** cada justificativa tem uma prioridade de seguimento, e o prazo de retorno é o
   da prioridade: ALTA 2 dias úteis (3x por semana), MODERADA 3 (2x por semana), BAIXA 5 (1x por semana),
@@ -73,10 +74,10 @@ Menu **Gestão**, com três abas (todas com filtro de setor, unidade e paciente)
   com a prioridade e a frequência da matriz, o último atendimento e o próximo prazo. Dá para incluir
   quem teve desfecho psicológico e segue internado, e mostrar só os atrasados ou só quem tem prazo.
 - **Interconsultas:** cada linha representa uma solicitação, com data, motivo, destinatário, prioridade, prazo e resposta próprios. A gestão inclui solicitações com e sem prazo (os tipos com prazo incluem, de início,
-  tipo EQUIPE). Aguardando resposta (com o tempo que falta ou o atraso em horas) e respondidas no
+  tipo EQUIPE). Aguardando resposta (com os dias úteis que faltam ou o atraso) e respondidas no
   período escolhido (no prazo ou fora, com o tempo de resposta), com totais e % no prazo.
 - **Prazos:** uma linha por paciente com os três prazos lado a lado: 1º atendimento (dias úteis da
-  admissão), interconsulta (horas úteis pela prioridade do motivo) e retorno (dias úteis pela prioridade da
+  admissão), interconsulta (dias úteis pela prioridade do motivo) e retorno (dias úteis pela prioridade da
   justificativa).
 
 A tela **Início** mostra os totais (em acompanhamento, aguardando 1º atendimento, interconsultas
@@ -91,8 +92,8 @@ está atrasado.
   desfechos são do serviço todo (a admissão não pertence a uma categoria).
 - **Seções:** atendimentos (pacientes, familiares atendidos, total de pessoas); admissões e suas
   distribuições (tipo, motivo e prioridade da solicitação, para quem, descrição da demanda, prioridade
-  do seguimento, necessidade de acompanhamento); 1º atendimento no prazo (com % e média de dias);
-  resposta à solicitação no prazo (com % geral e por prioridade e média de horas); retornos no prazo
+  do seguimento); 1º atendimento no prazo (com % e média de dias);
+  resposta à solicitação no prazo (com % geral e por prioridade e média de dias úteis); retornos no prazo
   da justificativa; desfechos; atividades assistenciais; reuniões de equipe; atividades gerenciais.
 - **Datas usadas:** atendimentos, atividades e reuniões pela data do registro; admissões e 1º
   atendimento pela data de admissão; desfechos pela data do desfecho.
@@ -249,8 +250,8 @@ Cada interconsulta possui o botão **Excluir interconsulta**, disponível para q
 A seção **Indicadores** é independente do Compilado. Possui filtros de mês, setor, unidade e paciente, três cartões de percentual, barras de distribuição e consulta dos casos com acesso à internação.
 
 - **Primeiro atendimento:** admissões do mês, considerando somente entradas a partir de **03/11/2026**, início oficial combinado para o indicador. O prazo usa o parâmetro de dias úteis e os feriados. Entradas anteriores aparecem separadas, fora do percentual.
-- **Interconsultas:** cada solicitação feita no mês conta separadamente, com o próprio prazo em horas úteis e resposta vinculada; há detalhamento por prioridade. Solicitações excluídas não entram.
-- **Acompanhamento:** cada intervalo de retorno cujo prazo vence no mês conta uma vez. A justificativa do contato anterior determina o prazo e o grupo histórico; a justificativa vigente define a próxima pendência aberta. Contatos no mesmo dia não multiplicam a obrigação. Atendimento à família só responde ao prazo do paciente quando ele estava impossibilitado. Desfechos interrompem as obrigações; retomadas iniciam um novo ciclo.
+- **Interconsultas:** cada solicitação feita no mês conta separadamente, com o próprio prazo em dias úteis e resposta vinculada; há detalhamento por prioridade. Solicitações excluídas não entram.
+- **Acompanhamento:** cada intervalo de retorno cujo prazo vence no mês conta uma vez. A justificativa do contato anterior determina o prazo e o grupo histórico; a justificativa vigente define a próxima pendência aberta. Contatos no mesmo dia não multiplicam a obrigação. Todo atendimento responde ao prazo, inclusive o feito só à família (v27). Desfechos interrompem as obrigações; retomadas iniciam um novo ciclo.
 
 O percentual é **no prazo / (no prazo + fora do prazo)**. Prazos já vencidos sem atendimento entram como fora do prazo e são destacados separadamente. Casos ainda dentro do prazo, sem prazo definido, não aplicáveis, com dados pendentes ou anteriores ao início oficial ficam fora do denominador. Sem casos avaliáveis, a tela mostra **—**, em vez de 0%. O agrupamento usa todos os casos; a lista de pacientes mostra até 300 por indicador e orienta usar os filtros quando esse limite é alcançado.
 
@@ -262,17 +263,27 @@ A lista de Atendimentos, Gestão e seus filtros usam a localização atual. O fo
 
 As transferências ficam na aba **TRANSFERENCIAS**, criada automaticamente no primeiro acesso. Cadastros existentes sem movimentações continuam com a unidade da admissão como localização atual. Transferências não alteram a unidade dos registros anteriores e não são herdadas por uma nova admissão do mesmo paciente.
 
-### Horas úteis das interconsultas
+### Dias úteis das interconsultas
 
-Os prazos de 24, 48 e 72 horas das interconsultas contam somente minutos de dias úteis, excluindo sábados, domingos e feriados cadastrados. A contagem usa as 24 horas de cada dia útil; não presume expediente de 8 horas ou uma faixa diária. Exemplo: sexta-feira às 10h + 24h úteis vence na segunda-feira às 10h, ou na terça-feira se a segunda for feriado. Solicitações em dia não útil começam a contar à meia-noite do próximo dia útil. Um vencimento à meia-noite de um dia não útil passa para a meia-noite do próximo dia útil.
+Desde a v27 o prazo da interconsulta é de **1, 2 ou 3 dias úteis** (ALTA, MODERADA e BAIXA), sem hora. O dia da solicitação não conta: o prazo começa no dia útil seguinte e vale **até o fim do dia** do vencimento. Sábados, domingos e feriados cadastrados não contam; uma solicitação feita no fim de semana começa a contar na segunda-feira. Exemplo: sexta-feira + 1 dia útil vence na segunda-feira, ou na terça-feira se a segunda for feriado. A hora da solicitação e a do atendimento continuam registradas, mas não mudam o prazo.
 
-As datas de vencimento são recalculadas ao consultar os registros. O tempo restante, o tempo até a resposta, o percentual de pontualidade e a média de resposta no compilado usam o mesmo calendário. Os valores numéricos das prioridades e os prazos de primeiro atendimento/retorno em dias úteis são preservados.
+Bancos anteriores à v27 guardavam os prazos em horas (24, 48 e 72). Ao rodar **configurar**, eles viram 1, 2 e 3 dias úteis uma única vez (o parâmetro `PRAZO_SOLICITACAO_EM_DIAS` marca que a conversão já foi feita). Solicitações gravadas antes continuam com o prazo delas, convertido da mesma forma (24h = 1 dia útil).
+
+As datas de vencimento são recalculadas ao consultar os registros. Os dias que faltam, o tempo até a resposta, o percentual de pontualidade e a média de resposta no compilado usam o mesmo calendário.
+
+### Descrição da demanda
+
+A descrição da demanda é obrigatória em **Registrar 1º atendimento (avaliação)**. Depois do 1º atendimento, ela pode ser corrigida a qualquer momento na tela da internação, no cartão **Descrição da demanda**, que altera só esse campo.
 
 ### Justificativa no registro do atendimento
 
-A seção **Dados do acompanhamento** contém descrição da demanda e necessidade de acompanhamento. A **justificativa** é escolhida em **Registrar 1º atendimento (avaliação)** e nos atendimentos seguintes, sendo obrigatória quando há necessidade de acompanhamento. É possível salvar os dados clínicos antes dessa escolha; a justificativa é validada quando o atendimento é registrado.
+Desde a v27 não há mais a seção **Dados do acompanhamento**. A **descrição da demanda** é informada em **Registrar 1º atendimento (avaliação)**. A **justificativa** é escolhida em todo atendimento (obrigatória na tela); quando não houver seguimento, escolhe-se **SEM DEMANDA PARA ACOMPANHAMENTO** e registra-se o desfecho. O campo "necessidade de acompanhamento" fica só nos registros antigos.
 
-Cada atendimento guarda a justificativa selecionada e a exibe no histórico. O contato válido mais recente atualiza a justificativa vigente e o prazo do próximo retorno. Um registro retroativo mantém sua própria justificativa sem substituir a vigente; atendimento à família sem paciente impossibilitado também não substitui a justificativa do último contato que conta para o prazo do paciente. Os registros anteriores mantêm suas justificativas para avaliar os intervalos de retorno e o indicador de acompanhamento.
+Cada atendimento guarda a justificativa selecionada e a exibe no histórico. O contato válido mais recente (ao paciente, à família ou aos dois) atualiza a justificativa vigente e o prazo do próximo retorno. Um registro retroativo mantém sua própria justificativa sem substituir a vigente.
+
+### Situação dos prazos (v27)
+
+Atrasado, vence hoje, **vence amanhã** (próximo dia útil: numa sexta, o que vence na segunda) e no prazo. A tela Início mostra o total que vence amanhã, e a lista "Para atender hoje e amanhã" inclui esses casos. Os registros anteriores mantêm suas justificativas para avaliar os intervalos de retorno e o indicador de acompanhamento.
 
 ### Prazos separados no histórico de atendimentos
 

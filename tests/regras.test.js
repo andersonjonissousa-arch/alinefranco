@@ -94,7 +94,12 @@ test('adicionarDiasUteis pula fim de semana e feriado', () => {
 test('situacaoPrazo e contaParaEmpresa', () => {
   assert.equal(r.situacaoPrazo('2026-10-19', '2026-10-20'), 'ATRASADO');
   assert.equal(r.situacaoPrazo('2026-10-20', '2026-10-20'), 'VENCE HOJE');
-  assert.equal(r.situacaoPrazo('2026-10-21', '2026-10-20'), 'NO PRAZO');
+  assert.equal(r.situacaoPrazo('2026-10-21', '2026-10-20'), 'VENCE AMANHÃ');
+  assert.equal(r.situacaoPrazo('2026-10-22', '2026-10-20'), 'NO PRAZO');
+  // Vence amanhã = próximo dia útil: numa sexta, o que vence na segunda (ou na terça, se a segunda for feriado).
+  assert.equal(r.situacaoPrazo('2026-10-26', '2026-10-23'), 'VENCE AMANHÃ');
+  assert.equal(r.situacaoPrazo('2026-10-27', '2026-10-23'), 'NO PRAZO');
+  assert.equal(r.situacaoPrazo('2026-10-27', '2026-10-23', r.conjuntoFeriados([{ data: '2026-10-26' }])), 'VENCE AMANHÃ');
   assert.equal(r.situacaoPrazo('', '2026-10-20'), '');
   assert.equal(r.contaParaEmpresa('PROFISSIONAL DA EMPRESA'), true);
   assert.equal(r.contaParaEmpresa('RESIDENTE'), false);
@@ -115,10 +120,16 @@ test('validarAdmissao: obrigatórios, datas e desfecho', () => {
   assert.ok(erros.includes('Informe a justificativa do acompanhamento.'));
 });
 
-test('contaParaPrazo: família só conta com o paciente impossibilitado', () => {
+test('contaParaPrazo: todo atendimento conta, ao paciente, à família ou aos dois (v27)', () => {
   assert.equal(r.contaParaPrazo({ publico: 'PACIENTE' }), true);
-  assert.equal(r.contaParaPrazo({ publico: 'FAMÍLIA', paciente_impossibilitado: 'NÃO' }), false);
-  assert.equal(r.contaParaPrazo({ publico: 'FAMÍLIA', paciente_impossibilitado: 'SIM' }), true);
+  assert.equal(r.contaParaPrazo({ publico: 'FAMÍLIA', paciente_impossibilitado: 'NÃO' }), true);
+  assert.equal(r.contaParaPrazo({ publico: 'FAMÍLIA' }), true);
+  assert.equal(r.contaParaPrazo({ publico: 'PACIENTE E FAMÍLIA' }), true);
+  assert.equal(r.contaParaPrazo({ publico: '' }), false);
+  assert.equal(r.atendeuPaciente('PACIENTE E FAMÍLIA'), true);
+  assert.equal(r.atendeuPaciente('FAMÍLIA'), false);
+  assert.equal(r.atendeuFamilia('PACIENTE E FAMÍLIA'), true);
+  assert.equal(r.atendeuFamilia('PACIENTE'), false);
 });
 
 const OP = { prazos: { j2: 2, j1: 1 }, feriados: {}, diasPrimeiro: 3, desfechoEncerra: false, hoje: '2026-10-20' };
@@ -135,34 +146,36 @@ test('calcularAdmissao: aguardando o 1º atendimento', () => {
   assert.equal(passou.primeiro_no_prazo, 'NÃO');
 });
 
-test('calcularAdmissao: 1º atendimento e retornos, família sem impossibilidade não conta', () => {
+test('calcularAdmissao: 1º atendimento e retornos contam o atendimento à família (v27)', () => {
   const atend = [
-    { id: 'f1', data: '2026-10-13', publico: 'FAMÍLIA', paciente_impossibilitado: 'NÃO', justificativa_id: 'j2' },
+    { id: 'f1', data: '2026-10-13', publico: 'FAMÍLIA', justificativa_id: 'j2' },
     { id: 'p1', data: '2026-10-14', publico: 'PACIENTE', justificativa_id: 'j2' },
-    { id: 'f2', data: '2026-10-16', publico: 'FAMÍLIA', paciente_impossibilitado: 'SIM', justificativa_id: 'j2' },
+    { id: 'f2', data: '2026-10-16', publico: 'PACIENTE E FAMÍLIA', justificativa_id: 'j2' },
     { id: 'p2', data: '2026-10-21', publico: 'PACIENTE', justificativa_id: 'j2' }
   ];
   const res = r.calcularAdmissao(ADM, atend, { ...OP, hoje: '2026-10-21' });
-  assert.deepEqual({ ...res.porAtendimento.f1 }, { prazo_limite: '', no_prazo: '', conta_prazo: 'NÃO', tipo_prazo: '' });
-  assert.deepEqual({ ...res.porAtendimento.p1 }, { prazo_limite: '2026-10-14', no_prazo: 'SIM', conta_prazo: 'SIM', tipo_prazo: 'PRIMEIRO' });
+  assert.deepEqual({ ...res.porAtendimento.f1 }, { prazo_limite: '2026-10-14', no_prazo: 'SIM', conta_prazo: 'SIM', tipo_prazo: 'PRIMEIRO' });
+  assert.deepEqual({ ...res.porAtendimento.p1 }, { prazo_limite: '2026-10-15', no_prazo: 'SIM', conta_prazo: 'SIM', tipo_prazo: 'RETORNO' });
   assert.deepEqual({ ...res.porAtendimento.f2 }, { prazo_limite: '2026-10-16', no_prazo: 'SIM', conta_prazo: 'SIM', tipo_prazo: 'RETORNO' });
   assert.deepEqual({ ...res.porAtendimento.p2 }, { prazo_limite: '2026-10-20', no_prazo: 'NÃO', conta_prazo: 'SIM', tipo_prazo: 'RETORNO' });
   const c = res.campos;
   assert.equal(c.status, 'EM ACOMPANHAMENTO');
-  assert.equal(c.primeiro_atendimento, '2026-10-14');
+  assert.equal(c.primeiro_atendimento, '2026-10-13');
   assert.equal(c.primeiro_no_prazo, 'SIM');
-  assert.equal(c.dias_ate_primeiro_atendimento, 5);
+  assert.equal(c.dias_ate_primeiro_atendimento, 4);
   assert.equal(c.ultimo_contato, '2026-10-21');
   assert.equal(c.proximo_prazo, '2026-10-23');
 });
 
-test('calcularAdmissao: só familiar sem impossibilidade não vale como 1º atendimento', () => {
-  const atend = [{ id: 'f', data: '2026-10-12', publico: 'FAMÍLIA', paciente_impossibilitado: 'NÃO' }];
+test('calcularAdmissao: atendimento só à família vale como 1º atendimento (v27)', () => {
+  const atend = [{ id: 'f', data: '2026-10-12', publico: 'FAMÍLIA' }];
   const c = r.calcularAdmissao(ADM, atend, OP).campos;
-  assert.equal(c.status, 'AGUARDANDO 1º ATENDIMENTO');
-  assert.equal(c.primeiro_no_prazo, 'NÃO');
-  const comImpossibilidade = r.calcularAdmissao(ADM, [{ ...atend[0], paciente_impossibilitado: 'SIM' }], OP).campos;
-  assert.equal(comImpossibilidade.primeiro_no_prazo, 'SIM');
+  assert.equal(c.status, 'EM ACOMPANHAMENTO');
+  assert.equal(c.primeiro_atendimento, '2026-10-12');
+  assert.equal(c.primeiro_no_prazo, 'SIM');
+  // Justificativa sem prioridade ("Sem demanda" ou "Sem condições"): sem próximo retorno.
+  const semPrazo = r.calcularAdmissao({ ...ADM, justificativa_id: 'sem' }, atend, OP).campos;
+  assert.equal(semPrazo.proximo_prazo, '');
 });
 
 test('calcularAdmissao: desfecho dentro do prazo sem atendimento fica fora do indicador', () => {
@@ -314,7 +327,8 @@ test('horas: normalizar, somar e medir', () => {
   assert.equal(r.horasEntre('2026-10-19 08:00', '2026-10-19 15:30'), 7.5);
   assert.equal(r.situacaoPrazoHora('2026-10-20 08:00', '2026-10-20 12:00'), 'ATRASADO');
   assert.equal(r.situacaoPrazoHora('2026-10-20 18:00', '2026-10-20 12:00'), 'VENCE HOJE');
-  assert.equal(r.situacaoPrazoHora('2026-10-21 08:00', '2026-10-20 12:00'), 'NO PRAZO');
+  assert.equal(r.situacaoPrazoHora('2026-10-21 08:00', '2026-10-20 12:00'), 'VENCE AMANHÃ');
+  assert.equal(r.situacaoPrazoHora('2026-10-22 08:00', '2026-10-20 12:00'), 'NO PRAZO');
   assert.equal(r.situacaoMaisUrgente('NO PRAZO', 'ATRASADO'), 'ATRASADO');
   assert.equal(r.situacaoMaisUrgente('', 'VENCE HOJE'), 'VENCE HOJE');
 });
@@ -326,37 +340,45 @@ test('validarAdmissao: hora da solicitação e familiar', () => {
   assert.deepEqual(Array.from(r.validarAdmissao({ ...base, para_quem: 'FAMILIAR', familiar_parentesco: 'MÃE' }, '2026-10-20')), []);
 });
 
-test('calcularResposta: prazo em horas pela prioridade, paciente x familiar, sem prazo e desfecho', () => {
-  const alta = { nome: 'ALTA', prazo: '24' };
+test('calcularResposta: prazo em dias úteis pela prioridade, vence no fim do dia, qualquer atendimento responde (v27)', () => {
+  const alta = { nome: 'ALTA', prazo: '1' };
   const op = { prioridade: alta, tiposComPrazo: ['EQUIPE'], agora: '2026-10-20 12:00' };
+  // Segunda 19/10: alta = 1 dia útil, sem contar o dia do pedido → até terça 20/10, o dia inteiro.
   const sol = { tipo_solicitacao: 'EQUIPE', data_solicitacao: '2026-10-19', hora_solicitacao: '08:00', para_quem: 'PACIENTE' };
-  const fam = { data: '2026-10-19', hora: '09:00', publico: 'FAMÍLIA', paciente_impossibilitado: 'NÃO' };
+  const fam = { data: '2026-10-19', hora: '09:00', publico: 'FAMÍLIA' };
   const pac = { data: '2026-10-19', hora: '15:30', publico: 'PACIENTE' };
   const antes = { data: '2026-10-18', hora: '10:00', publico: 'PACIENTE' };
 
   const ok = r.calcularResposta(sol, [antes, fam, pac], op);
   assert.equal(ok.prioridade_solicitacao, 'ALTA');
-  assert.equal(ok.prazo_resposta, '2026-10-20 08:00');
-  assert.equal(ok.momento_resposta, '2026-10-19 15:30'); // família sem impossibilidade e atendimento anterior não contam
-  assert.equal(ok.horas_resposta, 7.5);
+  assert.equal(ok.prazo_resposta, '2026-10-20');
+  assert.equal(ok.momento_resposta, '2026-10-19 09:00'); // a família responde; atendimento anterior à solicitação não
+  assert.equal(ok.dias_resposta, 0);
   assert.equal(ok.resposta_no_prazo, 'SIM');
 
-  const paraFamiliar = r.calcularResposta({ ...sol, para_quem: 'FAMILIAR' }, [fam, pac], op);
-  assert.equal(paraFamiliar.momento_resposta, '2026-10-19 09:00');
-  assert.equal(paraFamiliar.horas_resposta, 1);
-
-  const atrasada = r.calcularResposta(sol, [], op);
-  assert.equal(atrasada.resposta_no_prazo, 'NÃO');
-  assert.equal(r.calcularResposta(sol, [], { ...op, agora: '2026-10-19 20:00' }).resposta_no_prazo, 'EM ANDAMENTO');
+  // Sem resposta: no último dia do prazo ainda está em andamento; depois dele, fora do prazo.
+  assert.equal(r.calcularResposta(sol, [], op).resposta_no_prazo, 'EM ANDAMENTO');
+  assert.equal(r.calcularResposta(sol, [], { ...op, agora: '2026-10-21 00:01' }).resposta_no_prazo, 'NÃO');
   assert.equal(r.calcularResposta({ ...sol, data_desfecho: '2026-10-19' }, [], op).resposta_no_prazo, 'NÃO SE APLICA');
-  const fora = r.calcularResposta(sol, [{ data: '2026-10-20', hora: '09:00', publico: 'PACIENTE' }], op);
+  // Atendimento no último dia, em qualquer horário, está no prazo.
+  const ultimoDia = r.calcularResposta(sol, [{ data: '2026-10-20', hora: '23:30', publico: 'PACIENTE' }], op);
+  assert.equal(ultimoDia.resposta_no_prazo, 'SIM');
+  assert.equal(ultimoDia.dias_resposta, 1);
+  const fora = r.calcularResposta(sol, [{ data: '2026-10-21', hora: '07:00', publico: 'PACIENTE' }], op);
   assert.equal(fora.resposta_no_prazo, 'NÃO');
-  assert.equal(fora.horas_resposta, 25);
+  assert.equal(fora.dias_resposta, 2);
+  // Pedido no fim de semana começa a contar na segunda; moderada e baixa somam 2 e 3 dias úteis.
+  const sabado = { ...sol, data_solicitacao: '2026-10-24' };
+  assert.equal(r.calcularResposta(sabado, [], op).prazo_resposta, '2026-10-26');
+  assert.equal(r.calcularResposta(sabado, [], { ...op, prioridade: { nome: 'MODERADA', prazo: '2' } }).prazo_resposta, '2026-10-27');
+  assert.equal(r.calcularResposta(sol, [], { ...op, prioridade: { nome: 'BAIXA', prazo: '3' } }).prazo_resposta, '2026-10-22');
+  // Feriado não conta.
+  assert.equal(r.calcularResposta(sol, [], { ...op, feriados: r.conjuntoFeriados([{ data: '2026-10-20' }]) }).prazo_resposta, '2026-10-21');
 
   assert.equal(r.calcularResposta({ ...sol, tipo_solicitacao: 'BUSCA ATIVA' }, [pac], op).resposta_no_prazo, 'SEM PRAZO');
   const semPrioridade = r.calcularResposta(sol, [pac], { ...op, prioridade: null });
   assert.equal(semPrioridade.resposta_no_prazo, 'SEM PRAZO');
-  assert.equal(semPrioridade.horas_resposta, 7.5); // o tempo é medido mesmo sem prazo
+  assert.equal(semPrioridade.dias_resposta, 0); // o tempo é medido mesmo sem prazo
   assert.equal(r.calcularResposta({ ...sol, hora_solicitacao: '' }, [pac], op).resposta_no_prazo, '');
 });
 
@@ -382,18 +404,25 @@ test('horas úteis: prazos de 24h, 48h e 72h pulam fim de semana e feriados sem 
   assert.equal(r.adicionarHorasUteis('2026-10-23 10:00', Infinity), '');
 });
 
-test('interconsulta: resposta na segunda e contagem restante usam horas úteis; vencimento continua atrasando após o limite', () => {
+test('interconsulta: pedido na sexta vence na segunda; dias restantes e atraso em dias úteis (v27)', () => {
   const sol = { tipo_solicitacao: 'EQUIPE', data_solicitacao: '2026-10-23', hora_solicitacao: '10:00', para_quem: 'PACIENTE' };
-  const op = { prioridade: { nome: 'ALTA', prazo: 24 }, tiposComPrazo: ['EQUIPE'], agora: '2026-10-25 12:00' };
+  const op = { prioridade: { nome: 'ALTA', prazo: 1 }, tiposComPrazo: ['EQUIPE'], agora: '2026-10-25 12:00' };
   const pendente = r.calcularResposta(sol, [], op);
-  assert.equal(pendente.prazo_resposta, '2026-10-26 10:00');
+  assert.equal(pendente.prazo_resposta, '2026-10-26');
   assert.equal(pendente.resposta_no_prazo, 'EM ANDAMENTO');
   const prazos = r.prazosDaAdmissao({ ...sol, ...pendente, status: 'AGUARDANDO 1º ATENDIMENTO' }, '2026-10-25', op.agora);
-  assert.equal(prazos.interconsulta.horas_restantes, 10);
-  const resposta = r.calcularResposta(sol, [{ data: '2026-10-26', hora: '09:00', publico: 'PACIENTE' }], op);
+  assert.equal(prazos.interconsulta.situacao, 'VENCE AMANHÃ');
+  assert.equal(prazos.interconsulta.dias_restantes, 1);
+  const atrasada = r.prazosDaAdmissao({ ...sol, ...pendente, status: 'AGUARDANDO 1º ATENDIMENTO' }, '2026-10-28', '2026-10-28 09:00');
+  assert.equal(atrasada.interconsulta.situacao, 'ATRASADO');
+  assert.equal(atrasada.interconsulta.dias_restantes, -2);
+  const resposta = r.calcularResposta(sol, [{ data: '2026-10-26', hora: '18:00', publico: 'PACIENTE' }], op);
   assert.equal(resposta.resposta_no_prazo, 'SIM');
-  assert.equal(resposta.horas_resposta, 23);
-  assert.equal(r.calcularResposta(sol, [], { ...op, agora: '2026-10-26 10:01' }).resposta_no_prazo, 'NÃO');
+  assert.equal(resposta.dias_resposta, 1);
+  assert.equal(r.calcularResposta(sol, [], { ...op, agora: '2026-10-27 00:01' }).resposta_no_prazo, 'NÃO');
+  assert.equal(r.diasUteisEntre('2026-10-23', '2026-10-26'), 1);
+  assert.equal(r.diasUteisEntre('2026-10-26', '2026-10-23'), -1);
+  assert.equal(r.diasUteisEntre('2026-10-24', '2026-10-25'), 0);
 });
 
 test('prazosDaAdmissao: os três prazos e o mais urgente', () => {
@@ -401,20 +430,20 @@ test('prazosDaAdmissao: os três prazos e o mais urgente', () => {
   const A = '2026-10-20 12:00';
   const aguardando = {
     status: 'AGUARDANDO 1º ATENDIMENTO', prazo_primeiro_atendimento: '2026-10-22', primeiro_no_prazo: 'EM ANDAMENTO',
-    resposta_no_prazo: 'EM ANDAMENTO', prazo_resposta: '2026-10-20 16:00', prioridade_solicitacao: 'ALTA'
+    resposta_no_prazo: 'EM ANDAMENTO', prazo_resposta: '2026-10-20', prioridade_solicitacao: 'ALTA'
   };
   const p = r.prazosDaAdmissao(aguardando, H, A);
   assert.equal(p.primeiro.estado, 'PENDENTE');
   assert.equal(p.primeiro.situacao, 'NO PRAZO');
   assert.equal(p.interconsulta.estado, 'PENDENTE');
   assert.equal(p.interconsulta.situacao, 'VENCE HOJE');
-  assert.equal(p.interconsulta.horas_restantes, 4);
+  assert.equal(p.interconsulta.dias_restantes, 0);
   assert.equal(p.retorno.estado, '');
   assert.equal(p.proximo.tipo, 'INTERCONSULTA'); // vence hoje é mais urgente que no prazo
 
   const acompanhando = {
     status: 'EM ACOMPANHAMENTO', primeiro_atendimento: '2026-10-15', primeiro_no_prazo: 'SIM', prazo_primeiro_atendimento: '2026-10-16',
-    resposta_no_prazo: 'NÃO', momento_resposta: '2026-10-16 10:00', horas_resposta: 30, prazo_resposta: '2026-10-15 08:00',
+    resposta_no_prazo: 'NÃO', momento_resposta: '2026-10-16 10:00', dias_resposta: 2, prazo_resposta: '2026-10-15',
     proximo_prazo: '2026-10-19', ultimo_contato: '2026-10-16', prioridade_demanda: 'MODERADA'
   };
   const q = r.prazosDaAdmissao(acompanhando, H, A);
@@ -422,6 +451,7 @@ test('prazosDaAdmissao: os três prazos e o mais urgente', () => {
   assert.equal(q.primeiro.resultado, 'NO PRAZO');
   assert.equal(q.interconsulta.estado, 'CUMPRIDO');
   assert.equal(q.interconsulta.resultado, 'FORA DO PRAZO');
+  assert.equal(q.interconsulta.dias, 2);
   assert.equal(q.retorno.estado, 'PENDENTE');
   assert.equal(q.retorno.situacao, 'ATRASADO');
   assert.deepEqual({ ...q.proximo }, { tipo: 'RETORNO', prazo: '2026-10-19', situacao: 'ATRASADO' });

@@ -198,7 +198,12 @@ function sistemaComAdmissao() {
   };
   const atender = (adm, extra) => {
     ctx.novaExecucao();
-    const r = ctx.apiRegistrarAtendimento({ admissao_id: adm.id, data: '2026-10-14', hora: '10:00', publico: 'PACIENTE', tipo_atendimento: extra && extra.interconsulta_id ? 'INTERCONSULTA' : 'BUSCA ATIVA', ...extra });
+    // v27: o 1º atendimento exige a descrição da demanda; o teste informa uma quando a admissão ainda não tem.
+    const semDescricao = !(ctx.buscarPorId('ADMISSOES', adm.id) || {}).descricao_demanda;
+    ctx.novaExecucao();
+    const r = ctx.apiRegistrarAtendimento({ admissao_id: adm.id, data: '2026-10-14', hora: '10:00', publico: 'PACIENTE',
+      tipo_atendimento: extra && extra.interconsulta_id ? 'INTERCONSULTA' : 'BUSCA ATIVA',
+      ...(semDescricao ? { descricao_demanda: 'HUMOR DEPRIMIDO OU ANSIOSO' } : {}), ...extra });
     ctx.novaExecucao();
     return r;
   };
@@ -343,7 +348,8 @@ test('fluxo separado: retomada mantém ID e nova internação mantém os histór
   assert.equal(segunda.dados.atendimentos.length, 0);
   assert.equal(segunda.dados.desfechos.length, 0);
   ctx.novaExecucao();
-  const registro = ctx.apiRegistrarAtendimento({ admissao_id: segunda.dados.admissao.id, data: '2026-10-20', hora: '10:00', publico: 'PACIENTE', tipo_atendimento: 'BUSCA ATIVA' });
+  const registro = ctx.apiRegistrarAtendimento({ admissao_id: segunda.dados.admissao.id, data: '2026-10-20', hora: '10:00', publico: 'PACIENTE', tipo_atendimento: 'BUSCA ATIVA',
+    descricao_demanda: 'HUMOR DEPRIMIDO OU ANSIOSO', justificativa_id: j.id });
   assert.equal(registro.ok, true, registro.erro);
   assert.equal(registro.dados.atendimentos.length, 1);
   assert.equal(registro.dados.atendimentos[0].admissao_id, segunda.dados.admissao.id);
@@ -406,40 +412,58 @@ test('admissão: abre aguardando o 1º atendimento e impede outra admissão aber
   assert.match(r2.erro, /já tem uma admissão aberta/);
 });
 
-test('atendimentos: 1º no prazo, família com e sem impossibilidade, quantidade de familiares', () => {
+test('atendimentos: todo atendimento conta para os prazos, inclusive só à família (v27), e quantidade de familiares', () => {
   const { ctx, admitir, atender } = sistemaComAdmissao();
   const adm = admitir().dados.admissao;
 
-  const fam = atender(adm, { data: '2026-10-13', publico: 'FAMÍLIA', quantidade: '3', paciente_impossibilitado: 'NÃO' });
+  // Atendimento só à família já vale como 1º atendimento (prazo 15/10: 3 dias úteis após sex 09/10, sem o feriado de 12/10).
+  const fam = atender(adm, { data: '2026-10-13', publico: 'FAMÍLIA', quantidade: '3' });
   assert.equal(fam.ok, true, fam.erro);
   assert.equal(Number(fam.dados.atendimentos[0].quantidade), 3);
-  assert.equal(fam.dados.atendimentos[0].conta_prazo, 'NÃO');
-  assert.equal(fam.dados.admissao.status, 'AGUARDANDO 1º ATENDIMENTO');
+  assert.equal(fam.dados.atendimentos[0].conta_prazo, 'SIM');
+  assert.equal(fam.dados.atendimentos[0].paciente_impossibilitado, '');
+  assert.equal(fam.dados.admissao.status, 'EM ACOMPANHAMENTO');
+  assert.equal(fam.dados.admissao.primeiro_atendimento, '2026-10-13');
+  assert.equal(fam.dados.admissao.primeiro_no_prazo, 'SIM');
+  assert.equal(fam.dados.admissao.proximo_prazo, '2026-10-15');
 
   const pac = atender(adm, { data: '2026-10-14' });
   assert.equal(pac.ok, true, pac.erro);
-  assert.equal(pac.dados.admissao.status, 'EM ACOMPANHAMENTO');
-  assert.equal(pac.dados.admissao.primeiro_no_prazo, 'SIM');
+  assert.equal(pac.dados.atendimentos[0].tipo_prazo, 'RETORNO');
+  assert.equal(pac.dados.atendimentos[0].no_prazo, 'SIM');
   assert.equal(pac.dados.admissao.proximo_prazo, '2026-10-16');
   assert.equal(pac.dados.atendimentos[0].categoria, 'PROFISSIONAL DA EMPRESA');
 
-  // Paciente impossibilitado: o atendimento à família renova o prazo.
-  const fam2 = atender(adm, { data: '2026-10-16', publico: 'FAMÍLIA', quantidade: '2', paciente_impossibilitado: 'SIM' });
+  const fam2 = atender(adm, { data: '2026-10-16', publico: 'FAMÍLIA', quantidade: '2' });
   assert.equal(fam2.dados.atendimentos[0].conta_prazo, 'SIM');
   assert.equal(fam2.dados.atendimentos[0].no_prazo, 'SIM');
   assert.equal(fam2.dados.admissao.proximo_prazo, '2026-10-20');
   assert.equal(fam2.dados.admissao.situacao, 'VENCE HOJE');
+
+  // Paciente e família: o paciente mais os familiares informados.
+  const ambos = atender(adm, { data: '2026-10-19', publico: 'PACIENTE E FAMÍLIA', quantidade: '2' });
+  assert.equal(ambos.ok, true, ambos.erro);
+  assert.equal(ambos.dados.atendimentos[0].publico, 'PACIENTE E FAMÍLIA');
+  assert.equal(Number(ambos.dados.atendimentos[0].quantidade), 2);
+  assert.equal(ambos.dados.atendimentos[0].conta_prazo, 'SIM');
+  assert.equal(ambos.dados.admissao.proximo_prazo, '2026-10-21');
 
   const futuro = atender(adm, { data: '2026-10-21' });
   assert.equal(futuro.ok, false);
   const antes = atender(adm, { data: '2026-10-08' });
   assert.equal(antes.ok, false);
 
-  // Excluir o atendimento ao paciente faz o 1º atendimento passar a ser o da família de 16/10 (prazo era 15/10).
+  // Excluir o atendimento ao paciente não muda o 1º atendimento, que foi o da família em 13/10.
+  ctx.novaExecucao();
   const excl = ctx.apiExcluirAtendimento(pac.dados.atendimentos[0].id);
   assert.equal(excl.ok, true, excl.erro);
-  assert.equal(excl.dados.admissao.primeiro_atendimento, '2026-10-16');
-  assert.equal(excl.dados.admissao.primeiro_no_prazo, 'NÃO');
+  assert.equal(excl.dados.admissao.primeiro_atendimento, '2026-10-13');
+  // Sem ele, o 1º atendimento passa a ser o da família de 16/10 (prazo era 15/10).
+  ctx.novaExecucao();
+  const excl2 = ctx.apiExcluirAtendimento(fam.dados.atendimentos[0].id);
+  assert.equal(excl2.ok, true, excl2.erro);
+  assert.equal(excl2.dados.admissao.primeiro_atendimento, '2026-10-16');
+  assert.equal(excl2.dados.admissao.primeiro_no_prazo, 'NÃO');
 });
 
 test('residente: categoria gravada no atendimento', () => {
@@ -508,7 +532,7 @@ test('parâmetro do prazo do 1º atendimento e prazo da prioridade de seguimento
   assert.equal(ctx.buscarPorId('ADMISSOES', adm.id).proximo_prazo, '2026-10-21');
   ctx.novaExecucao();
   const lista = ctx.apiListarAdmissoes({ abertas: 'SIM' });
-  assert.equal(lista.dados[0].situacao, 'NO PRAZO');
+  assert.equal(lista.dados[0].situacao, 'VENCE AMANHÃ'); // hoje é 20/10; o prazo é 21/10
 });
 
 test('compilado pela API e exportação para uma planilha nova', () => {
@@ -609,7 +633,7 @@ test('histórico de desfechos: retomada preserva o desfecho anterior; correção
   assert.equal(linhas.find((l) => l.rotulo.startsWith('… saídas')).total, 1);
 });
 
-test('solicitação: prazo em horas pela prioridade do motivo, familiar, motivo sem prioridade e compilado', () => {
+test('solicitação: prazo em dias úteis pela prioridade do motivo, familiar, motivo sem prioridade e compilado', () => {
   const { ctx, admitir, atender } = sistemaComAdmissao();
   const motivo = (nome) => ctx.listar('MOTIVOS_SOLICITACAO').find((m) => m.nome === nome);
   const sol = { tipo_solicitacao: 'EQUIPE', data_solicitacao: '2026-10-19', hora_solicitacao: '8:00' };
@@ -624,10 +648,10 @@ test('solicitação: prazo em horas pela prioridade do motivo, familiar, motivo 
   assert.equal(adm.hora_solicitacao, '08:00');
   assert.equal(adm.familiar_parentesco, 'MÃE');
   assert.equal(adm.prioridade_solicitacao, 'ALTA');
-  assert.equal(adm.prazo_resposta, '2026-10-20 08:00');
-  assert.equal(adm.resposta_no_prazo, 'NÃO'); // agora = 20/10 12:00, ninguém respondeu
+  assert.equal(adm.prazo_resposta, '2026-10-20'); // ALTA: 1 dia útil, sem contar o dia da solicitação
+  assert.equal(adm.resposta_no_prazo, 'EM ANDAMENTO'); // agora = 20/10 12:00: vale até o fim do dia
   assert.equal(adm.aguardando_resposta, true);
-  assert.equal(adm.situacao, 'ATRASADO');
+  assert.equal(adm.situacao, 'ATRASADO'); // vem do 1º atendimento (prazo 15/10)
   assert.equal(adm.motivo_nome, 'RISCO DE SUICÍDIO');
   assert.equal(adm.prioridade_demanda, 'MODERADA'); // da justificativa POUCOS RECURSOS
 
@@ -640,7 +664,7 @@ test('solicitação: prazo em horas pela prioridade do motivo, familiar, motivo 
   const resp = atender(adm, { data: '2026-10-19', hora: '10:30', publico: 'FAMÍLIA', quantidade: '1', paciente_impossibilitado: 'NÃO' });
   assert.equal(resp.ok, true, resp.erro);
   assert.equal(resp.dados.admissao.momento_resposta, '2026-10-19 10:30');
-  assert.equal(Number(resp.dados.admissao.horas_resposta), 2.5);
+  assert.equal(Number(resp.dados.admissao.dias_resposta), 0); // no mesmo dia
   assert.equal(resp.dados.admissao.resposta_no_prazo, 'SIM');
   assert.equal(resp.dados.atendimentos[0].hora, '10:30');
 
@@ -648,7 +672,7 @@ test('solicitação: prazo em horas pela prioridade do motivo, familiar, motivo 
   const sec = c.secoes.find((s) => s.titulo.startsWith('Resposta à solicitação'));
   assert.equal(sec.linhas.find((l) => l.rotulo === 'NO PRAZO').total, 1);
   assert.equal(sec.linhas.find((l) => l.rotulo === '% NO PRAZO — ALTA').total, 1);
-  assert.equal(sec.linhas.find((l) => l.rotulo.startsWith('MÉDIA DE HORAS')).total, 2.5);
+  assert.equal(sec.linhas.find((l) => l.rotulo.startsWith('MÉDIA DE DIAS ÚTEIS')).total, 0);
   const motivoSec = c.secoes.find((s) => s.titulo === 'Motivo da solicitação');
   assert.equal(motivoSec.linhas.find((l) => l.rotulo === 'RISCO DE SUICÍDIO').total, 1);
 });
@@ -666,7 +690,7 @@ test('motivo sem prioridade fica sem prazo até a coordenação definir; tipos c
   ctx.novaExecucao();
   const depois = ctx.buscarPorId('ADMISSOES', adm.id);
   assert.equal(depois.prioridade_solicitacao, 'BAIXA');
-  assert.equal(depois.prazo_resposta, '2026-10-22 09:00');
+  assert.equal(depois.prazo_resposta, '2026-10-22'); // BAIXA: 3 dias úteis após 19/10
   assert.equal(depois.resposta_no_prazo, 'EM ANDAMENTO');
 
   const seg = ctx.listar('PRIORIDADES').find((p) => p.tipo === 'SEGUIMENTO');
@@ -724,10 +748,11 @@ test('gestão: pacientes ativos por unidade, interconsultas pendentes e respondi
   assert.equal(primeiro.paciente_nome, 'SEGUNDO PACIENTE'); // o mais urgente vem primeiro
   assert.deepEqual({ ...primeiro.prazos.proximo }, { tipo: 'RETORNO', prazo: '2026-10-20', situacao: 'VENCE HOJE' });
   assert.equal(primeiro.periodicidade, '3x por semana ou mais');
-  // 1º paciente: interconsulta alta (24h) solicitada 20/10 08:00 → vence 21/10 08:00; agora 20/10 12:00 → faltam 20h.
+  // 1º paciente: interconsulta alta (1 dia útil) solicitada 20/10 → vence 21/10; hoje 20/10 → falta 1 dia útil.
   const doCm2 = g.dados.itens.find((i) => i.unidade_id === unidade.id);
   assert.equal(doCm2.dias_internado, 1);
-  assert.equal(doCm2.prazos.interconsulta.horas_restantes, 20);
+  assert.equal(doCm2.prazos.interconsulta.dias_restantes, 1);
+  assert.equal(doCm2.prazos.interconsulta.situacao, 'VENCE AMANHÃ');
   assert.equal(doCm2.prazos.proximo.tipo, 'INTERCONSULTA');
   ctx.novaExecucao();
   assert.equal(ctx.apiGestao({ unidade_id: outra.id }).dados.itens.length, 1);
@@ -743,7 +768,7 @@ test('gestão: pacientes ativos por unidade, interconsultas pendentes e respondi
   const resp = ctx.apiInterconsultas({ situacao: 'RESPONDIDAS' });
   assert.equal(resp.dados.itens.length, 1);
   assert.equal(resp.dados.resumo.no_prazo, 1);
-  assert.equal(Number(resp.dados.itens[0].prazos.interconsulta.horas), 3);
+  assert.equal(Number(resp.dados.itens[0].prazos.interconsulta.dias), 0); // respondida no mesmo dia
 });
 
 function solicitar(sis, adm, extra = {}) {
@@ -874,7 +899,7 @@ test('justificativa do atendimento: inválida ou ausente quando necessária não
   }
 });
 
-test('justificativa retroativa ou de familiar sem impossibilidade não substitui a justificativa do último contato válido', () => {
+test('justificativa retroativa não substitui a do último contato; a do atendimento à família, posterior, substitui (v27)', () => {
   const { ctx, admitir, atender, j } = sistemaComAdmissao();
   const adm = admitir().dados.admissao;
   const alta = ctx.listar('JUSTIFICATIVAS').find(x => x.nome === 'RISCO DE SUICÍDIO');
@@ -883,13 +908,13 @@ test('justificativa retroativa ou de familiar sem impossibilidade não substitui
   assert.equal(retroativo.ok, true, retroativo.erro);
   assert.equal(retroativo.dados.admissao.justificativa_id, j.id);
   assert.equal(retroativo.dados.atendimentos.find(a => a.data === '2026-10-14').justificativa_id, alta.id);
-  const familia = atender(adm, { data: '2026-10-20', publico: 'FAMÍLIA', paciente_impossibilitado: 'NÃO', justificativa_id: alta.id });
+  const familia = atender(adm, { data: '2026-10-20', publico: 'FAMÍLIA', justificativa_id: alta.id });
   assert.equal(familia.ok, true, familia.erro);
-  assert.equal(familia.dados.admissao.justificativa_id, j.id);
+  assert.equal(familia.dados.admissao.justificativa_id, alta.id);
   assert.equal(familia.dados.atendimentos[0].justificativa_id, alta.id);
 });
 
-test('horas úteis em interconsulta: feriado, gestão, resposta e compilado compartilham o prazo sem inflar prioridade', () => {
+test('dias úteis em interconsulta: feriado, gestão, resposta e compilado compartilham o prazo sem inflar prioridade', () => {
   const sis = sistemaComAdmissao();
   const { ctx, admitir, atender } = sis;
   vm.runInContext("hoje = function () { return '2026-10-30'; }; agora = function () { return '2026-10-30 12:00'; }", ctx);
@@ -897,30 +922,33 @@ test('horas úteis em interconsulta: feriado, gestão, resposta e compilado comp
   const pedido = solicitar(sis, adm, { data_solicitacao: '2026-10-30', hora_solicitacao: '10:00' });
   assert.equal(pedido.ok, true, pedido.erro);
   const i = pedido.dados.interconsultas[0];
-  assert.equal(i.prazo_resposta, '2026-11-03 10:00'); // 02/11 é feriado cadastrado
-  assert.equal(i.prazo.horas_restantes, 22);
-  assert.equal(ctx.apiGestao({}).dados.itens[0].prazos.interconsulta.horas_restantes, 22);
+  // Sexta 30/10, ALTA (1 dia útil): sábado, domingo e o feriado de 02/11 não contam.
+  assert.equal(i.prazo_resposta, '2026-11-03');
+  assert.equal(i.prazo_dias_uteis, '1');
+  assert.equal(i.prazo.dias_restantes, 1);
+  assert.equal(ctx.apiGestao({}).dados.itens[0].prazos.interconsulta.dias_restantes, 1);
   vm.runInContext("hoje = function () { return '2026-11-02'; }; agora = function () { return '2026-11-02 12:00'; }", ctx);
   ctx.novaExecucao();
   const feriado = ctx.apiInterconsultas({ situacao: 'PENDENTES' }).dados;
   assert.equal(feriado.resumo.atrasadas, 0);
-  assert.equal(feriado.itens[0].prazos.interconsulta.horas_restantes, 10);
+  assert.equal(feriado.itens[0].prazos.interconsulta.dias_restantes, 1);
+  assert.equal(feriado.itens[0].prazos.interconsulta.situacao, 'VENCE AMANHÃ');
   vm.runInContext("hoje = function () { return '2026-11-03'; }; agora = function () { return '2026-11-03 12:00'; }", ctx);
   const contato = atender(adm, { data: '2026-11-03', hora: '09:00' });
   assert.equal(contato.ok, true, contato.erro);
   const resposta = ctx.apiResponderInterconsulta({ id: i.id, atendimento_id: contato.dados.atendimentos[0].id });
   assert.equal(resposta.ok, true, resposta.erro);
   const respondida = resposta.dados.interconsultas[0];
-  assert.equal(respondida.prazo_horas, '24');
-  assert.equal(respondida.prazo_resposta, '2026-11-03 10:00');
+  assert.equal(respondida.prazo_dias_uteis, '1');
+  assert.equal(respondida.prazo_resposta, '2026-11-03');
   assert.equal(respondida.resposta_no_prazo, 'SIM');
-  assert.equal(respondida.horas_resposta, 23);
+  assert.equal(respondida.dias_resposta, 1);
   ctx.novaExecucao();
   const painel = ctx.apiIndicadores({ ano: 2026, mes: 10 });
   assert.equal(painel.dados.interconsultas.resumo.percentual, 1);
   const compilado = ctx.apiCompilado({ ano: 2026, mes: 10, eixo: 'UNIDADE' });
   const sec = compilado.dados.secoes.find(s => s.titulo === 'Resposta à solicitação no prazo da prioridade');
-  assert.equal(sec.linhas.find(l => l.rotulo.startsWith('MÉDIA DE HORAS ÚTEIS')).total, 23);
+  assert.equal(sec.linhas.find(l => l.rotulo.startsWith('MÉDIA DE DIAS ÚTEIS')).total, 1);
 });
 
 test('transferência muda localização e filtros atuais, preservando admissão, prazos e unidades históricas', () => {
@@ -1070,25 +1098,27 @@ test('interconsultas: duas solicitações na mesma admissão conservam prazos e 
   const segunda = solicitar(sis, adm, { motivo_solicitacao_id: moderada.id, data_solicitacao: '2026-10-20', hora_solicitacao: '09:00' });
   assert.equal(segunda.ok, true, segunda.erro);
   const i2 = segunda.dados.interconsultas.find(i => i.id !== i1.id);
-  assert.equal(i1.prazo_resposta, '2026-10-20 08:00');
-  assert.equal(i2.prazo_resposta, '2026-10-22 09:00');
+  assert.equal(i1.prazo_resposta, '2026-10-20'); // ALTA: 1 dia útil após 19/10
+  assert.equal(i2.prazo_resposta, '2026-10-22'); // MODERADA: 2 dias úteis após 20/10
   assert.equal(ctx.apiGestao({}).dados.resumo.interconsultas_pendentes, 2);
   assert.equal(ctx.apiInterconsultas({ situacao: 'PENDENTES' }).dados.itens.length, 2);
   const resposta = atender(adm, { data: '2026-10-20', hora: '10:00', interconsulta_id: i2.id });
   assert.equal(resposta.ok, true, resposta.erro);
   assert.equal(resposta.dados.interconsultas.find(i => i.id === i1.id).momento_resposta, '');
   const respondida = resposta.dados.interconsultas.find(i => i.id === i2.id);
-  assert.equal(respondida.horas_resposta, 1);
+  assert.equal(respondida.dias_resposta, 0);
   assert.equal(respondida.resposta_no_prazo, 'SIM');
   assert.equal(ctx.apiInterconsultas({ situacao: 'RESPONDIDAS' }).dados.itens.length, 1);
   assert.equal(ctx.apiGestao({}).dados.resumo.interconsultas_pendentes, 1);
+  // O prazo vale até o fim do dia: às 11:00 do dia do vencimento ainda está no prazo.
   const tarde = atender(adm, { data: '2026-10-20', hora: '11:00', interconsulta_id: i1.id });
   assert.equal(tarde.ok, true, tarde.erro);
-  assert.equal(tarde.dados.interconsultas.find(i => i.id === i1.id).resposta_no_prazo, 'NÃO');
+  assert.equal(tarde.dados.interconsultas.find(i => i.id === i1.id).resposta_no_prazo, 'SIM');
+  assert.equal(tarde.dados.interconsultas.find(i => i.id === i1.id).dias_resposta, 1);
   const terceiro = solicitar(sis, adm, { data_solicitacao: '2026-10-20', hora_solicitacao: '11:30' });
   assert.equal(terceiro.dados.interconsultas.length, 3);
   assert.equal(terceiro.dados.interconsultas[2].momento_resposta, '');
-  assert.equal(terceiro.dados.interconsultas[2].prazo_resposta, '2026-10-21 11:30');
+  assert.equal(terceiro.dados.interconsultas[2].prazo_resposta, '2026-10-21');
 });
 
 test('interconsultas: vínculo explícito valida admissão, horário, público e exclusão reabre a solicitação', () => {
@@ -1099,14 +1129,14 @@ test('interconsultas: vínculo explícito valida admissão, horário, público e
   const anterior = atender(adm, { interconsulta_id: i.id });
   assert.equal(anterior.ok, false);
   assert.match(anterior.erro, /antes da solicitação/);
-  const familia = atender(adm, { data: '2026-10-19', interconsulta_id: i.id, publico: 'FAMÍLIA', paciente_impossibilitado: 'NÃO' });
-  assert.equal(familia.ok, false);
-  assert.match(familia.erro, /não responde/);
   const rotina = atender(adm, { data: '2026-10-19', hora: '09:00' });
   assert.equal(rotina.dados.interconsultas[0].momento_resposta, '');
   const at = rotina.dados.atendimentos[0];
   const errada = ctx.validarRespostaInterconsulta_;
   assert.throws(() => errada(i.id, { ...at, admissao_id: 'outra' }), /não pertence/);
+  assert.throws(() => errada(i.id, { ...at, publico: '' }), /sem público/);
+  // Desde a v27 o atendimento à família também responde à solicitação.
+  assert.equal(ctx.validarRespostaInterconsulta_(i.id, { ...at, publico: 'FAMÍLIA' }).id, i.id);
   const resposta = ctx.apiResponderInterconsulta({ id: i.id, atendimento_id: at.id });
   assert.equal(resposta.ok, true, resposta.erro);
   assert.equal(resposta.dados.interconsultas[0].momento_resposta, '2026-10-19 09:00');
@@ -1159,13 +1189,15 @@ test('interconsultas: migração de banco antigo é aditiva, idempotente e prese
 test('interconsultas: prioridade é preservada por solicitação e compilado usa mês da solicitação', () => {
   const sis = sistemaComAdmissao();
   const { ctx, admitir } = sis;
+  vm.runInContext("hoje = function () { return '2026-10-21'; }; agora = function () { return '2026-10-21 12:00'; }", ctx);
   const adm = admitir({ data_admissao: '2026-09-01' }).dados.admissao;
   const primeira = solicitar(sis, adm).dados.interconsultas[0];
+  assert.equal(primeira.prazo_resposta, '2026-10-20');
   const p = ctx.listar('PRIORIDADES').find(p => p.tipo === 'SOLICITAÇÃO' && p.nome === 'ALTA');
-  ctx.apiSalvarPrioridade({ ...p, prazo: '36' });
+  ctx.apiSalvarPrioridade({ ...p, prazo: '2' });
   const segunda = solicitar(sis, adm).dados.interconsultas[1];
   assert.equal(ctx.apiObterAdmissao(adm.id).dados.interconsultas[0].prazo_resposta, primeira.prazo_resposta);
-  assert.equal(segunda.prazo_resposta, '2026-10-20 20:00');
+  assert.equal(segunda.prazo_resposta, '2026-10-21');
   const c = ctx.apiCompilado({ ano: 2026, mes: 10, eixo: 'UNIDADE' });
   assert.equal(c.ok, true, c.erro);
   const sec = t => c.dados.secoes.find(s => s.titulo.startsWith(t));
@@ -1273,7 +1305,7 @@ test('interconsulta é sempre da equipe, inclusive quando o cliente omite ou env
     assert.equal(r.ok, true, r.erro);
     const i = r.dados.interconsultas.at(-1);
     assert.equal(i.tipo_solicitacao, 'EQUIPE');
-    assert.equal(i.prazo_resposta, '2026-10-20 08:00');
+    assert.equal(i.prazo_resposta, '2026-10-20');
   }
 });
 
@@ -1493,7 +1525,7 @@ test('gravação pela API: registrar atendimento lê uma vez, grava uma linha no
   const { ctx, admitir } = sistemaComAdmissao();
   const adm = admitir().dados.admissao;
   const { r, cont } = contarChamadas(ctx, () =>
-    ctx.apiRegistrarAtendimento({ tipo_atendimento: 'BUSCA ATIVA', admissao_id: adm.id, data: '2026-10-14', hora: '10:00', publico: 'PACIENTE' }));
+    ctx.apiRegistrarAtendimento({ tipo_atendimento: 'BUSCA ATIVA', admissao_id: adm.id, data: '2026-10-14', hora: '10:00', publico: 'PACIENTE', descricao_demanda: 'HUMOR DEPRIMIDO OU ANSIOSO' }));
   assert.equal(r.ok, true, r.erro);
   assert.deepEqual({ ...cont }, { batchGet: 1, append: 1, batchUpdate: 1, trava: 1 });
   assert.equal(r.dados.admissao.primeiro_atendimento, '2026-10-14');
@@ -1575,4 +1607,78 @@ test('abertura: sem acesso, a página leva o erro para a tela mostrar', () => {
   const r = JSON.parse(ctx.dadosIniciaisDaPagina());
   assert.equal(r.ok, false);
   assert.match(r.erro, /não tem acesso/);
+});
+
+test('v27: configurar converte uma vez as prioridades de solicitação de horas para dias úteis', () => {
+  const sis = sistemaComAdmissao();
+  const { ctx, admitir } = sis;
+  const adm = admitir().dados.admissao;
+  const i = solicitar(sis, adm).dados.interconsultas[0];
+  // Planilha anterior à v27: prazos em horas, sem o parâmetro, e uma interconsulta gravada com prazo_horas.
+  ctx.comTrava(() => {
+    ctx.listar('PRIORIDADES').filter(p => p.tipo === 'SOLICITAÇÃO').forEach((p, n) => {
+      ctx.atualizar('PRIORIDADES', p.id, { prazo: String([24, 48, 72][n]), periodicidade: 'Atender em até ' + [24, 48, 72][n] + 'h' });
+    });
+    ctx.excluir('PARAMETROS', ctx.listar('PARAMETROS').find(p => p.chave === 'PRAZO_SOLICITACAO_EM_DIAS').id);
+    ctx.atualizar('INTERCONSULTAS', i.id, { prazo_horas: '48', prazo_dias_uteis: '' });
+  });
+  ctx.novaExecucao();
+  const antiga = ctx.apiObterAdmissao(adm.id).dados.interconsultas[0];
+  assert.equal(antiga.prazo_resposta, '2026-10-21'); // 48h viram 2 dias úteis após 19/10
+
+  ctx.novaExecucao();
+  ctx.configurar();
+  ctx.novaExecucao();
+  const solicitacao = () => ctx.listar('PRIORIDADES').filter(p => p.tipo === 'SOLICITAÇÃO');
+  assert.equal(solicitacao().map(p => p.prazo).join(','), '1,2,3');
+  assert.equal(solicitacao()[1].periodicidade, 'Atender em até 2 dias úteis');
+  assert.equal(ctx.parametro('PRAZO_SOLICITACAO_EM_DIAS', ''), 'SIM');
+
+  // A conversão não se repete: um prazo de 30 dias úteis definido depois continua 30.
+  ctx.comTrava(() => ctx.atualizar('PRIORIDADES', solicitacao()[2].id, { prazo: '30' }));
+  ctx.novaExecucao();
+  ctx.configurar();
+  ctx.novaExecucao();
+  assert.equal(solicitacao()[2].prazo, '30');
+  assert.equal(ctx.listar('PARAMETROS').filter(p => p.chave === 'PRAZO_SOLICITACAO_EM_DIAS').length, 1);
+});
+
+test('v27: descrição da demanda é exigida no 1º atendimento e corrigível depois, só ela', () => {
+  const { ctx, admitir, j } = sistemaComAdmissao();
+  const adm = admitir().dados.admissao;
+  ctx.novaExecucao();
+  const base = { admissao_id: adm.id, data: '2026-10-14', hora: '10:00', publico: 'PACIENTE', tipo_atendimento: 'BUSCA ATIVA', justificativa_id: j.id };
+  const sem = ctx.apiRegistrarAtendimento(base);
+  assert.equal(sem.ok, false);
+  assert.match(sem.erro, /descrição da demanda/);
+  ctx.novaExecucao();
+  const primeiro = ctx.apiRegistrarAtendimento({ ...base, descricao_demanda: 'HUMOR DEPRIMIDO OU ANSIOSO' });
+  assert.equal(primeiro.ok, true, primeiro.erro);
+  assert.equal(primeiro.dados.admissao.descricao_demanda, 'HUMOR DEPRIMIDO OU ANSIOSO');
+  // Os retornos não pedem a descrição de novo.
+  ctx.novaExecucao();
+  assert.equal(ctx.apiRegistrarAtendimento({ ...base, data: '2026-10-16' }).ok, true);
+
+  ctx.novaExecucao();
+  assert.equal(ctx.apiSalvarDescricaoDemanda({ id: adm.id, descricao_demanda: '' }).ok, false);
+  ctx.novaExecucao();
+  const antes = ctx.buscarPorId('ADMISSOES', adm.id);
+  ctx.novaExecucao();
+  const corr = ctx.apiSalvarDescricaoDemanda({ id: adm.id, descricao_demanda: 'CONFLITOS FAMILIARES', unidade_id: 'outra', justificativa_id: 'x', observacoes: 'não muda' });
+  assert.equal(corr.ok, true, corr.erro);
+  assert.equal(corr.dados.admissao.descricao_demanda, 'CONFLITOS FAMILIARES');
+  ctx.novaExecucao();
+  const depois = ctx.buscarPorId('ADMISSOES', adm.id);
+  for (const campo of ['unidade_id', 'justificativa_id', 'observacoes', 'primeiro_atendimento', 'status']) {
+    assert.equal(depois[campo], antes[campo], campo);
+  }
+});
+
+test('v27: compilado não tem mais a seção "Necessidade de acompanhamento"', () => {
+  const { ctx, admitir, atender } = sistemaComAdmissao();
+  atender(admitir().dados.admissao);
+  const c = ctx.apiCompilado({ ano: '2026', mes: '10', eixo: 'UNIDADE' });
+  assert.equal(c.ok, true, c.erro);
+  assert.equal(c.dados.secoes.some(s => /Necessidade de acompanhamento/i.test(s.titulo)), false);
+  assert.equal(c.dados.secoes.some(s => s.linhas.some(l => /IMPOSSIBILITADO/i.test(l.rotulo))), false);
 });

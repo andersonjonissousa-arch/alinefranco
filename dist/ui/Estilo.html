@@ -103,14 +103,16 @@
     background: #eef2f6; color: var(--suave); white-space: nowrap;
   }
   .selo.atrasado { background: #fde8e7; color: var(--perigo); }
-  .selo.hoje { background: #fff4d6; color: #8a5a00; }
+  .selo.hoje { background: #ffe9d5; color: #b54708; }
+  .selo.amanha { background: #fff8c5; color: #7a5d00; }
   .selo.prazo { background: #e6f4ea; color: var(--ok); }
 
   .indicadores { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 16px; }
   .indicador { background: var(--cartao); border: 1px solid var(--borda); border-radius: var(--raio); padding: 14px 16px; color: var(--suave); }
   .indicador .numero { font-size: 28px; font-weight: 700; color: var(--texto); }
   .indicador.atrasado .numero { color: var(--perigo); }
-  .indicador.hoje .numero { color: #8a5a00; }
+  .indicador.hoje .numero { color: #b54708; }
+  .indicador.amanha .numero { color: #7a5d00; }
   .indicador.prazo .numero { color: var(--ok); }
   button.indicador { font: inherit; text-align: left; cursor: pointer; }
   button.indicador:hover { border-color: var(--primaria); background: #f7fafd; }

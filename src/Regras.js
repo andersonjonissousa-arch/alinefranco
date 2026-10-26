@@ -180,10 +180,24 @@ function prazoDaJustificativa(prazos, justificativaId) {
   return p === '' || p === undefined || p === null || isNaN(Number(p)) ? null : Number(p);
 }
 
-/** Atendimento ao paciente sempre conta para os prazos; à família, só se o paciente estava impossibilitado. */
+var PUBLICOS_COM_FAMILIA = ['FAMÍLIA', 'PACIENTE E FAMÍLIA'];
+
+/**
+ * Todo atendimento conta para os prazos: ao paciente, à família ou aos dois (decisão da coordenação, v27).
+ * O campo paciente_impossibilitado dos registros antigos não muda mais o resultado.
+ */
 function contaParaPrazo(atendimento) {
-  if (atendimento.publico === 'PACIENTE') return true;
-  return atendimento.publico === 'FAMÍLIA' && atendimento.paciente_impossibilitado === 'SIM';
+  return atendimento.publico === 'PACIENTE' || PUBLICOS_COM_FAMILIA.indexOf(atendimento.publico) !== -1;
+}
+
+/** Atendimento que incluiu o paciente (sozinho ou junto com a família). */
+function atendeuPaciente(publico) {
+  return publico === 'PACIENTE' || publico === 'PACIENTE E FAMÍLIA';
+}
+
+/** Atendimento que incluiu familiares; `quantidade` é o número de familiares atendidos. */
+function atendeuFamilia(publico) {
+  return PUBLICOS_COM_FAMILIA.indexOf(publico) !== -1;
 }
 
 var STATUS_ADMISSAO = {
@@ -272,9 +286,11 @@ function calcularAdmissao(adm, atendimentos, op) {
   if (status === STATUS_ADMISSAO.aguardando) {
     proximo = prazoPrimeiro;
   } else if (status === STATUS_ADMISSAO.acompanhamento) {
-    var acompanha = adm.necessidade_acompanhamento && SEM_ACOMPANHAMENTO.indexOf(adm.necessidade_acompanhamento) === -1;
+    // v27: o próximo retorno depende só da justificativa vigente (sem prazo = "SEM DEMANDA PARA ACOMPANHAMENTO"
+    // ou "SEM CONDIÇÕES"). Admissões antigas com necessidade "NÃO" ou "N / A" continuam sem prazo.
+    var semAcompanhamento = SEM_ACOMPANHAMENTO.indexOf(adm.necessidade_acompanhamento) !== -1;
     var prazoAtual = prazoDaJustificativa(op.prazos, adm.justificativa_id);
-    if (acompanha && prazoAtual !== null) proximo = adicionarDiasUteis(ultimo, prazoAtual, feriados);
+    if (!semAcompanhamento && prazoAtual !== null) proximo = adicionarDiasUteis(ultimo, prazoAtual, feriados);
   }
 
   return {
@@ -291,13 +307,22 @@ function calcularAdmissao(adm, atendimentos, op) {
   };
 }
 
-/** Como está o prazo do próximo atendimento em relação a hoje. */
-function situacaoPrazo(proximoPrazo, hoje) {
+/** Próximo dia útil depois de `data` (amanhã, ou segunda-feira quando `data` é sexta). */
+function proximoDiaUtil(data, feriados) {
+  return adicionarDiasUteis(data, 1, feriados || {});
+}
+
+/**
+ * Como está o prazo do próximo atendimento em relação a hoje.
+ * VENCE AMANHÃ = vence no próximo dia útil (numa sexta, o que vence na segunda).
+ */
+function situacaoPrazo(proximoPrazo, hoje, feriados) {
   var p = normalizarData(proximoPrazo);
   var h = normalizarData(hoje);
   if (!p || !h) return '';
   if (p < h) return 'ATRASADO';
   if (p === h) return 'VENCE HOJE';
+  if (p <= proximoDiaUtil(h, feriados)) return 'VENCE AMANHÃ';
   return 'NO PRAZO';
 }
 
@@ -385,64 +410,84 @@ function horasUteisEntre(inicio, fim, feriados) {
 }
 
 /**
+ * Dias úteis depois de `inicio` até `fim` ('AAAA-MM-DD'), sem contar o próprio `inicio`.
+ * Mesmo dia = 0. Negativo quando `fim` vem antes (para mostrar o atraso).
+ */
+function diasUteisEntre(inicio, fim, feriados) {
+  var a = normalizarData(inicio);
+  var b = normalizarData(fim);
+  if (!a || !b) return '';
+  if (b < a) return -diasUteisEntre(b, a, feriados);
+  var n = 0;
+  for (var d = a; d < b;) {
+    d = adicionarDias(d, 1);
+    if (ehDiaUtil(d, feriados || {})) n++;
+  }
+  return n;
+}
+
+/**
  * Resposta à solicitação (matriz de atendimento): o primeiro atendimento depois da solicitação
- * tem que acontecer em até N horas úteis, conforme a prioridade do motivo.
- * Solicitação para o paciente: vale atendimento ao paciente, ou à família com o paciente impossibilitado.
- * Solicitação para um familiar: vale atendimento ao paciente ou à família.
+ * tem que acontecer em até N dias úteis, conforme a prioridade do motivo (v27: alta 1, moderada 2, baixa 3).
+ * Não conta o dia do pedido; pedido em dia não útil começa a contar no próximo dia útil. O prazo vence
+ * no fim do dia: atendimento no último dia, em qualquer horário, está no prazo. A hora continua
+ * registrada só para saber se o atendimento veio depois da solicitação.
+ * Qualquer atendimento responde: ao paciente, à família ou aos dois (v27).
  *
- * @param adm a admissão
- * @param atendimentos atendimentos da admissão (data, hora, publico, paciente_impossibilitado)
- * @param op { prioridade: { nome, prazo } ou null, tiposComPrazo: [tipos], agora: 'AAAA-MM-DD HH:MM', feriados: conjunto }
- * @return { prioridade_solicitacao, prazo_resposta, momento_resposta, horas_resposta, resposta_no_prazo }
+ * @param adm a admissão (ou a interconsulta)
+ * @param atendimentos atendimentos da admissão (data, hora, publico)
+ * @param op { prioridade: { nome, prazo (dias úteis) } ou null, tiposComPrazo: [tipos], agora: 'AAAA-MM-DD HH:MM', feriados: conjunto }
+ * @return { prioridade_solicitacao, prazo_resposta ('AAAA-MM-DD'), momento_resposta, dias_resposta, horas_resposta, resposta_no_prazo }
  *   resposta_no_prazo: SIM, NÃO, EM ANDAMENTO, NÃO SE APLICA (desfecho antes do prazo sem resposta),
  *   SEM PRAZO (tipo ou motivo sem prazo) ou '' (sem solicitação).
  */
 function calcularResposta(adm, atendimentos, op) {
-  var vazio = { prioridade_solicitacao: '', prazo_resposta: '', momento_resposta: '', horas_resposta: '', resposta_no_prazo: '' };
+  var vazio = { prioridade_solicitacao: '', prazo_resposta: '', momento_resposta: '', dias_resposta: '', horas_resposta: '', resposta_no_prazo: '' };
   var inicio = normalizarHora(adm.hora_solicitacao) ? dataHora(adm.data_solicitacao, adm.hora_solicitacao) : '';
   if (!inicio) return vazio;
 
   var prioridade = op.prioridade;
-  var horasPrazo = prioridade && prioridade.prazo !== '' && !isNaN(Number(prioridade.prazo)) ? Number(prioridade.prazo) : null;
-  var temPrazo = horasPrazo !== null && (op.tiposComPrazo || []).indexOf(adm.tipo_solicitacao) !== -1;
-  var paraFamiliar = adm.para_quem === 'FAMILIAR';
+  var diasPrazo = prioridade && prioridade.prazo !== '' && !isNaN(Number(prioridade.prazo)) ? Number(prioridade.prazo) : null;
+  var temPrazo = diasPrazo !== null && (op.tiposComPrazo || []).indexOf(adm.tipo_solicitacao) !== -1;
 
   var resposta = '';
   atendimentos.forEach(function (a) {
     var dh = dataHora(a.data, a.hora);
     if (!dh || dh < inicio) return;
-    var vale = paraFamiliar ? (a.publico === 'PACIENTE' || a.publico === 'FAMÍLIA') : contaParaPrazo(a);
+    var vale = contaParaPrazo(a);
     if (vale && (!resposta || dh < resposta)) resposta = dh;
   });
 
-  var prazo = temPrazo ? adicionarHorasUteis(inicio, horasPrazo, op.feriados) : '';
+  var prazo = temPrazo ? adicionarDiasUteis(adm.data_solicitacao, diasPrazo, op.feriados) : '';
   var situacao;
   if (!temPrazo) situacao = 'SEM PRAZO';
-  else if (resposta) situacao = resposta <= prazo ? 'SIM' : 'NÃO';
+  else if (resposta) situacao = resposta.slice(0, 10) <= prazo ? 'SIM' : 'NÃO';
   else {
     var desfecho = normalizarData(adm.data_desfecho);
-    if (desfecho && desfecho <= prazo.slice(0, 10)) situacao = 'NÃO SE APLICA';
-    else if (desfecho || (op.agora && op.agora > prazo)) situacao = 'NÃO';
+    if (desfecho && desfecho <= prazo) situacao = 'NÃO SE APLICA';
+    else if (desfecho || (op.agora && op.agora.slice(0, 10) > prazo)) situacao = 'NÃO';
     else situacao = 'EM ANDAMENTO';
   }
   return {
     prioridade_solicitacao: prioridade ? prioridade.nome : '',
     prazo_resposta: prazo,
     momento_resposta: resposta,
+    dias_resposta: resposta ? diasUteisEntre(adm.data_solicitacao, resposta, op.feriados) : '',
     horas_resposta: resposta ? horasUteisEntre(inicio, resposta, op.feriados) : '',
     resposta_no_prazo: situacao
   };
 }
 
 /** Situação de um prazo com hora ('AAAA-MM-DD HH:MM') em relação a agora. */
-function situacaoPrazoHora(prazo, agora) {
+function situacaoPrazoHora(prazo, agora, feriados) {
   if (!prazo || !agora) return '';
   if (prazo < agora) return 'ATRASADO';
   if (prazo.slice(0, 10) === agora.slice(0, 10)) return 'VENCE HOJE';
+  if (prazo.slice(0, 10) <= proximoDiaUtil(agora.slice(0, 10), feriados)) return 'VENCE AMANHÃ';
   return 'NO PRAZO';
 }
 
-var GRAVIDADE_SITUACAO = { 'ATRASADO': 3, 'VENCE HOJE': 2, 'NO PRAZO': 1, '': 0 };
+var GRAVIDADE_SITUACAO = { 'ATRASADO': 4, 'VENCE HOJE': 3, 'VENCE AMANHÃ': 2, 'NO PRAZO': 1, '': 0 };
 
 /** A mais urgente de duas situações. */
 function situacaoMaisUrgente(a, b) {
@@ -455,7 +500,7 @@ function situacaoMaisUrgente(a, b) {
  * Situação de cada prazo da admissão, para as telas de gestão:
  * 1º atendimento após a admissão, resposta à interconsulta e próximo retorno do seguimento.
  * Cada um: { estado: PENDENTE | CUMPRIDO | NÃO REALIZADO | NÃO SE APLICA | SEM PRAZO | '', prazo,
- *            situacao (se pendente): ATRASADO | VENCE HOJE | NO PRAZO, resultado (se cumprido): NO PRAZO | FORA DO PRAZO }
+ *            situacao (se pendente): ATRASADO | VENCE HOJE | VENCE AMANHÃ | NO PRAZO, resultado (se cumprido): NO PRAZO | FORA DO PRAZO }
  * proximo: o prazo pendente mais urgente ({ tipo, prazo, situacao }) ou null.
  */
 function prazosDaAdmissao(adm, hojeIso, agoraDh, feriados) {
@@ -469,7 +514,7 @@ function prazosDaAdmissao(adm, hojeIso, agoraDh, feriados) {
     primeiro.resultado = adm.primeiro_no_prazo === 'SIM' ? 'NO PRAZO' : 'FORA DO PRAZO';
   } else if (ativa) {
     primeiro.estado = 'PENDENTE';
-    primeiro.situacao = situacaoPrazo(primeiro.prazo, hojeIso);
+    primeiro.situacao = situacaoPrazo(primeiro.prazo, hojeIso, feriados);
   } else {
     primeiro.estado = 'NÃO REALIZADO';
     primeiro.resultado = 'FORA DO PRAZO';
@@ -483,12 +528,13 @@ function prazosDaAdmissao(adm, hojeIso, agoraDh, feriados) {
   else if (adm.momento_resposta) {
     interconsulta.estado = 'CUMPRIDO';
     interconsulta.realizado = adm.momento_resposta;
-    interconsulta.horas = adm.horas_resposta;
+    interconsulta.dias = adm.dias_resposta;
     interconsulta.resultado = r === 'SIM' ? 'NO PRAZO' : 'FORA DO PRAZO';
   } else if (ativa) {
     interconsulta.estado = 'PENDENTE';
-    interconsulta.situacao = situacaoPrazoHora(interconsulta.prazo, agoraDh);
-    interconsulta.horas_restantes = horasUteisEntre(agoraDh, interconsulta.prazo, feriados);
+    // Prazo em dias úteis, sem hora (v27): vence no fim do dia.
+    interconsulta.situacao = situacaoPrazo(interconsulta.prazo, hojeIso, feriados);
+    interconsulta.dias_restantes = diasUteisEntre(hojeIso, interconsulta.prazo, feriados);
   } else {
     interconsulta.estado = 'NÃO REALIZADO';
     interconsulta.resultado = 'FORA DO PRAZO';
@@ -499,7 +545,7 @@ function prazosDaAdmissao(adm, hojeIso, agoraDh, feriados) {
   else if (adm.proximo_prazo) {
     retorno.estado = 'PENDENTE';
     retorno.prazo = adm.proximo_prazo;
-    retorno.situacao = situacaoPrazo(retorno.prazo, hojeIso);
+    retorno.situacao = situacaoPrazo(retorno.prazo, hojeIso, feriados);
   } else retorno.estado = 'SEM PRAZO';
 
   var pendentes = [['1º ATENDIMENTO', primeiro], ['INTERCONSULTA', interconsulta], ['RETORNO', retorno]]

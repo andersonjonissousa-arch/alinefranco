@@ -10,3 +10,5 @@
 ## Estado de sincronização
 
 A versão 22 do Apps Script foi salva na branch `codex/appscript-v22`. Ela foi conciliada na branch `claude/adoring-bell-q834ri` com as otimizações de desempenho feitas lá em paralelo (leitura e gravação pela API do Google Planilhas, uma trava por operação, abertura com os dados embutidos e `medirDesempenho`). O cache de cadastros da versão 22 saiu na conciliação, porque a leitura em lote o tornou redundante. A publicação automática (`.github/workflows/publicar-apps-script.yml`) envia `claude/adoring-bell-q834ri` ao Apps Script a cada push.
+
+A v27 enviada pela coordenação (patch `gestao-psicologia-v27.patch`) foi integrada em `claude/adoring-bell-q834ri` com os ajustes combinados: prazo da interconsulta em 1/2/3 dias úteis sem hora (o `configurar` converte uma única vez os bancos antigos, marcando `PRAZO_SOLICITACAO_EM_DIAS`), sem a seção "Necessidade de acompanhamento" no compilado e descrição da demanda corrigível depois do 1º atendimento.

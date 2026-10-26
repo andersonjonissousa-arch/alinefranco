@@ -76,14 +76,19 @@ test('retornos usam justificativa do contato anterior, contam um intervalo por d
   assert.equal(p.resumo.percentual, 0.5);
 });
 
-test('família sem impossibilidade não responde retorno; mês do vencimento pode diferir do mês do atendimento', () => {
+test('atendimento à família responde ao retorno (v27); mês do vencimento pode diferir do mês do atendimento', () => {
   const d = dados();
   d.atendimentos = [contato('outubro', '2026-10-30', 'alta'),
-    contato('familia', '2026-11-03', 'alta', { publico: 'FAMÍLIA', paciente_impossibilitado: 'NÃO' })];
+    contato('familia', '2026-11-03', 'alta', { publico: 'FAMÍLIA', quantidade: '2' })];
   const p = painel(d).acompanhamento;
-  assert.equal(p.resumo.total, 1);
-  assert.equal(p.casos[0].inicio, '2026-10-30');
-  assert.equal(p.casos[0].realizado, '');
+  assert.equal(p.resumo.total, 2);
+  const outubro = p.casos.find(i => i.id === 'outubro');
+  assert.equal(outubro.inicio, '2026-10-30');
+  assert.equal(outubro.prazo, '2026-11-03');
+  assert.equal(outubro.realizado, '2026-11-03');
+  assert.equal(outubro.resultado, 'SIM');
+  // O retorno em aberto segue a justificativa atual da admissão (BAIXA, 5 dias úteis, sem o feriado de 05/11).
+  assert.equal(p.casos.find(i => i.id === 'familia').prazo, '2026-11-11');
   assert.equal(p.resumo.fora_prazo, 1);
 });
 

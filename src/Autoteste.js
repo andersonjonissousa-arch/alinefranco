@@ -53,10 +53,12 @@ function testarSistema() {
     item = daAdmissao(dados(apiInterconsultas({ situacao: 'PENDENTES' }), 'Gestão: interconsultas pendentes'));
     verificar(item && item.prazos.interconsulta.estado === 'PENDENTE', 'Gestão: interconsulta aparece aguardando resposta');
 
-    det = dados(apiRegistrarAtendimento({ tipo_atendimento: 'BUSCA ATIVA', admissao_id: adm.id, data: hojeIso, hora: horaAgora, publico: 'PACIENTE' }), 'Atendimento: registro ao paciente');
+    det = dados(apiRegistrarAtendimento({ tipo_atendimento: 'BUSCA ATIVA', admissao_id: adm.id, data: hojeIso, hora: horaAgora, publico: 'PACIENTE',
+      descricao_demanda: 'RISCO DE SUICÍDIO' }), 'Atendimento: registro ao paciente');
     adm = det && det.admissao;
+    verificar(adm && adm.descricao_demanda === 'RISCO DE SUICÍDIO', 'Descrição da demanda gravada no 1º atendimento (v27)', adm && adm.descricao_demanda);
     verificar(adm && adm.primeiro_no_prazo === 'SIM', '1º atendimento dentro do prazo da admissão', adm && adm.primeiro_no_prazo);
-    verificar(adm && adm.resposta_no_prazo === 'SIM', 'Resposta à solicitação dentro de 24h', adm && adm.resposta_no_prazo);
+    verificar(adm && adm.resposta_no_prazo === 'SIM', 'Resposta à solicitação dentro do prazo (1 dia útil)', adm && adm.resposta_no_prazo);
     verificar(adm && adm.proximo_prazo > hojeIso, 'Próximo retorno calculado', adm && adm.proximo_prazo);
     item = daAdmissao(dados(apiInterconsultas({ situacao: 'RESPONDIDAS' }), 'Gestão: interconsultas respondidas'));
     verificar(item && item.prazos.interconsulta.resultado === 'NO PRAZO', 'Gestão: interconsulta respondida no prazo');
@@ -64,11 +66,16 @@ function testarSistema() {
     verificar(item && item.prazos.retorno.estado === 'PENDENTE' && item.prazos.retorno.prazo === adm.proximo_prazo,
       'Gestão: próximo retorno pela matriz de seguimento');
 
-    det = dados(apiRegistrarAtendimento({ tipo_atendimento: 'BUSCA ATIVA',
-      admissao_id: adm.id, data: hojeIso, hora: horaAgora, publico: 'FAMÍLIA', quantidade: 2, paciente_impossibilitado: 'NÃO'
+    det = dados(apiRegistrarAtendimento({ tipo_atendimento: 'BUSCA ATIVA', justificativa_id: justificativa.id,
+      admissao_id: adm.id, data: hojeIso, hora: horaAgora, publico: 'FAMÍLIA', quantidade: 2
     }), 'Atendimento: registro à família (2 pessoas)');
-    verificar(det && det.atendimentos.some(function (a) { return a.publico === 'FAMÍLIA' && a.conta_prazo === 'NÃO'; }),
-      'Atendimento à família sem paciente impossibilitado não conta para o prazo');
+    verificar(det && det.atendimentos.some(function (a) { return a.publico === 'FAMÍLIA' && a.conta_prazo === 'SIM'; }),
+      'Atendimento à família conta para o prazo (v27)');
+    det = dados(apiRegistrarAtendimento({ tipo_atendimento: 'SEGUIMENTO PSICOLÓGICO', justificativa_id: justificativa.id,
+      admissao_id: adm.id, data: hojeIso, hora: horaAgora, publico: 'PACIENTE E FAMÍLIA', quantidade: 1
+    }), 'Atendimento: registro ao paciente e à família');
+    verificar(det && det.atendimentos.some(function (a) { return a.publico === 'PACIENTE E FAMÍLIA' && a.conta_prazo === 'SIM'; }),
+      'Atendimento ao paciente e à família conta para o prazo (v27)');
 
     dados(apiRegistrarAtividade({ admissao_id: adm.id, data: hojeIso, tipo: 'DISCUSSÃO DE CASO', quantidade: 1 }), 'Atividade assistencial: registro');
 
@@ -93,7 +100,8 @@ function testarSistema() {
       var s = c && c.secoes.filter(function (x) { return x.titulo.indexOf(secao) === 0; })[0];
       return s && s.linhas.filter(function (l) { return l.rotulo.indexOf(rotulo) === 0; })[0];
     };
-    verificar(linha('Atendimentos', 'TOTAL DE PESSOAS') && linha('Atendimentos', 'TOTAL DE PESSOAS').total === 3, 'Compilado: 3 pessoas atendidas');
+    verificar(linha('Atendimentos', 'TOTAL DE PESSOAS') && linha('Atendimentos', 'TOTAL DE PESSOAS').total === 5,
+      'Compilado: 5 pessoas atendidas (paciente, 2 familiares, paciente e 1 familiar)', linha('Atendimentos', 'TOTAL DE PESSOAS') && linha('Atendimentos', 'TOTAL DE PESSOAS').total);
     verificar(linha('Desfechos', 'TOTAL') && linha('Desfechos', 'TOTAL').total === 2, 'Compilado: 2 desfechos');
     verificar(linha('Resposta à solicitação', '% NO PRAZO') && linha('Resposta à solicitação', '% NO PRAZO').total === 1, 'Compilado: resposta à solicitação 100% no prazo');
     dados(apiCompilado({ ano: hojeIso.slice(0, 4), eixo: 'MES', grupo: 'EMPRESA' }), 'Compilado anual (empresa)');

@@ -110,22 +110,22 @@ function montarCompilado(dados, op) {
   var lPac = linhaCompilado('PACIENTE (atendimentos)');
   var lFam = linhaCompilado('FAMÍLIA (pessoas atendidas)');
   var lFamAt = linhaCompilado('Atendimentos à família');
-  var lFamImp = linhaCompilado('… com paciente impossibilitado');
   var lTot = linhaCompilado('TOTAL DE PESSOAS ATENDIDAS');
   lTot.destaque = true;
+  // Cada pessoa atendida conta 1: "PACIENTE E FAMÍLIA" soma o paciente e os familiares (v27).
   atend.forEach(function (a) {
     var c = chave(a.data, a.unidade_id);
-    if (a.publico === 'PACIENTE') {
+    if (atendeuPaciente(a.publico)) {
       acumular(lPac, c, 1);
       acumular(lTot, c, 1);
-    } else {
+    }
+    if (atendeuFamilia(a.publico)) {
       acumular(lFam, c, qtd(a));
       acumular(lFamAt, c, 1);
-      if (a.paciente_impossibilitado === 'SIM') acumular(lFamImp, c, 1);
       acumular(lTot, c, qtd(a));
     }
   });
-  secao('Atendimentos', [lPac, lFam, lFamAt, lFamImp, lTot]);
+  secao('Atendimentos', [lPac, lFam, lFamAt, lTot]);
 
   // 2. Admissões no período (pela data de admissão no hospital)
   var adms = dados.admissoes.filter(function (a) { return aceita(a.data_admissao, a.unidade_id); });
@@ -151,8 +151,8 @@ function montarCompilado(dados, op) {
     ['Solicitação para', function (a) { return a.para_quem; }, PARA_QUEM_SOLICITACAO, solicitacoes.filter(comSolicitacao)],
     ['Descrição da demanda', function (a) { return a.descricao_demanda; }, listas.DESCRICAO_DEMANDA, adms],
     ['Prioridade da demanda (seguimento)', function (a) { return a.prioridade_demanda || 'SEM PRIORIDADE'; },
-      nomesPrioridade(TIPOS_PRIORIDADE.seguimento), adms],
-    ['Necessidade de acompanhamento', function (a) { return a.necessidade_acompanhamento; }, listas.NECESSIDADE_ACOMPANHAMENTO, adms]
+      nomesPrioridade(TIPOS_PRIORIDADE.seguimento), adms]
+    // v27: sem a seção "Necessidade de acompanhamento" (o campo saiu das telas).
   ].forEach(function (d) {
     secao(d[0], distribuicao(d[3], d[1], d[2], (!dados.interconsultas || d[3] === adms) ? chaveAdm : function (a) { return chave(a.data_solicitacao, a.unidade_id); }), { nota: notaServico });
   });
@@ -192,7 +192,7 @@ function montarCompilado(dados, op) {
   rPct.num = rSim;
   rPct.den = [rSim, rNao];
   rPct.destaque = true;
-  var rMedia = linhaCompilado('MÉDIA DE HORAS ÚTEIS ATÉ A RESPOSTA', 'media');
+  var rMedia = linhaCompilado('MÉDIA DE DIAS ÚTEIS ATÉ A RESPOSTA', 'media');
   var mapaResp = { 'SIM': rSim, 'NÃO': rNao, 'EM ANDAMENTO': rAnd, 'NÃO SE APLICA': rNsa, 'SEM PRAZO': rSem };
   // % no prazo por prioridade
   var porPrioridade = {};
@@ -208,8 +208,8 @@ function montarCompilado(dados, op) {
   sols.forEach(function (a) {
     var c = chaveSol(a);
     if (mapaResp[a.resposta_no_prazo]) acumular(mapaResp[a.resposta_no_prazo], c, 1);
-    if (a.horas_resposta !== '' && a.horas_resposta !== undefined && a.resposta_no_prazo !== 'SEM PRAZO') {
-      acumular(rMedia, c, Number(a.horas_resposta));
+    if (a.dias_resposta !== '' && a.dias_resposta !== undefined && a.resposta_no_prazo !== 'SEM PRAZO') {
+      acumular(rMedia, c, Number(a.dias_resposta));
     }
     var pp = porPrioridade[a.prioridade_solicitacao];
     if (pp && a.resposta_no_prazo === 'SIM') acumular(pp.sim, c, 1);
@@ -217,7 +217,7 @@ function montarCompilado(dados, op) {
   });
   var linhasPorPrioridade = ordemPrioridade.map(function (n) { return porPrioridade[n].pct; });
   secao('Resposta à solicitação no prazo da prioridade', [rSim, rNao, rAnd, rNsa, rSem, rPct].concat(linhasPorPrioridade).concat([rMedia]), {
-    nota: [notaServico, 'Horas úteis entre a solicitação e a resposta, sem sábados, domingos e feriados, pela data da solicitação.']
+    nota: [notaServico, 'Prazo em dias úteis pela prioridade (alta 1, moderada 2, baixa 3), sem contar o dia do pedido, sábados, domingos e feriados; atendimento no último dia, em qualquer horário, está no prazo. Pela data da solicitação.']
       .filter(Boolean).join(' ')
   });
 
@@ -235,7 +235,7 @@ function montarCompilado(dados, op) {
     if (a.no_prazo === 'NÃO') acumular(lRetNao, c, 1);
   });
   secao('Retornos no prazo da justificativa', [lRetSim, lRetNao, lRetPct], {
-    nota: 'Atendimentos de acompanhamento que contam para o prazo (paciente, ou família com paciente impossibilitado).'
+    nota: 'Atendimentos de acompanhamento que contam para o prazo (ao paciente, à família ou aos dois).'
   });
 
   // 5. Desfechos no período, pelo histórico: conta todos, inclusive os que foram seguidos de retomada.

@@ -46,6 +46,12 @@ function apiSalvarAcompanhamento(dados) {
   return salvarCamposAdmissao_(dados, CAMPOS_ACOMPANHAMENTO, true, true);
 }
 
+/** Corrige só a descrição da demanda, em qualquer momento da internação (v27). */
+function apiSalvarDescricaoDemanda(dados) {
+  if (!String((dados || {}).descricao_demanda || '').trim()) return { ok: false, erro: 'Selecione a descrição da demanda.' };
+  return salvarCamposAdmissao_(dados, ['descricao_demanda'], true, false);
+}
+
 /** Registra ou corrige o desfecho da admissão escolhida, mantendo seu histórico. */
 function apiSalvarDesfechoAdmissao(dados) {
   return salvarCamposAdmissao_(dados, ['desfecho_id', 'data_desfecho'], true, false);
@@ -62,6 +68,17 @@ function prioridadeDe(registro) {
   if (!registro || !registro.prioridade_id) return null;
   var p = buscarPorId('PRIORIDADES', registro.prioridade_id);
   return p && p.ativo !== 'NÃO' ? p : null;
+}
+
+/**
+ * Prioridade da matriz de atendimento com o prazo em dias úteis (v27: alta 1, moderada 2, baixa 3).
+ * Bancos de antes da v27 guardavam horas (24/48/72): até o "configurar" converter, 24h = 1 dia útil.
+ */
+function prioridadeSolicitacaoEmDias_(p) {
+  if (!p || p.prazo === '' || isNaN(Number(p.prazo))) return p;
+  var n = Number(p.prazo);
+  if (parametro('PRAZO_SOLICITACAO_EM_DIAS', '') !== 'SIM' && n >= 24) n = Math.ceil(n / 24);
+  return Object.assign({}, p, { prazo: String(n) });
 }
 
 /** { justificativa_id: dias úteis } pela prioridade de seguimento de cada justificativa. */
@@ -119,7 +136,7 @@ function recalcularAdmissoes(ids) {
     var daAdmissao = atendimentos.filter(function (a) { return a.admissao_id === id; });
     var r = calcularAdmissao(adm, daAdmissao, Object.assign({ desfechoEncerra: desfechoEncerraAdmissao(adm.desfecho_id) }, op));
     var resposta = calcularResposta(adm, daAdmissao, {
-      prioridade: prioridadeDe(buscarPorId('MOTIVOS_SOLICITACAO', adm.motivo_solicitacao_id)),
+      prioridade: prioridadeSolicitacaoEmDias_(prioridadeDe(buscarPorId('MOTIVOS_SOLICITACAO', adm.motivo_solicitacao_id))),
       tiposComPrazo: tipos,
       feriados: op.feriados,
       agora: momento
@@ -176,7 +193,7 @@ function resumoAdmissao(adm, aux) {
   });
   var destaque = pendentes[0] || solicitacoes[solicitacoes.length - 1];
   adm = Object.assign({}, adm);
-  ['prioridade_solicitacao', 'prazo_resposta', 'momento_resposta', 'horas_resposta', 'resposta_no_prazo'].forEach(function (c) {
+  ['prioridade_solicitacao', 'prazo_resposta', 'momento_resposta', 'dias_resposta', 'horas_resposta', 'resposta_no_prazo'].forEach(function (c) {
     adm[c] = destaque ? destaque[c] : '';
   });
   adm.interconsultas_pendentes = pendentes.length;
@@ -188,10 +205,10 @@ function resumoAdmissao(adm, aux) {
   var justificativa = aux.justificativas[adm.justificativa_id] || {};
   var desfecho = aux.desfechos[adm.desfecho_id] || {};
   var motivo = aux.motivos[adm.motivo_solicitacao_id] || {};
-  // Aguardando resposta à solicitação: o prazo em horas também entra na situação.
+  // Aguardando resposta à solicitação: o prazo dela também entra na situação.
   var aguardandoResposta = pendentes.length > 0;
-  var situacaoResposta = aguardandoResposta ? situacaoPrazoHora(adm.prazo_resposta, aux.agora) : '';
-  var situacaoRetorno = adm.proximo_prazo ? situacaoPrazo(adm.proximo_prazo, aux.hoje) : '';
+  var situacaoResposta = aguardandoResposta ? situacaoPrazo(adm.prazo_resposta, aux.hoje, aux.feriados) : '';
+  var situacaoRetorno = adm.proximo_prazo ? situacaoPrazo(adm.proximo_prazo, aux.hoje, aux.feriados) : '';
   return Object.assign({}, adm, {
     paciente_nome: paciente.nome || '',
     prontuario: paciente.prontuario || '',
@@ -212,7 +229,7 @@ function resumoAdmissao(adm, aux) {
   });
 }
 
-var ORDEM_SITUACAO = { 'ATRASADO': 0, 'VENCE HOJE': 1, 'NO PRAZO': 2, '': 3 };
+var ORDEM_SITUACAO = { 'ATRASADO': 0, 'VENCE HOJE': 1, 'VENCE AMANHÃ': 2, 'NO PRAZO': 3, '': 4 };
 
 /**
  * Admissões filtradas.
@@ -293,7 +310,8 @@ function detalheAdmissao(adm) {
           item.prazo_acompanhamento = prazoClinicoNoHistorico_(adm, a);
           item.interconsultas_respondidas = (respostas[a.id] || []).map(function (i) {
             return { id: i.id, prioridade_solicitacao: i.prioridade_solicitacao, prazo_resposta: i.prazo_resposta,
-              resposta_no_prazo: i.resposta_no_prazo, momento_resposta: i.momento_resposta, horas_resposta: i.horas_resposta };
+              resposta_no_prazo: i.resposta_no_prazo, momento_resposta: i.momento_resposta, dias_resposta: i.dias_resposta,
+              horas_resposta: i.horas_resposta };
           });
         }
         return item;
@@ -487,22 +505,29 @@ function apiRegistrarAtendimento(dados) {
     var hora = normalizarHora(dados.hora);
     if (!hora) throw new Error('Informe a hora do atendimento.');
     if (dataHora(data, hora) > agora()) throw new Error('O atendimento não pode estar no futuro.');
-    if (PUBLICOS_ATENDIMENTO.indexOf(dados.publico) === -1) throw new Error('Escolha se o atendimento foi ao paciente ou à família.');
+    if (PUBLICOS_ATENDIMENTO.indexOf(dados.publico) === -1) throw new Error('Escolha se o atendimento foi ao paciente, à família ou aos dois.');
     if (TIPOS_ATENDIMENTO.indexOf(dados.tipo_atendimento) === -1) throw new Error('Selecione o tipo da solicitação: interconsulta, busca ativa, espontânea ou seguimento psicológico.');
     if (dados.tipo_atendimento === 'INTERCONSULTA' && !dados.interconsulta_id) throw new Error('Selecione a interconsulta respondida.');
     if (dados.tipo_atendimento !== 'INTERCONSULTA' && dados.interconsulta_id) throw new Error('Somente atendimento por interconsulta pode responder a uma solicitação.');
-    var familia = dados.publico === 'FAMÍLIA';
+    // quantidade = número de familiares atendidos (com "PACIENTE E FAMÍLIA", o paciente conta à parte).
+    var familia = atendeuFamilia(dados.publico);
     var quantidade = familia ? inteiroEntre(dados.quantidade, 1, 30, 1) : 1;
     if (quantidade === null) throw new Error('Informe quantos familiares foram atendidos (1 a 30).');
-    var impossibilitado = familia && dados.paciente_impossibilitado === 'SIM' ? 'SIM' : 'NÃO';
     var prof = profissionalDoRegistro(dados.profissional_id, usuario);
     var justificativaId = Object.prototype.hasOwnProperty.call(dados, 'justificativa_id') ? String(dados.justificativa_id || '').trim() : adm.justificativa_id;
     if (justificativaId) {
       var justificativa = buscarPorId('JUSTIFICATIVAS', justificativaId);
       if (!justificativa || justificativa.ativo === 'NÃO') throw new Error('Selecione uma justificativa de acompanhamento válida.');
     }
-    var acompanha = adm.necessidade_acompanhamento && SEM_ACOMPANHAMENTO.indexOf(adm.necessidade_acompanhamento) === -1;
-    if (acompanha && !justificativaId) throw new Error('Selecione a justificativa no registro do atendimento.');
+    // v27: justificativa em todo atendimento ("SEM DEMANDA PARA ACOMPANHAMENTO" quando não houver seguimento).
+    // Só as admissões antigas com necessidade "NÃO" ou "N / A" dispensam.
+    var semAcompanhamento = SEM_ACOMPANHAMENTO.indexOf(adm.necessidade_acompanhamento) !== -1;
+    if (!semAcompanhamento && !justificativaId) throw new Error('Selecione a justificativa no registro do atendimento.');
+    // Descrição da demanda: informada no 1º atendimento (avaliação) e corrigível depois na tela da internação.
+    var descricaoDemanda = String(dados.descricao_demanda || '').trim();
+    if (adm.status === STATUS_ADMISSAO.aguardando && !descricaoDemanda && !adm.descricao_demanda) {
+      throw new Error('Informe a descrição da demanda no 1º atendimento.');
+    }
     var atendimento = {
       admissao_id: adm.id,
       unidade_id: unidadeDoRegistro_(dados, adm, data, hora),
@@ -511,7 +536,7 @@ function apiRegistrarAtendimento(dados) {
       publico: dados.publico,
       tipo_atendimento: dados.tipo_atendimento,
       quantidade: quantidade,
-      paciente_impossibilitado: familia ? impossibilitado : '',
+      paciente_impossibilitado: '',
       profissional_id: prof.id,
       categoria: prof.categoria,
       justificativa_id: justificativaId || '',
@@ -526,9 +551,12 @@ function apiRegistrarAtendimento(dados) {
     var temContatoPosterior = listar('ATENDIMENTOS').some(function (a) {
       return a.admissao_id === adm.id && contaParaPrazo(a) && dataHora(a.data, a.hora) > dataHora(data, hora);
     });
+    var mudancasAdm = {};
     if (contaParaPrazo(atendimento) && !temContatoPosterior && String(adm.justificativa_id || '') !== String(justificativaId || '')) {
-      atualizar('ADMISSOES', adm.id, { justificativa_id: justificativaId || '' });
+      mudancasAdm.justificativa_id = justificativaId || '';
     }
+    if (descricaoDemanda && descricaoDemanda !== String(adm.descricao_demanda || '')) mudancasAdm.descricao_demanda = descricaoDemanda;
+    if (Object.keys(mudancasAdm).length) atualizar('ADMISSOES', adm.id, mudancasAdm);
     if (dados.interconsulta_id) atualizar('INTERCONSULTAS', dados.interconsulta_id, { atendimento_id: salvo.id });
     return detalheAdmissao(recalcularAdmissao(adm.id));
   });

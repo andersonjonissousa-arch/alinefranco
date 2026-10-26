@@ -182,10 +182,10 @@
     return ativos(estado.cad.prioridades).filter(function (p) { return p.tipo === tipo; });
   }
 
-  /** Texto do prazo de uma prioridade: "ALTA · até 24h" ou "MODERADA · até 3 dias úteis (2x por semana ou mais)". */
+  /** Texto do prazo de uma prioridade: "ALTA · até 1 dia útil" ou "MODERADA · até 3 dias úteis (2x por semana ou mais)". */
   function rotuloPrioridade(p) {
     if (!p) return 'sem prazo definido';
-    if (p.tipo === estado.cad.tipos_prioridade.solicitacao) return p.nome + ' · até ' + p.prazo + 'h úteis';
+    if (p.tipo === estado.cad.tipos_prioridade.solicitacao) return p.nome + ' · até ' + textoDias(p.prazo);
     return p.nome + ' · até ' + p.prazo + ' dia(s) útil(eis)' + (p.periodicidade ? ' (' + p.periodicidade + ')' : '');
   }
 
@@ -212,7 +212,9 @@
     return ('0' + d.getHours()).slice(-2) + ':' + ('0' + d.getMinutes()).slice(-2);
   }
 
-  var CLASSE_SITUACAO = { 'ATRASADO': 'selo atrasado', 'VENCE HOJE': 'selo hoje', 'NO PRAZO': 'selo prazo' };
+  var CLASSE_SITUACAO = { 'ATRASADO': 'selo atrasado', 'VENCE HOJE': 'selo hoje', 'VENCE AMANHÃ': 'selo amanha', 'NO PRAZO': 'selo prazo' };
+
+  var ROTULO_PUBLICO = { 'PACIENTE': 'Paciente', 'FAMÍLIA': 'Família', 'PACIENTE E FAMÍLIA': 'Paciente e família' };
 
   function selo(situacao) {
     return situacao ? h('span', { class: CLASSE_SITUACAO[situacao] }, situacao.toLowerCase()) : '';
@@ -266,11 +268,12 @@
       resumo.appendChild(cartaoIndicador(r.interconsultas_pendentes, 'Interconsultas pendentes', '', function () { abrir('gestao', { aba: 'interconsultas' }); }));
       resumo.appendChild(cartaoIndicador(r.atrasados, 'Com prazo atrasado', 'atrasado', function () { abrir('gestao', { aba: 'prazos', pendencia: 'ATRASADOS' }); }));
       resumo.appendChild(cartaoIndicador(r.vencem_hoje, 'Vencem hoje', 'hoje', function () { abrir('gestao', { aba: 'prazos', pendencia: 'PENDENTES' }); }));
+      resumo.appendChild(cartaoIndicador(r.vencem_amanha || 0, 'Vencem amanhã', 'amanha', function () { abrir('gestao', { aba: 'prazos', pendencia: 'PENDENTES' }); }));
       var urgentes = g.itens.filter(function (a) { return a.prazos.proximo && a.prazos.proximo.situacao !== 'NO PRAZO'; });
       lista.textContent = '';
-      lista.appendChild(h('h2', null, 'Para atender hoje'));
+      lista.appendChild(h('h2', null, 'Para atender hoje e amanhã'));
       if (!urgentes.length) {
-        lista.appendChild(h('p', { class: 'suave' }, 'Nenhum paciente com prazo atrasado ou vencendo hoje.'));
+        lista.appendChild(h('p', { class: 'suave' }, 'Nenhum paciente com prazo atrasado ou vencendo hoje ou amanhã.'));
         return;
       }
       lista.appendChild(h('table', null,
@@ -292,31 +295,32 @@
   var filtrosGestao = { setor_id: '', unidade_id: '', termo: '', incluir_encerrados: '', pendencia: '' };
   var filtrosInterconsultas = { situacao: 'PENDENTES', dias: '30', setor_id: '', prioridade: '' };
 
-  /** "faltam 5h", "atrasada há 1d 3h" etc. */
-  function textoHoras(horas) {
-    var h0 = Math.abs(Number(horas) || 0);
-    var dias = Math.floor(h0 / 24);
-    var resto = Math.round(h0 - dias * 24);
-    if (resto === 24) { dias++; resto = 0; }
-    return (dias ? dias + 'd ' : '') + resto + 'h';
+  /** "1 dia útil", "3 dias úteis". */
+  function textoDias(dias) {
+    var n = Math.abs(Number(dias) || 0);
+    return n + (n === 1 ? ' dia útil' : ' dias úteis');
+  }
+
+  /** Prazo só com a data (v27); registros antigos com hora continuam mostrando a hora. */
+  function prazoBr(v) {
+    return v && v.length > 10 ? dataHoraBr(v) : dataBr(v);
   }
 
   /** Célula de um prazo: data e selo da situação (pendente) ou do resultado (cumprido). */
   function celulaPrazo(p, comHora) {
-    var data = function (v) { return comHora ? dataHoraBr(v) : dataBr(v); };
     if (!p.estado) return h('span', { class: 'suave' }, '—');
     if (p.estado === 'SEM PRAZO') return h('span', { class: 'suave' }, 'sem prazo');
     if (p.estado === 'NÃO SE APLICA') return h('span', { class: 'suave' }, 'não se aplica');
     if (p.estado === 'PENDENTE') {
-      return h('div', null, data(p.prazo), ' ', selo(p.situacao),
-        p.horas_restantes !== undefined && p.horas_restantes !== ''
-          ? h('div', { class: 'suave' }, (p.horas_restantes >= 0 ? 'faltam ' + textoHoras(p.horas_restantes) : 'atrasada há ' + textoHoras(p.horas_restantes)) + ' úteis')
+      return h('div', null, prazoBr(p.prazo), ' ', selo(p.situacao),
+        p.dias_restantes !== undefined && p.dias_restantes !== '' && p.dias_restantes !== 0
+          ? h('div', { class: 'suave' }, p.dias_restantes > 0 ? (Number(p.dias_restantes) === 1 ? 'falta ' : 'faltam ') + textoDias(p.dias_restantes) : 'atrasada há ' + textoDias(p.dias_restantes))
           : '');
     }
     var classe = p.resultado === 'NO PRAZO' ? 'selo prazo' : 'selo atrasado';
     var quando = p.realizado ? (comHora ? dataHoraBr(p.realizado) : dataBr(p.realizado)) : 'não realizado';
     return h('div', null, quando, ' ', h('span', { class: classe }, p.resultado.toLowerCase()),
-      p.horas !== undefined && p.horas !== '' ? h('div', { class: 'suave' }, 'em ' + String(p.horas).replace('.', ',') + 'h úteis') : '');
+      p.dias !== undefined && p.dias !== '' ? h('div', { class: 'suave' }, p.dias === 0 ? 'no mesmo dia' : 'em ' + textoDias(p.dias)) : '');
   }
 
   function telaGestao(arg) {
@@ -438,7 +442,7 @@
         lista.textContent = '';
         lista.appendChild(h('p', { class: 'suave' },
           'Prazos de cada paciente: 1º atendimento em até ' + parametroPrazoPrimeiro() + ' dia(s) útil(eis) da admissão, ' +
-          'resposta à interconsulta em horas úteis pela prioridade do motivo, e retorno em dias úteis pela prioridade da justificativa.'));
+          'resposta à interconsulta em dias úteis pela prioridade do motivo, e retorno em dias úteis pela prioridade da justificativa.'));
         if (!g.itens.length) { lista.appendChild(h('p', { class: 'suave' }, 'Nenhum paciente encontrado.')); return; }
         lista.appendChild(h('table', null,
           h('thead', null, h('tr', null, ['Paciente', '1º atendimento', 'Interconsulta', 'Retorno (seguimento)']
@@ -528,7 +532,7 @@
                 a.para_quem === 'FAMILIAR' ? h('div', { class: 'suave' }, 'para ' + [a.familiar_parentesco, a.familiar_nome].filter(Boolean).join(' ').toLowerCase()) : ''),
               h('td', null, a.motivo_nome || '—', h('div', { class: 'suave' }, (i.prioridade || '').toLowerCase())),
               h('td', null, dataHoraBr(dataHoraSolicitacao(a))),
-              h('td', null, h('div', { class: 'suave' }, 'até ' + dataHoraBr(i.prazo)), celulaPrazo(i, true)));
+              h('td', null, i.prazo ? h('div', { class: 'suave' }, 'até ' + prazoBr(i.prazo)) : '', celulaPrazo(i, true)));
           }))));
     }
     form.addEventListener('change', desenhar);
@@ -892,13 +896,13 @@
       h('button', { class: 'btn sec', type: 'button', onclick: function () { abrir('admissoes', { id: a.id }); } }, 'Consultar dados da entrada')));
     main.appendChild(blocoLocalizacao(det));
     main.appendChild(blocoInterconsultas(det));
+    // A descrição da demanda é informada no 1º atendimento e pode ser corrigida depois, a qualquer momento.
+    if (a.status !== st.aguardando) main.appendChild(formularioDescricao(a));
     if (a.status === st.aguardando || a.status === st.acompanhamento) {
-      main.appendChild(formularioAcompanhamento(a));
       main.appendChild(formularioAtendimento(a, det.interconsultas || [], det.transferencias || []));
     } else {
       main.appendChild(h('div', { class: 'cartao' }, h('h2', null, 'Dados do acompanhamento'),
-        info('Descrição da demanda', a.descricao_demanda || '—'),
-        info('Necessidade de acompanhamento', a.necessidade_acompanhamento || '—'),
+        a.necessidade_acompanhamento ? info('Necessidade de acompanhamento (registro antigo)', a.necessidade_acompanhamento) : null,
         info('Justificativa', a.justificativa_nome || '—')));
       if (a.status === st.acompanhamentoEncerrado) main.appendChild(formularioRetomada(a));
       else main.appendChild(h('p', { class: 'suave' }, 'Internação encerrada. Consulte abaixo os registros desta admissão.'));
@@ -1018,23 +1022,21 @@
     return bloco;
   }
 
-  function formularioAcompanhamento(a) {
+  /** Descrição da demanda, corrigível depois do 1º atendimento (v27): só esse campo. */
+  function formularioDescricao(a) {
     var navegacao = estado.navegacao;
-    var bloco = h('details', { class: 'cartao', open: !a.necessidade_acompanhamento },
-      h('summary', null, h('h2', { class: 'inline' }, 'Dados do acompanhamento')));
-    var form = h('form', { class: 'linha' },
-      campo('Descrição da demanda', seletor('descricao_demanda', opcoesLista('DESCRICAO_DEMANDA'), a.descricao_demanda)),
-      campo('Necessidade de acompanhamento', seletor('necessidade_acompanhamento', opcoesLista('NECESSIDADE_ACOMPANHAMENTO'), a.necessidade_acompanhamento)));
-    bloco.appendChild(h('p', { class: 'suave' }, 'Selecione a justificativa ao registrar o atendimento. Ela define o prazo do próximo retorno.'));
-    var botao = h('button', { class: 'btn', type: 'submit' }, 'Salvar acompanhamento');
+    var descricao = seletor('descricao_demanda', opcoesLista('DESCRICAO_DEMANDA'), a.descricao_demanda || '');
+    descricao.required = true;
+    var form = h('form', { class: 'linha' }, campo('Descrição da demanda', descricao));
+    var botao = h('button', { class: 'btn sec', type: 'submit' }, 'Salvar descrição');
     form.appendChild(botao);
     form.addEventListener('submit', function (ev) {
       ev.preventDefault();
-      enviar(botao, chamar('apiSalvarAcompanhamento', Object.assign(lerFormulario(form), { id: a.id })), 'Acompanhamento salvo.')
+      enviar(botao, chamar('apiSalvarDescricaoDemanda', Object.assign(lerFormulario(form), { id: a.id })), 'Descrição da demanda salva.')
         .then(function (det) { if (navegacao === estado.navegacao) desenharAtendimento(det); }).catch(function () {});
     });
-    bloco.appendChild(form);
-    return bloco;
+    return h('div', { class: 'cartao' }, h('h2', null, 'Descrição da demanda'),
+      h('p', { class: 'suave' }, 'Corrija se houve erro no preenchimento ou se a demanda mudou durante a internação.'), form);
   }
 
   function formularioDesfecho(a) {
@@ -1076,13 +1078,16 @@
     'SEM PRAZO': ['sem prazo', 'selo']
   };
 
-  /** Resumo da resposta à solicitação: prioridade, prazo em horas e quando foi respondida. */
+  /** Resumo da resposta à solicitação: prioridade, prazo em dias úteis e quando foi respondida. */
   function infoResposta(a) {
     var r = ROTULO_RESPOSTA[a.resposta_no_prazo] || ['', 'selo'];
     var partes = [];
     if (a.prioridade_solicitacao) partes.push(a.prioridade_solicitacao.toLowerCase());
-    if (a.prazo_resposta) partes.push('até ' + dataHoraBr(a.prazo_resposta));
-    if (a.momento_resposta) partes.push('respondida ' + dataHoraBr(a.momento_resposta) + ' (' + String(a.horas_resposta).replace('.', ',') + 'h úteis)');
+    if (a.prazo_resposta) partes.push('até ' + prazoBr(a.prazo_resposta));
+    if (a.momento_resposta) {
+      var dias = a.dias_resposta === '' || a.dias_resposta === undefined ? '' : a.dias_resposta === 0 ? ' (no mesmo dia)' : ' (em ' + textoDias(a.dias_resposta) + ')';
+      partes.push('respondida ' + dataHoraBr(a.momento_resposta) + dias);
+    }
     if (a.para_quem === 'FAMILIAR') partes.push('para ' + [a.familiar_parentesco, a.familiar_nome].filter(Boolean).join(' ').toLowerCase());
     return h('span', null, partes.join(' · ') + ' ', h('span', { class: r[1] }, r[0]));
   }
@@ -1091,7 +1096,6 @@
     var navegacao = estado.navegacao;
     var form = h('form', { class: 'linha' },
       campo('Data da retomada', h('input', { name: 'data', type: 'date', value: estado.cad.hoje, max: estado.cad.hoje, required: true })),
-      campo('Necessidade de acompanhamento', seletor('necessidade_acompanhamento', opcoesLista('NECESSIDADE_ACOMPANHAMENTO'), a.necessidade_acompanhamento)),
       campo('Justificativa', seletor('justificativa_id', opcoesJustificativas(), a.justificativa_id)));
     var botao = h('button', { class: 'btn', type: 'submit' }, 'Retomar acompanhamento');
     form.appendChild(botao);
@@ -1110,18 +1114,22 @@
   function formularioAtendimento(a, interconsultas, transferencias) {
     var navegacao = estado.navegacao;
     var publico = seletor('publico', estado.cad.publicos.map(function (p) {
-      return { valor: p, rotulo: p === 'PACIENTE' ? 'Paciente' : 'Família' };
+      return { valor: p, rotulo: ROTULO_PUBLICO[p] || p };
     }), 'PACIENTE', false);
     var quantos = campo('Quantos familiares', h('input', { name: 'quantidade', type: 'number', min: 1, max: 30, value: 1 }));
-    var impossibilitado = campo('Paciente impossibilitado de ser atendido?', seletor('paciente_impossibilitado',
-      [{ valor: 'NÃO', rotulo: 'Não' }, { valor: 'SIM', rotulo: 'Sim — conta para o prazo do paciente' }], 'NÃO', false));
+    // Descrição da demanda: só no 1º atendimento (avaliação). Antes ficava no bloco "Dados do acompanhamento".
+    var primeiroAtendimento = a.status === estado.cad.status_admissao.aguardando;
+    var demanda = seletor('descricao_demanda', opcoesLista('DESCRICAO_DEMANDA'), a.descricao_demanda || '');
+    demanda.required = primeiroAtendimento;
+    var campoDemanda = primeiroAtendimento ? campo('Descrição da demanda', demanda) : null;
     var tipo = seletor('tipo_atendimento', estado.cad.tipos_atendimento, '');
     tipo.required = true;
     var interconsulta = seletor('interconsulta_id', (interconsultas || []).filter(function (i) { return i.pendente; })
       .map(function (i) { return { valor: i.id, rotulo: dataHoraBr(dataHoraSolicitacao(i)) + ' · ' + i.motivo_nome + ' · ' + (i.prioridade_solicitacao || 'sem prioridade') }; }), '', 'Selecione a interconsulta');
     var campoInterconsulta = campo('Interconsulta respondida', interconsulta);
     var justificativa = seletor('justificativa_id', opcoesJustificativas(), a.justificativa_id || '');
-    justificativa.required = Boolean(a.necessidade_acompanhamento && ['NÃO', 'N / A'].indexOf(a.necessidade_acompanhamento) === -1);
+    // Obrigatória em todo atendimento; sem seguimento, escolher "SEM DEMANDA PARA ACOMPANHAMENTO".
+    justificativa.required = ['NÃO', 'N / A'].indexOf(a.necessidade_acompanhamento) === -1;
     var unidade = seletor('unidade_id', opcoesUnidades(), a.unidade_atual_id || a.unidade_id, false);
     var dataAtendimento = h('input', { name: 'data', type: 'date', value: estado.cad.hoje, max: estado.cad.hoje, required: true });
     var horaAtendimento = h('input', { name: 'hora', type: 'time', value: horaAgora(), required: true });
@@ -1147,15 +1155,13 @@
       campo('Data', dataAtendimento),
       campo('Hora', horaAtendimento),
       campo('Unidade do atendimento', unidade),
-      campo('Atendimento a', publico), quantos, impossibilitado,
-      campo('Tipo da solicitação', tipo), campoInterconsulta,
+      campo('Atendimento a', publico), quantos,
+      campo('Tipo da solicitação', tipo), campoInterconsulta, campoDemanda,
       campo('Justificativa do acompanhamento / próximo retorno', justificativa),
       campo('Profissional', seletor('profissional_id', opcoesProfissionais(), estado.usuario.id, false)),
       campo('Observação', h('input', { name: 'observacao', placeholder: 'Opcional' })));
     function ajustar() {
-      var familia = publico.value === 'FAMÍLIA';
-      quantos.hidden = !familia;
-      impossibilitado.hidden = !familia;
+      quantos.hidden = publico.value === 'PACIENTE';
     }
     publico.addEventListener('change', ajustar);
     ajustar();
@@ -1191,13 +1197,13 @@
       h('thead', null, h('tr', null, ['Data', 'Unidade', 'Tipo da solicitação', 'A quem', 'Profissional', 'Justificativa', 'Interconsulta — prazo e resultado', 'Primeiro atendimento / retorno — prazo e resultado', 'Observação', '']
         .map(function (t) { return h('th', null, t); }))),
       h('tbody', null, det.atendimentos.map(function (at) {
-        var familia = at.publico === 'FAMÍLIA';
+        var familia = at.publico === 'FAMÍLIA' || at.publico === 'PACIENTE E FAMÍLIA';
         return h('tr', null,
           h('td', null, dataBr(at.data), at.hora ? h('div', { class: 'suave' }, at.hora) : ''),
           h('td', null, at.unidade_nome || '—'),
           h('td', null, at.tipo_atendimento || 'Não informado'),
-          h('td', null, familia ? 'Família · ' + at.quantidade + ' pessoa(s)' : 'Paciente',
-            familia && at.paciente_impossibilitado === 'SIM' ? h('div', { class: 'suave' }, 'paciente impossibilitado') : ''),
+          h('td', null, at.publico === 'PACIENTE E FAMÍLIA' ? 'Paciente e família · ' + at.quantidade + ' familiar(es)' :
+            familia ? 'Família · ' + at.quantidade + ' pessoa(s)' : 'Paciente'),
           h('td', null, at.profissional_nome, at.categoria !== 'PROFISSIONAL DA EMPRESA'
             ? h('div', { class: 'suave' }, ROTULO_CATEGORIA[at.categoria] || at.categoria) : ''),
           h('td', null, at.justificativa_nome || '—'),
@@ -1221,7 +1227,7 @@
     return h('div', null, itens.map(function (i) {
       return h('div', null,
         h('div', { class: 'suave' }, 'Solicitação ' + i.id + (i.prioridade_solicitacao ? ' · ' + i.prioridade_solicitacao.toLowerCase() : '')),
-        i.prazo_resposta ? h('div', null, 'Até ' + dataHoraBr(i.prazo_resposta)) : '',
+        i.prazo_resposta ? h('div', null, 'Até ' + prazoBr(i.prazo_resposta)) : '',
         resultadoPrazoNoHistorico(i.resposta_no_prazo));
     }));
   }
@@ -1736,7 +1742,7 @@
 
   function cadMotivos(alvo, aoSalvar) {
     alvo.appendChild(h('p', { class: 'suave' },
-      'Matriz de atendimento: cada motivo da solicitação tem uma prioridade, e o prazo de resposta (em horas úteis, sem sábados, domingos e feriados) é o da prioridade. ' +
+      'Matriz de atendimento: cada motivo da solicitação tem uma prioridade, e o prazo de resposta (em dias úteis, sem contar o dia do pedido, sábados, domingos e feriados) é o da prioridade. ' +
       'Motivo sem prioridade fica sem prazo até ser definido.'));
     secaoCadastro(alvo, {
       api: 'apiSalvarMotivo',
@@ -1757,7 +1763,7 @@
 
   function cadPrioridades(alvo, aoSalvar) {
     var tipos = estado.cad.tipos_prioridade;
-    [[tipos.solicitacao, 'Prioridades da solicitação (matriz de atendimento)', 'Prazo em horas úteis', 'horas úteis a partir da solicitação; não contam sábados, domingos e feriados'],
+    [[tipos.solicitacao, 'Prioridades da solicitação (matriz de atendimento)', 'Prazo em dias úteis', 'dias úteis a partir da solicitação; não contam o dia do pedido, sábados, domingos e feriados, e o prazo vence no fim do dia'],
       [tipos.seguimento, 'Prioridades do seguimento (matriz de seguimento)', 'Prazo em dias úteis', 'dias úteis entre um atendimento e o próximo']]
       .forEach(function (t) {
         var bloco = h('div');
@@ -1833,7 +1839,7 @@
         enviar(botaoT, chamar('apiSalvarParametro', { id: t.id, valor: valor })).then(aoSalvar).catch(function () {});
       });
       alvo.appendChild(h('div', { class: 'cartao' }, h('h2', null, 'Prazo de resposta à solicitação'),
-        h('p', { class: 'suave' }, 'Tipos de solicitação que têm prazo de resposta pela matriz de atendimento (24h, 48h, 72h úteis…).'),
+        h('p', { class: 'suave' }, 'Tipos de solicitação que têm prazo de resposta pela matriz de atendimento (1, 2 ou 3 dias úteis…).'),
         h('div', { class: 'linha' }, caixas, botaoT)));
     }
   }

@@ -81,12 +81,13 @@ function dadosDeGestao_(filtros) {
     });
     itens.sort(ordemUrgencia);
 
-    var resumo = { pacientes: itens.length, aguardando_primeiro: 0, interconsultas_pendentes: 0, atrasados: 0, vencem_hoje: 0 };
+    var resumo = { pacientes: itens.length, aguardando_primeiro: 0, interconsultas_pendentes: 0, atrasados: 0, vencem_hoje: 0, vencem_amanha: 0 };
     itens.forEach(function (a) {
       if (a.prazos.primeiro.estado === 'PENDENTE') resumo.aguardando_primeiro++;
       resumo.interconsultas_pendentes += a.interconsultas_pendentes || 0;
       if (a.prazos.proximo && a.prazos.proximo.situacao === 'ATRASADO') resumo.atrasados++;
       if (a.prazos.proximo && a.prazos.proximo.situacao === 'VENCE HOJE') resumo.vencem_hoje++;
+      if (a.prazos.proximo && a.prazos.proximo.situacao === 'VENCE AMANHÃ') resumo.vencem_amanha++;
     });
     return { itens: itens, resumo: resumo, hoje: aux.hoje, agora: aux.agora };
 }

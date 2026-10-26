@@ -123,6 +123,12 @@ function formularioCom(tela, nome) {
   assert.ok(form, 'Formulário com campo ' + nome + ' está disponível');
   return form;
 }
+function formularioDaDescricao(tela) {
+  const form = tela.todos().find(el => el.tagName === 'FORM' && el.elements.some(c => c.name === 'descricao_demanda') &&
+    !el.elements.some(c => c.name === 'publico'));
+  assert.ok(form, 'Formulário só da descrição da demanda está disponível');
+  return form;
+}
 function preencher(form, nome, valor) {
   const campo = form.elements.find(el => el.name === nome);
   assert.ok(campo, 'Campo ' + nome + ' existe');
@@ -183,23 +189,33 @@ test('registro usa rótulo Tipo da solicitação e permite selecionar seguimento
   assert.equal(tela.pedidos[0].args[0].tipo_atendimento, 'SEGUIMENTO PSICOLÓGICO');
 });
 
-test('justificativa sai de Dados do acompanhamento e é enviada no registro do primeiro atendimento', () => {
+test('1º atendimento: descrição da demanda e justificativa vão no próprio registro (v27)', () => {
   const tela = carregar();
-  tela.ctx.desenharAtendimento(detalhe({ justificativa_id: '' }));
-  const clinico = formularioCom(tela, 'descricao_demanda');
-  assert.equal(clinico.elements.some(el => el.name === 'justificativa_id'), false);
+  tela.ctx.desenharAtendimento(detalhe({ justificativa_id: '', descricao_demanda: '' }));
+  assert.doesNotMatch(tela.conteudo.textContent, /Dados do acompanhamento/);
+  assert.equal(tela.todos().some(el => el.name === 'paciente_impossibilitado'), false);
+  assert.equal(tela.todos().filter(el => el.tagName === 'FORM' && el.elements.some(c => c.name === 'descricao_demanda')).length, 1);
   const form = formularioCom(tela, 'publico');
+  const descricao = form.elements.find(el => el.name === 'descricao_demanda');
+  assert.ok(descricao);
+  assert.equal(descricao.required, true);
   const justificativa = form.elements.find(el => el.name === 'justificativa_id');
   assert.ok(justificativa);
   assert.equal(justificativa.required, true);
   assert.match(tela.conteudo.textContent, /Registrar 1º atendimento/);
+  preencher(form, 'descricao_demanda', 'DEMANDA TESTE');
   preencher(form, 'justificativa_id', 'j1');
   preencher(form, 'tipo_atendimento', 'BUSCA ATIVA');
   form.emitir('submit');
   assert.equal(tela.pedidos[0].nome, 'apiRegistrarAtendimento');
   assert.equal(tela.pedidos[0].args[0].justificativa_id, 'j1');
+  assert.equal(tela.pedidos[0].args[0].descricao_demanda, 'DEMANDA TESTE');
+  // Depois do 1º atendimento, o registro não pede mais a descrição; ela fica num formulário próprio.
   tela.ctx.desenharAtendimento(detalhe({ status: status.acompanhamento }));
-  assert.equal(formularioCom(tela, 'publico').elements.find(el => el.name === 'justificativa_id').value, 'j1');
+  const registro = formularioCom(tela, 'publico');
+  assert.equal(registro.elements.some(el => el.name === 'descricao_demanda'), false);
+  assert.equal(registro.elements.find(el => el.name === 'justificativa_id').value, 'j1');
+  assert.equal(formularioDaDescricao(tela).elements.find(el => el.name === 'descricao_demanda').value, 'DEMANDA TESTE');
 });
 
 test('localização: alteração de setor/unidade envia transferência e mantém unidade da admissão no cabeçalho', async () => {
@@ -347,20 +363,19 @@ test('atendimentos: lista inclui aguardando avaliação e marca hoje pela entrad
   assert.deepEqual(tela.navegacao.at(-1), { nome: 'atendimentos', arg: { id: 'adm-hoje' } });
 });
 
-test('atendimentos: salvar dados clínicos e registrar contato preserva a admissão selecionada', async () => {
+test('atendimentos: corrigir a descrição da demanda e registrar contato preserva a admissão selecionada', async () => {
   const tela = carregar();
-  tela.ctx.desenharAtendimento(detalhe());
-  const clinico = formularioCom(tela, 'descricao_demanda');
-  preencher(clinico, 'descricao_demanda', 'DEMANDA TESTE');
-  clinico.emitir('submit');
-  assert.equal(tela.pedidos[0].nome, 'apiSalvarAcompanhamento');
-  assert.equal(tela.pedidos[0].args[0].id, 'adm1');
-  assert.equal('data_admissao' in tela.pedidos[0].args[0], false);
-  await tela.responder(0, detalhe());
+  tela.ctx.desenharAtendimento(detalhe({ status: status.acompanhamento }));
+  const descricao = formularioDaDescricao(tela);
+  assert.equal(descricao.elements.length, 2, 'Só o campo da descrição e o botão');
+  preencher(descricao, 'descricao_demanda', 'DEMANDA TESTE');
+  descricao.emitir('submit');
+  assert.equal(tela.pedidos[0].nome, 'apiSalvarDescricaoDemanda');
+  assert.deepEqual({ ...tela.pedidos[0].args[0] }, { descricao_demanda: 'DEMANDA TESTE', id: 'adm1' });
+  await tela.responder(0, detalhe({ status: status.acompanhamento }));
   const registro = formularioCom(tela, 'publico');
   preencher(registro, 'publico', 'FAMÍLIA').emitir('change');
   preencher(registro, 'quantidade', '3');
-  preencher(registro, 'paciente_impossibilitado', 'SIM');
   registro.emitir('submit');
   assert.equal(tela.pedidos[1].nome, 'apiRegistrarAtendimento');
   assert.equal(tela.pedidos[1].args[0].admissao_id, 'adm1');
@@ -369,7 +384,7 @@ test('atendimentos: salvar dados clínicos e registrar contato preserva a admiss
   salvo.atendimentos.push({ id: 'at1', data: cad.hoje, publico: 'FAMÍLIA', quantidade: 3, categoria: 'PROFISSIONAL DA EMPRESA', conta_prazo: 'SIM', profissional_nome: 'PROFISSIONAL TESTE' });
   await tela.responder(1, salvo);
   assert.match(tela.conteudo.textContent, /Atendimentos \(1\)/);
-  formularioCom(tela, 'descricao_demanda');
+  formularioDaDescricao(tela);
   assert.equal(tela.todos().some(el => el.name === 'data_admissao'), false);
 });
 
@@ -386,8 +401,8 @@ test('atendimentos: desfecho próprio encerra registros e mantém o histórico d
   encerrado.desfechos.push({ id: 'hist1', data: cad.hoje, desfecho_nome: 'ALTA', encerra_admissao: 'SIM', vigente: 'SIM', unidade_nome: 'UNIDADE TESTE' });
   await tela.responder(0, encerrado);
   assert.equal(tela.todos().some(el => el.name === 'publico'), false);
-  assert.equal(tela.todos().some(el => el.name === 'descricao_demanda'), false);
   assert.equal(tela.todos().some(el => el.name === 'tipo'), false);
+  formularioDaDescricao(tela); // a descrição continua corrigível depois da saída do hospital
   assert.match(tela.conteudo.textContent, /Desfechos desta admissão/);
   assert.match(tela.conteudo.textContent, /ALTA/);
 });
@@ -471,7 +486,8 @@ test('atendimentos: retomada reabre trabalho diário na mesma admissão hospital
   const tela = carregar();
   tela.ctx.desenharAtendimento(detalhe({ status: status.acompanhamentoEncerrado, desfecho_nome: 'ALTA PSICOLÓGICA', data_desfecho: '2026-10-20' }));
   assert.equal(tela.todos().some(el => el.name === 'publico'), false);
-  const form = formularioCom(tela, 'necessidade_acompanhamento');
+  assert.equal(tela.todos().some(el => el.name === 'necessidade_acompanhamento'), false);
+  const form = formularioCom(tela, 'justificativa_id');
   form.emitir('submit');
   assert.equal(tela.pedidos[0].nome, 'apiRetomarAcompanhamento');
   assert.equal(tela.pedidos[0].args[0].id, 'adm1');
@@ -486,16 +502,16 @@ test('atendimentos: salvar depois de mudar de tela não substitui a lista de adm
   tela.usarNavegacaoReal();
   tela.ctx.abrir('atendimentos', { id: 'adm1' });
   assert.equal(tela.pedidos[0].nome, 'apiObterAdmissao');
-  await tela.responder(0, detalhe());
-  formularioCom(tela, 'descricao_demanda').emitir('submit');
-  assert.equal(tela.pedidos[1].nome, 'apiSalvarAcompanhamento');
+  await tela.responder(0, detalhe({ status: status.acompanhamento }));
+  formularioDaDescricao(tela).emitir('submit');
+  assert.equal(tela.pedidos[1].nome, 'apiSalvarDescricaoDemanda');
 
   // O usuário continua trabalhando enquanto a gravação ainda está pendente.
   tela.ctx.abrir('admissoes');
   assert.equal(tela.pedidos[2].nome, 'apiListarAdmissoes');
   await tela.responder(2, [detalhe().admissao]);
   const listaAtual = tela.conteudo.textContent;
-  await tela.responder(1, detalhe({ descricao_demanda: 'DEMANDA ATUALIZADA' }));
+  await tela.responder(1, detalhe({ status: status.acompanhamento, descricao_demanda: 'DEMANDA ATUALIZADA' }));
 
   assert.equal(tela.ctx.estado.tela, 'admissoes');
   assert.deepEqual(tela.navegacao.at(-1), { nome: 'admissoes', arg: undefined });

@@ -16,6 +16,18 @@ function prepararInterconsultas_() {
   });
 }
 
+/**
+ * Prazo de resposta da solicitação em dias úteis. Desde a v27 fica em prazo_dias_uteis; as gravadas
+ * antes guardavam horas em prazo_horas (24h = 1 dia útil).
+ */
+function prazoDiasDaInterconsulta_(i) {
+  if (i.prazo_dias_uteis !== '' && i.prazo_dias_uteis !== undefined) return i.prazo_dias_uteis;
+  if (i.prazo_horas !== '' && i.prazo_horas !== undefined && !isNaN(Number(i.prazo_horas))) {
+    return String(Math.max(1, Math.ceil(Number(i.prazo_horas) / 24)));
+  }
+  return '';
+}
+
 /** Resposta calculada por solicitação; somente registros antigos mantêm a associação automática. */
 function listarInterconsultas_() {
   prepararInterconsultas_();
@@ -36,13 +48,13 @@ function listarInterconsultas_() {
       (resposta && resposta.admissao_id === adm.id ? [resposta] : []);
     var encerrada = adm.status === STATUS_ADMISSAO.encerrada || (legado && Boolean(adm.desfecho_id));
     var contexto = Object.assign({}, i, { data_desfecho: encerrada ? adm.data_desfecho : '' });
-    var prioridade = legado ? prioridadeDe(buscarPorId('MOTIVOS_SOLICITACAO', i.motivo_solicitacao_id)) :
-      (i.tem_prazo === 'SIM' ? { nome: i.prioridade_solicitacao, prazo: i.prazo_horas } : null);
+    var prioridade = legado ? prioridadeSolicitacaoEmDias_(prioridadeDe(buscarPorId('MOTIVOS_SOLICITACAO', i.motivo_solicitacao_id))) :
+      (i.tem_prazo === 'SIM' ? { nome: i.prioridade_solicitacao, prazo: prazoDiasDaInterconsulta_(i) } : null);
     Object.assign(i, calcularResposta(contexto, candidatos, {
       prioridade: prioridade, tiposComPrazo: legado ? tiposSolicitacaoComPrazo() : (i.tem_prazo === 'SIM' ? [i.tipo_solicitacao] : []), agora: agora(), feriados: feriados
     }));
     var respondidoPor = i.momento_resposta ? candidatos.filter(function (a) {
-      var vale = i.para_quem === 'FAMILIAR' ? (a.publico === 'PACIENTE' || a.publico === 'FAMÍLIA') : contaParaPrazo(a);
+      var vale = contaParaPrazo(a);
       return vale && dataHora(a.data, a.hora) === i.momento_resposta;
     })[0] : null;
     i.atendimento_resposta_id = respondidoPor ? respondidoPor.id : '';
@@ -54,7 +66,7 @@ function listarInterconsultas_() {
       status: encerrada ? STATUS_ADMISSAO.encerrada : STATUS_ADMISSAO.aguardando, desfecho_id: encerrada ? adm.desfecho_id : ''
     }), hoje(), agora(), feriados).interconsulta;
     if (i.momento_resposta && i.resposta_no_prazo === 'SEM PRAZO') {
-      i.prazo = { estado: 'CUMPRIDO', realizado: i.momento_resposta, horas: i.horas_resposta, resultado: 'SEM PRAZO' };
+      i.prazo = { estado: 'CUMPRIDO', realizado: i.momento_resposta, dias: i.dias_resposta, resultado: 'SEM PRAZO' };
     }
     return i;
   }).filter(Boolean);
@@ -80,14 +92,14 @@ function apiRegistrarInterconsulta(dados) {
     var nome = familiar ? formatarNome(dados.familiar_nome || '') : '';
     var parentesco = familiar ? formatarNome(dados.familiar_parentesco || '') : '';
     if (familiar && !nome && !parentesco) throw new Error('Informe o nome ou o parentesco do familiar.');
-    var prioridade = prioridadeDe(motivo);
+    var prioridade = prioridadeSolicitacaoEmDias_(prioridadeDe(motivo));
     var temPrazo = prioridade && prioridade.prazo !== '' && tiposSolicitacaoComPrazo().indexOf('EQUIPE') !== -1;
     prepararInterconsultas_();
     inserir('INTERCONSULTAS', {
       admissao_id: adm.id, unidade_id: unidadeNaData_(adm, data, hora), tipo_solicitacao: 'EQUIPE',
       motivo_solicitacao_id: motivo.id, data_solicitacao: data, hora_solicitacao: hora,
       para_quem: dados.para_quem, familiar_nome: nome, familiar_parentesco: parentesco,
-      prioridade_solicitacao: prioridade ? prioridade.nome : '', prazo_horas: temPrazo ? prioridade.prazo : '',
+      prioridade_solicitacao: prioridade ? prioridade.nome : '', prazo_horas: '', prazo_dias_uteis: temPrazo ? prioridade.prazo : '',
       tem_prazo: temPrazo ? 'SIM' : 'NÃO', origem: 'SOLICITAÇÃO', observacoes: String(dados.observacoes || '').trim(), criado_por: usuario.id
     });
     return detalheAdmissao(adm);
@@ -101,9 +113,7 @@ function validarRespostaInterconsulta_(id, atendimento) {
   if (dataHora(atendimento.data, atendimento.hora) < dataHora(i.data_solicitacao, i.hora_solicitacao)) {
     throw new Error('O atendimento não pode ser antes da solicitação.');
   }
-  if (i.para_quem !== 'FAMILIAR' && !contaParaPrazo(atendimento)) {
-    throw new Error('Este atendimento à família não responde à solicitação do paciente.');
-  }
+  if (!contaParaPrazo(atendimento)) throw new Error('Atendimento sem público informado.');
   return i;
 }
 
@@ -115,9 +125,9 @@ function apiResponderInterconsulta(dados) {
     var i = validarRespostaInterconsulta_(dados.id, atendimento);
     atualizar('ATENDIMENTOS', atendimento.id, { tipo_atendimento: 'INTERCONSULTA' });
     atualizar('INTERCONSULTAS', i.id, { atendimento_id: atendimento.id, origem: 'SOLICITAÇÃO',
-      tem_prazo: i.prazo_resposta ? 'SIM' : 'NÃO', prazo_horas: i.prazo_resposta ?
-        (i.prazo_horas !== '' && i.prazo_horas !== undefined ? i.prazo_horas :
-          horasUteisEntre(dataHora(i.data_solicitacao, i.hora_solicitacao), i.prazo_resposta, conjuntoFeriados(listar('FERIADOS')))) : '',
+      tem_prazo: i.prazo_resposta ? 'SIM' : 'NÃO', prazo_dias_uteis: i.prazo_resposta ?
+        (prazoDiasDaInterconsulta_(i) !== '' ? prazoDiasDaInterconsulta_(i) :
+          diasUteisEntre(i.data_solicitacao, i.prazo_resposta, conjuntoFeriados(listar('FERIADOS')))) : '',
       prioridade_solicitacao: i.prioridade_solicitacao });
     return detalheAdmissao(buscarPorId('ADMISSOES', i.admissao_id));
   });

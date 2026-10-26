@@ -240,7 +240,7 @@ function apiSalvarMotivo(dados) {
   });
 }
 
-/** Prioridade de solicitação (prazo em horas) ou de seguimento (prazo em dias úteis). */
+/** Prioridade de solicitação ou de seguimento; as duas com prazo em dias úteis (v27). */
 function apiSalvarPrioridade(dados) {
   return responderGravando(function () {
     exigirCoordenacao();
@@ -250,7 +250,7 @@ function apiSalvarPrioridade(dados) {
     if (tipos.indexOf(tipo) === -1) throw new Error('Escolha se a prioridade é de solicitação ou de seguimento.');
     var prazo = String(dados.prazo === undefined ? '' : dados.prazo).trim();
     if (!/^\d+$/.test(prazo) || Number(prazo) < 1) {
-      throw new Error(tipo === TIPOS_PRIORIDADE.solicitacao ? 'O prazo deve ser um número inteiro de horas.' : 'O prazo deve ser um número inteiro de dias úteis.');
+      throw new Error('O prazo deve ser um número inteiro de dias úteis.');
     }
     var item = {
       tipo: tipo,

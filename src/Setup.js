@@ -20,7 +20,10 @@ function configurarComTrava() {
   semearFeriados();
   semearDesfechos();
   semearParametros();
+  converterPrazosSolicitacaoEmDias();
   semearCoordenacao();
+  // Aplica as regras da versão atual aos prazos das admissões em andamento.
+  recalcularAdmissoesAbertas();
   Logger.log('Banco pronto: ' + banco.getUrl());
   return banco.getUrl();
 }
@@ -111,6 +114,14 @@ function semearMatrizes() {
       inserir('JUSTIFICATIVAS', { nome: j[0], prioridade_id: idPrioridade(TIPOS_PRIORIDADE.seguimento, j[1]), ordem: i + 1, ativo: 'SIM' });
     });
   }
+  var justificativas = listar('JUSTIFICATIVAS');
+  JUSTIFICATIVAS_GARANTIDAS.forEach(function (j) {
+    var existe = justificativas.some(function (x) { return normalizarTexto(x.nome) === normalizarTexto(j[0]); });
+    if (!existe) {
+      inserir('JUSTIFICATIVAS', { nome: j[0], prioridade_id: idPrioridade(TIPOS_PRIORIDADE.seguimento, j[1]),
+        ordem: justificativas.length + 1, ativo: 'SIM' });
+    }
+  });
 }
 
 function semearFeriados() {
@@ -126,6 +137,25 @@ function semearDesfechos() {
 }
 
 /** Parâmetros que faltam são criados; os existentes não são alterados. */
+/**
+ * v27: o prazo da interconsulta passou de horas úteis (24/48/72) para dias úteis (1/2/3).
+ * Converte uma única vez as prioridades da matriz de atendimento de bancos anteriores e marca o
+ * parâmetro PRAZO_SOLICITACAO_EM_DIAS; prioridades já em dias (menos de 24) não mudam.
+ */
+function converterPrazosSolicitacaoEmDias() {
+  if (parametro('PRAZO_SOLICITACAO_EM_DIAS', '') === 'SIM') return;
+  listar('PRIORIDADES').filter(function (p) { return p.tipo === TIPOS_PRIORIDADE.solicitacao; }).forEach(function (p) {
+    var n = Number(p.prazo);
+    if (p.prazo === '' || isNaN(n) || n < 24) return;
+    var dias = Math.ceil(n / 24);
+    var campos = { prazo: String(dias) };
+    if (/\dh/.test(String(p.periodicidade))) campos.periodicidade = 'Atender em até ' + dias + (dias === 1 ? ' dia útil' : ' dias úteis');
+    atualizar('PRIORIDADES', p.id, campos);
+  });
+  inserir('PARAMETROS', { chave: 'PRAZO_SOLICITACAO_EM_DIAS', valor: 'SIM',
+    descricao: 'O prazo das interconsultas está em dias úteis (v27). Não altere.' });
+}
+
 function semearParametros() {
   PARAMETROS_INICIAIS.forEach(function (p) {
     var existe = listar('PARAMETROS').some(function (x) { return x.chave === p[0]; });

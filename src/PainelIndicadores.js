@@ -138,7 +138,7 @@ function montarPainelIndicadores(dados, op) {
   }
   return { mes: mes, agora: agoraDh, inicio_primeiro: op.inicioPrimeiro, dias_primeiro: op.diasPrimeiro,
     primeiro: indicador(primeiro, 'Admissões no mês selecionado. Indicador válido para entradas a partir de ' + op.inicioPrimeiro + '.'),
-    interconsultas: indicador(interconsultas, 'Solicitações feitas no mês selecionado. Prazo em horas úteis, excluindo sábados, domingos e feriados, pela prioridade de cada solicitação.'),
+    interconsultas: indicador(interconsultas, 'Solicitações feitas no mês selecionado. Prazo em dias úteis pela prioridade de cada solicitação (alta 1, moderada 2, baixa 3), sem contar o dia do pedido, sábados, domingos e feriados; vence no fim do dia.'),
     acompanhamento: indicador(retornos, 'Retornos cujo prazo vence no mês selecionado, em dias úteis pela justificativa do atendimento anterior. Cada intervalo conta uma vez.') };
 }
 

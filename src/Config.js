@@ -20,7 +20,7 @@ var TABELAS = {
   PROFISSIONAIS: ['id', 'nome', 'email', 'categoria', 'perfil', 'ativo'],
   LISTAS: ['id', 'lista', 'valor', 'ordem', 'ativo'],
   // Prioridades das duas matrizes, cada uma com seu prazo:
-  // tipo SOLICITAÇÃO → prazo em horas úteis para responder à solicitação;
+  // tipo SOLICITAÇÃO → prazo em dias úteis para responder à solicitação (v27; antes, horas úteis);
   // tipo SEGUIMENTO → prazo em dias úteis entre um atendimento e o próximo.
   PRIORIDADES: ['id', 'tipo', 'nome', 'prazo', 'periodicidade', 'ordem', 'ativo'],
   // Motivos da solicitação (matriz de atendimento). Sem prioridade = sem prazo de resposta.
@@ -53,7 +53,7 @@ var TABELAS = {
     // Calculados pelo sistema ao salvar
     'status', 'prazo_primeiro_atendimento', 'primeiro_atendimento', 'primeiro_no_prazo',
     'dias_ate_primeiro_atendimento', 'ultimo_contato', 'proximo_prazo', 'prioridade_demanda',
-    // Resposta à solicitação, em horas úteis, pela prioridade do motivo
+    // Resposta à solicitação, em dias úteis, pela prioridade do motivo
     'prioridade_solicitacao', 'prazo_resposta', 'momento_resposta', 'horas_resposta', 'resposta_no_prazo',
     'criado_por', 'criado_em', 'atualizado_em'
   ],
@@ -64,11 +64,13 @@ var TABELAS = {
     'id', 'admissao_id', 'unidade_id', 'tipo_solicitacao', 'motivo_solicitacao_id',
     'data_solicitacao', 'hora_solicitacao', 'para_quem', 'familiar_nome', 'familiar_parentesco',
     'prioridade_solicitacao', 'prazo_horas', 'tem_prazo', 'atendimento_id', 'origem', 'observacoes',
-    'criado_por', 'criado_em', 'excluido_em', 'excluido_por'
+    'criado_por', 'criado_em', 'excluido_em', 'excluido_por',
+    // v27: prazo em dias úteis. prazo_horas fica só nas solicitações gravadas antes.
+    'prazo_dias_uteis'
   ],
-  // Cada atendimento: ao paciente ou à família (com quantas pessoas), por quem, em que unidade e se foi no prazo.
+  // Cada atendimento: ao paciente, à família ou aos dois (quantidade = nº de familiares), por quem, em que unidade e se foi no prazo.
   // tipo_prazo: PRIMEIRO (1º atendimento da admissão) ou RETORNO.
-  // Atendimento à família só conta para os prazos quando o paciente estava impossibilitado.
+  // Todo atendimento conta para os prazos (v27). paciente_impossibilitado fica só nos registros antigos.
   ATENDIMENTOS: [
     'id', 'admissao_id', 'unidade_id', 'data', 'hora', 'publico', 'quantidade', 'paciente_impossibilitado', 'conta_prazo',
     'profissional_id', 'categoria', 'justificativa_id', 'tipo_prazo', 'prazo_limite', 'no_prazo', 'observacao',
@@ -88,7 +90,7 @@ var CATEGORIA_EMPRESA = 'PROFISSIONAL DA EMPRESA';
 var PERFIS = ['COORDENAÇÃO', 'PROFISSIONAL'];
 var TIPOS_ATENDIMENTO = ['INTERCONSULTA', 'BUSCA ATIVA', 'ESPONTÂNEA', 'SEGUIMENTO PSICOLÓGICO'];
 var SEXOS_PACIENTE = ['FEMININO', 'MASCULINO', 'INTERSEXO'];
-var PUBLICOS_ATENDIMENTO = ['PACIENTE', 'FAMÍLIA'];
+var PUBLICOS_ATENDIMENTO = ['PACIENTE', 'FAMÍLIA', 'PACIENTE E FAMÍLIA'];
 var PARA_QUEM_SOLICITACAO = ['PACIENTE', 'FAMILIAR'];
 var TIPOS_PRIORIDADE = { solicitacao: 'SOLICITAÇÃO', seguimento: 'SEGUIMENTO' };
 /** Com estas respostas em "necessidade de acompanhamento", a admissão não tem prazo de retorno. */
@@ -132,9 +134,9 @@ var PARAMETROS_INICIAIS = [
 
 /** Prioridades das matrizes do HGWA: [tipo, nome, prazo, periodicidade]. */
 var PRIORIDADES_INICIAIS = [
-  ['SOLICITAÇÃO', 'ALTA', '24', 'Atender em até 24h úteis'],
-  ['SOLICITAÇÃO', 'MODERADA', '48', 'Atender em até 48h úteis'],
-  ['SOLICITAÇÃO', 'BAIXA', '72', 'Atender em até 72h úteis'],
+  ['SOLICITAÇÃO', 'ALTA', '1', 'Atender em até 1 dia útil'],
+  ['SOLICITAÇÃO', 'MODERADA', '2', 'Atender em até 2 dias úteis'],
+  ['SOLICITAÇÃO', 'BAIXA', '3', 'Atender em até 3 dias úteis'],
   ['SEGUIMENTO', 'ALTA', '2', '3x por semana ou mais'],
   ['SEGUIMENTO', 'MODERADA', '3', '2x por semana ou mais'],
   ['SEGUIMENTO', 'BAIXA', '5', '1x por semana ou mais'],
@@ -157,8 +159,11 @@ var JUSTIFICATIVAS_INICIAIS = [
   ['INST. PSIQ. SEM RISCO A SI OU A TERCEIROS', 'MODERADA'], ['CUIDADOS PALIATIVOS OU FIM DE VIDA', 'MODERADA'],
   ['ADESÃO AO TRATAMENTO', 'MODERADA'], ['POUCOS RECURSOS DE ENFRENTAMENTO', 'MODERADA'],
   ['BONS A PARCIAIS RECURSOS DE ENFRENTAMENTO', 'BAIXA'], ['INTERNAÇÃO PROLONGADA', 'MONITORAMENTO'],
-  ['SEM CONDIÇÕES CLÍNICAS / SOCIAIS', '']
+  ['SEM CONDIÇÕES CLÍNICAS / SOCIAIS', ''], ['SEM DEMANDA PARA ACOMPANHAMENTO', '']
 ];
+
+/** Justificativas acrescentadas em versões novas: o "configurar" inclui em bancos já existentes, se faltarem. */
+var JUSTIFICATIVAS_GARANTIDAS = [['SEM DEMANDA PARA ACOMPANHAMENTO', '']];
 
 /** Feriados nacionais. Estaduais, municipais e pontos facultativos são incluídos pela coordenação. */
 var FERIADOS_NACIONAIS = [
