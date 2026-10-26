@@ -223,6 +223,9 @@ function gravarPelaApi() {
 
 // Linhas alteradas na operação atual, enviadas de uma vez só quando a operação termina: { intervalo: valores }.
 var _gravacoes = {};
+// Linhas novas da operação atual, por tabela, acrescentadas de uma vez no fim: { tabela: { ids: [], linhas: [] } }.
+// O Google limita as gravações por minuto de cada usuário: uma gravação por linha estourava o limite no configurar.
+var _insercoes = {};
 // Houve gravação pela planilha (SpreadsheetApp) que ainda precisa ser enviada antes de soltar a trava.
 var _pendenteNaPlanilha = false;
 
@@ -240,18 +243,14 @@ function inserir(nome, registro) {
       delete _cacheTabelas[nome];
       return obj;
     }
-    // RAW: grava o texto como está, sem a planilha converter datas e números.
-    var r = Sheets.Spreadsheets.Values.append({ values: [valores] }, idDoBanco(), "'" + nome + "'!A1",
-      { valueInputOption: 'RAW', insertDataOption: 'INSERT_ROWS' });
-    var linha = /(\d+)$/.exec(String(r.updates && r.updates.updatedRange));
-    if (_cacheTabelas[nome] && linha) {
+    // Vai para a planilha no fim da operação, junto com as outras linhas novas da mesma aba.
+    var pendentes = _insercoes[nome] = _insercoes[nome] || { ids: [], linhas: [] };
+    pendentes.ids.push(String(obj.id));
+    pendentes.linhas.push(valores);
+    // Quem ler a tabela depois, na mesma operação, já vê o registro novo.
+    if (_cacheTabelas[nome]) {
       _cacheTabelas[nome].push(registroDeValores(colunas, valores));
-      _linhas[nome][String(obj.id)] = Number(linha[1]);
       delete _indicesTabelas[nome];
-    } else {
-      // Sem saber a linha nova, a aba vai ser lida de novo: o que estava para gravar vai antes.
-      enviarGravacoes();
-      delete _cacheTabelas[nome];
     }
     return obj;
   });
@@ -281,17 +280,21 @@ function atualizarVarios(nome, mudancas, unico) {
     var indice = {};
     lista.forEach(function (r, i) { indice[String(r.id)] = i; });
     var gravados = [];
+    var pendentes = _insercoes[nome] || { ids: [], linhas: [] };
     ids.forEach(function (id) {
       var i = indice[String(id)];
       var linha = _linhas[nome][String(id)];
-      if (i === undefined || !linha) {
+      // Registro inserido nesta mesma operação: muda a linha que ainda vai ser acrescentada.
+      var novo = pendentes.ids.lastIndexOf(String(id));
+      if (i === undefined || (!linha && novo === -1)) {
         if (unico) throw new Error('Registro não encontrado: ' + id);
         return;
       }
       var obj = Object.assign({}, lista[i]);
       aplicarCampos(colunas, obj, mudancas[id], unico);
       var valores = linhaDe(colunas, obj);
-      _gravacoes["'" + nome + "'!A" + linha + ':' + letraDaColuna(colunas.length) + linha] = valores;
+      if (linha) _gravacoes["'" + nome + "'!A" + linha + ':' + letraDaColuna(colunas.length) + linha] = valores;
+      else pendentes.linhas[novo] = valores;
       // Objeto novo: quem guardou o registro antigo continua vendo o antigo, como numa leitura nova.
       lista[i] = registroDeValores(colunas, valores);
       gravados.push(lista[i]);
@@ -340,10 +343,10 @@ function excluir(nome, id) {
   return comTrava(function () {
     var linha = 0;
     if (gravarPelaApi()) {
+      // As linhas abaixo sobem uma posição: o que estava para gravar (e as linhas novas) vai antes.
+      enviarGravacoes();
       listar(nome);
       linha = _linhas[nome][String(id)] || 0;
-      // As linhas abaixo sobem uma posição: o que estava para gravar vai antes.
-      enviarGravacoes();
     }
     var aba = abaDaTabela(nome);
     if (!linha) linha = numeroDaLinha(aba, id);
@@ -364,13 +367,54 @@ function excluir(nome, id) {
   });
 }
 
-/** Envia de uma vez, pela API, as linhas alteradas na operação. */
+/**
+ * Envia pela API o que a operação gravou: as linhas alteradas numa chamada só e as linhas novas
+ * numa chamada por aba. RAW: grava o texto como está, sem a planilha converter datas e números.
+ */
 function enviarGravacoes() {
   var intervalos = Object.keys(_gravacoes);
-  if (!intervalos.length) return;
+  var tabelas = Object.keys(_insercoes);
+  if (!intervalos.length && !tabelas.length) return;
   var dados = intervalos.map(function (faixa) { return { range: faixa, values: [_gravacoes[faixa]] }; });
+  var insercoes = _insercoes;
   _gravacoes = {};
-  Sheets.Spreadsheets.Values.batchUpdate({ valueInputOption: 'RAW', data: dados }, idDoBanco());
+  _insercoes = {};
+  if (dados.length) {
+    comEsperaDaCota_(function () {
+      return Sheets.Spreadsheets.Values.batchUpdate({ valueInputOption: 'RAW', data: dados }, idDoBanco());
+    });
+  }
+  tabelas.forEach(function (nome) {
+    var pendentes = insercoes[nome];
+    var r = comEsperaDaCota_(function () {
+      return Sheets.Spreadsheets.Values.append({ values: pendentes.linhas }, idDoBanco(), "'" + nome + "'!A1",
+        { valueInputOption: 'RAW', insertDataOption: 'INSERT_ROWS' });
+    });
+    // Ex.: 'ATENDIMENTOS'!A12:R14 — as linhas novas começam na 12.
+    var inicio = /!A(\d+)/.exec(String(r && r.updates && r.updates.updatedRange));
+    if (inicio && _cacheTabelas[nome] && _linhas[nome]) {
+      pendentes.ids.forEach(function (id, i) { _linhas[nome][id] = Number(inicio[1]) + i; });
+    } else {
+      // Sem saber as linhas novas, a aba vai ser lida de novo.
+      delete _cacheTabelas[nome];
+    }
+  });
+}
+
+/**
+ * O Google limita as gravações por minuto de cada usuário. Se recusar por isso, espera e tenta de novo
+ * (2, 4, 8, 16 e 32 segundos) em vez de perder a operação.
+ */
+function comEsperaDaCota_(fn) {
+  for (var tentativa = 0; ; tentativa++) {
+    try {
+      return fn();
+    } catch (e) {
+      var cota = /quota|rate limit|429|too many requests/i.test(String(e && e.message));
+      if (!cota || tentativa >= 5 || typeof Utilities.sleep !== 'function') throw e;
+      Utilities.sleep(Math.pow(2, tentativa + 1) * 1000 + Math.floor(Math.random() * 500));
+    }
+  }
 }
 
 function numeroDaLinha(aba, id) {
@@ -414,12 +458,14 @@ function comTrava(fn) {
   _cacheTabelas = {};
   _indicesTabelas = {};
   _gravacoes = {};
+  _insercoes = {};
   try {
     var resultado = fn();
     enviarGravacoes();
     return resultado;
   } catch (e) {
     _gravacoes = {};
+    _insercoes = {};
     throw e;
   } finally {
     _travaAtiva = false;

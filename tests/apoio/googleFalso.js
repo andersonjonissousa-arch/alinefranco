@@ -98,9 +98,10 @@ function batchGetFalso(id, opcoes) {
 function appendFalso(corpo, id, faixa) {
   const aba = planilhasPorId[id] && planilhasPorId[id].getSheetByName(/^'(.+)'!/.exec(faixa)[1]);
   if (!aba) throw new Error('Unable to parse range: ' + faixa);
+  const inicio = aba.linhas.length + 1;
   corpo.values.forEach((l) => aba.linhas.push(l.slice()));
   const n = aba.linhas.length;
-  return { updates: { updatedRange: `'${aba.nome}'!A${n}:Z${n}` } };
+  return { updates: { updatedRange: `'${aba.nome}'!A${inicio}:Z${n}`, updatedRows: corpo.values.length } };
 }
 
 /** Imita Values.batchUpdate com RAW: grava cada intervalo 'ABA'!A7:R7 sem converter os valores. */

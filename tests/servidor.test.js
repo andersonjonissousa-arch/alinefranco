@@ -1682,3 +1682,62 @@ test('v27: compilado não tem mais a seção "Necessidade de acompanhamento"', (
   assert.equal(c.dados.secoes.some(s => /Necessidade de acompanhamento/i.test(s.titulo)), false);
   assert.equal(c.dados.secoes.some(s => s.linhas.some(l => /IMPOSSIBILITADO/i.test(l.rotulo))), false);
 });
+
+test('cota do Google: linhas novas vão numa gravação por aba e a recusa por cota espera e tenta de novo', () => {
+  const { ctx, google } = carregarSistema();
+  const V = google.globais.Sheets.Spreadsheets.Values;
+  const chamadas = { append: 0, batchUpdate: 0 };
+  const originais = { append: V.append, batchUpdate: V.batchUpdate };
+  V.append = (...a) => { chamadas.append++; return originais.append(...a); };
+  V.batchUpdate = (...a) => { chamadas.batchUpdate++; return originais.batchUpdate(...a); };
+  ctx.configurar();
+  // Banco novo: centenas de linhas, no máximo uma gravação por aba (o limite do Google é 60 por minuto).
+  assert.ok(chamadas.append <= Object.keys(ctx.TABELAS).length, 'appends: ' + chamadas.append);
+  ctx.novaExecucao();
+  assert.equal(ctx.listar('UNIDADES').length, 18);
+
+  // Inserido e alterado na mesma operação: a linha nova já sai com o valor alterado, numa gravação só.
+  chamadas.append = 0;
+  ctx.novaExecucao();
+  const r = ctx.comTrava(() => {
+    const s = ctx.inserir('SETORES', { nome: 'SETOR NOVO', ordem: 99, ativo: 'SIM' });
+    ctx.atualizar('SETORES', s.id, { ativo: 'NÃO' });
+    assert.equal(ctx.buscarPorId('SETORES', s.id).ativo, 'NÃO');
+    return s;
+  });
+  assert.equal(chamadas.append, 1);
+  ctx.novaExecucao();
+  assert.equal(ctx.buscarPorId('SETORES', r.id).ativo, 'NÃO');
+  // A linha da aba é conhecida depois da gravação: alterar de novo não duplica o registro.
+  ctx.comTrava(() => {
+    const s = ctx.inserir('SETORES', { nome: 'OUTRO SETOR', ordem: 100, ativo: 'SIM' });
+    ctx.listar('PACIENTES'); // uma leitura no meio envia as linhas novas antes
+    ctx.atualizar('SETORES', s.id, { nome: 'OUTRO SETOR RENOMEADO' });
+    ctx.excluir('SETORES', r.id);
+  });
+  ctx.novaExecucao();
+  const setores = ctx.listar('SETORES').map(s => s.nome);
+  assert.equal(setores.filter(n => n === 'OUTRO SETOR RENOMEADO').length, 1);
+  assert.equal(setores.includes('OUTRO SETOR'), false);
+  assert.equal(setores.includes('SETOR NOVO'), false);
+
+  // Recusa por cota: espera e tenta de novo, sem perder a gravação.
+  let recusas = 1;
+  const esperas = [];
+  ctx.Utilities.sleep = (ms) => esperas.push(ms);
+  V.append = (...a) => {
+    if (recusas-- > 0) throw new Error("Quota exceeded for quota metric 'Write requests' and limit 'Write requests per minute per user'");
+    return originais.append(...a);
+  };
+  ctx.novaExecucao();
+  const p = ctx.apiSalvarPaciente({ prontuario: '777', nome: 'Paciente da Cota' });
+  assert.equal(p.ok, true, p.erro);
+  assert.equal(esperas.length, 1);
+  ctx.novaExecucao();
+  assert.ok(ctx.listar('PACIENTES').some(x => x.prontuario === '777'));
+  // Outros erros não são repetidos.
+  V.append = () => { throw new Error('Permissão negada'); };
+  ctx.novaExecucao();
+  assert.equal(ctx.apiSalvarPaciente({ prontuario: '778', nome: 'Outro' }).ok, false);
+  assert.equal(esperas.length, 1);
+});
