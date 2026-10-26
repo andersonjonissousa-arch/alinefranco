@@ -90,6 +90,7 @@
     Array.prototype.slice.call(arguments, 2).forEach(function (filho) {
       if (filho === null || filho === undefined || filho === false) return;
       (Array.isArray(filho) ? filho : [filho]).forEach(function (f) {
+        if (f === null || f === undefined || f === false) return;
         el.appendChild(typeof f === 'object' ? f : document.createTextNode(String(f)));
       });
     });
@@ -231,7 +232,8 @@
     registro: telaRegistro,
     indicadores: telaIndicadores,
     compilado: telaCompilado,
-    cadastros: telaCadastros
+    cadastros: telaCadastros,
+    historico: telaHistorico
   };
 
   function abrir(nome, arg) {
@@ -621,6 +623,7 @@
       });
       formulario.appendChild(h('h2', null, p.id ? 'Editar paciente' : 'Novo paciente'));
       formulario.appendChild(form);
+      if (p.id) formulario.appendChild(botaoHistorico(p.id, { nome: 'pacientes' }));
     }
 
     busca.addEventListener('input', function () {
@@ -784,13 +787,175 @@
       info('Unidade atual', a.unidade_atual_nome || a.unidade_nome),
       seloStatus(a),
       h('button', { class: 'btn', type: 'button', onclick: function () { abrir('atendimentos', { id: a.id }); } },
-        a.status === estado.cad.status_admissao.encerrada ? 'Consultar atendimentos desta admissão' : 'Ir para atendimentos')));
+        a.status === estado.cad.status_admissao.encerrada ? 'Consultar atendimentos desta admissão' : 'Ir para atendimentos'),
+      botaoHistorico(a.paciente_id, { nome: 'admissoes', arg: { id: a.id } })));
     main.appendChild(h('div', { class: 'cartao' }, h('h2', null, 'Dados da entrada'), formularioAdmissao(a, desenharAdmissao)));
     if (det.desfechos.length) main.appendChild(historicoDesfechos(det.desfechos));
     if (det.outras_admissoes.length) {
       main.appendChild(h('div', { class: 'cartao tabela-rolagem' }, h('h2', null, 'Outras admissões deste paciente'),
         tabelaAdmissoes(det.outras_admissoes)));
     }
+  }
+
+  // ---------- Histórico completo do paciente ----------
+
+  /** Botão que abre o histórico do paciente e, ao voltar, retorna para a tela de onde veio. */
+  function botaoHistorico(pacienteId, voltar, classe) {
+    var b = h('button', { class: classe || 'btn sec', type: 'button' }, classe === 'link' ? 'histórico' : 'Histórico completo do paciente');
+    b.addEventListener('click', function (ev) {
+      ev.stopPropagation();
+      abrir('historico', { paciente_id: pacienteId, voltar: voltar });
+    });
+    return b;
+  }
+
+  var FILTROS_HISTORICO = [
+    { valor: '', rotulo: 'Tudo' },
+    { valor: 'ATENDIMENTO', rotulo: 'Atendimentos' },
+    { valor: 'SOLICITAÇÃO', rotulo: 'Solicitações (interconsultas)' },
+    { valor: 'JUSTIFICATIVA', rotulo: 'Mudanças de justificativa' },
+    { valor: 'TRANSFERÊNCIA', rotulo: 'Mudanças de unidade' },
+    { valor: 'DESFECHO', rotulo: 'Desfechos e retomadas' }
+  ];
+
+  var ROTULO_EVENTO = {
+    'ENTRADA': 'Entrada', 'TRANSFERÊNCIA': 'Mudança de unidade', 'SOLICITAÇÃO': 'Solicitação', 'ATENDIMENTO': 'Atendimento',
+    'JUSTIFICATIVA': 'Justificativa', 'ATIVIDADE': 'Atividade', 'DESFECHO': 'Desfecho', 'RETOMADA': 'Retomada'
+  };
+
+  function telaHistorico(arg) {
+    arg = arg || {};
+    var main = tela('Histórico do paciente');
+    var voltar = h('button', { class: 'btn sec voltar', type: 'button', onclick: function () {
+      if (arg.voltar) abrir(arg.voltar.nome, arg.voltar.arg); else abrir('pacientes');
+    } }, '← Voltar');
+    main.appendChild(voltar);
+    var corpo = h('div', null, h('p', { class: 'carregando' }, 'Carregando o histórico…'));
+    main.appendChild(corpo);
+    var navegacao = estado.navegacao;
+    chamar('apiHistoricoPaciente', arg.paciente_id).then(function (hist) {
+      if (navegacao !== estado.navegacao) return;
+      desenharHistorico(main, corpo, hist);
+    }).catch(function (e) {
+      if (navegacao !== estado.navegacao) return;
+      corpo.textContent = 'Não foi possível carregar o histórico. ' + e.message;
+      avisar(e.message, 'erro');
+    });
+  }
+
+  function desenharHistorico(main, corpo, hist) {
+    var p = hist.paciente;
+    var r = hist.resumo;
+    main.querySelector('h1').textContent = 'Histórico · ' + p.nome;
+    corpo.textContent = '';
+    corpo.appendChild(h('div', { class: 'cartao cabecalho-caso' },
+      info('Prontuário', p.prontuario),
+      p.sexo ? info('Sexo', p.sexo.toLowerCase()) : null,
+      p.data_nascimento ? info('Nascimento', dataBr(p.data_nascimento)) : null,
+      info('Internações', String(r.internacoes)),
+      info('Atendimentos', String(r.atendimentos)),
+      info('Solicitações', String(r.solicitacoes)),
+      info('Desfechos', String(r.desfechos))));
+    var filtro = seletor('tipo', FILTROS_HISTORICO, '', false);
+    corpo.appendChild(h('div', { class: 'cartao' }, h('div', { class: 'linha' }, campo('Mostrar', filtro)),
+      h('p', { class: 'suave' }, 'Do mais recente para o mais antigo. Clique em "Abrir esta internação" para registrar ou corrigir.')));
+    var lista = h('div');
+    corpo.appendChild(lista);
+    function desenhar() {
+      lista.textContent = '';
+      if (!hist.internacoes.length) {
+        lista.appendChild(h('div', { class: 'cartao' }, h('p', { class: 'suave' }, 'Este paciente ainda não tem internações registradas.')));
+        return;
+      }
+      hist.internacoes.forEach(function (i) { lista.appendChild(cartaoInternacaoHistorico(i, filtro.value)); });
+    }
+    filtro.addEventListener('change', desenhar);
+    desenhar();
+  }
+
+  function cartaoInternacaoHistorico(internacao, tipo) {
+    var a = internacao.admissao;
+    var eventos = internacao.eventos.filter(function (e) {
+      if (!tipo) return true;
+      if (tipo === 'DESFECHO') return e.tipo === 'DESFECHO' || e.tipo === 'RETOMADA';
+      return e.tipo === tipo;
+    });
+    var cartao = h('div', { class: 'cartao' },
+      h('h2', null, 'Internação de ' + dataBr(a.data_admissao), ' ', seloStatus(a)),
+      h('div', { class: 'cabecalho-caso' },
+        info('ID da admissão', a.id),
+        info('Unidade da admissão', a.unidade_admissao_nome || a.unidade_nome),
+        info('Unidade atual', a.unidade_atual_nome || a.unidade_nome),
+        info('Descrição da demanda', a.descricao_demanda || '—'),
+        info('Justificativa atual', a.justificativa_nome || '—'),
+        info('1º atendimento', a.primeiro_atendimento ? dataBr(a.primeiro_atendimento) : '—', ' ', a.primeiro_em_avaliacao === false
+          ? h('span', { class: 'selo' }, 'Fora do período de avaliação') : seloPrimeiro(a.primeiro_no_prazo)),
+        a.desfecho_nome ? info('Desfecho', a.desfecho_nome + (a.data_desfecho ? ' em ' + dataBr(a.data_desfecho) : '')) : null,
+        h('button', { class: 'btn sec', type: 'button', onclick: function () { abrir('atendimentos', { id: a.id }); } }, 'Abrir esta internação')));
+    if (!eventos.length) {
+      cartao.appendChild(h('p', { class: 'suave' }, 'Nada deste tipo nesta internação.'));
+      return cartao;
+    }
+    // A solicitação respondida aparece pela data e pelo motivo, não pelo código interno.
+    var solicitacoes = {};
+    internacao.eventos.forEach(function (e) {
+      if (e.tipo === 'SOLICITAÇÃO') solicitacoes[e.solicitacao_id] = dataBr(e.data) + (e.hora ? ' ' + e.hora : '') + ' · ' + e.motivo_nome;
+    });
+    cartao.appendChild(h('ol', { class: 'linha-tempo' }, eventos.map(function (e) {
+      return h('li', { class: 'evento evento-' + e.tipo.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '') },
+        h('div', { class: 'quando' }, dataBr(e.data), e.hora ? h('div', { class: 'suave' }, e.hora) : null),
+        h('div', null, h('span', { class: 'selo tipo-evento' }, ROTULO_EVENTO[e.tipo] || e.tipo), ' ', descricaoEvento(e, solicitacoes)));
+    })));
+    return cartao;
+  }
+
+  function quemAtendeu(e) {
+    if (!e.profissional_nome) return '';
+    var categoria = e.categoria && e.categoria !== 'PROFISSIONAL DA EMPRESA' ? ' (' + (ROTULO_CATEGORIA[e.categoria] || e.categoria).toLowerCase() + ')' : '';
+    return 'por ' + e.profissional_nome + categoria;
+  }
+
+  function descricaoEvento(e, solicitacoes) {
+    var linhas = [];
+    var juntar = function (partes) { return partes.filter(Boolean).join(' · '); };
+    if (e.tipo === 'ENTRADA') {
+      linhas.push(h('strong', null, 'Entrada no hospital'), h('div', { class: 'suave' }, juntar([e.unidade_nome, 'admissão ' + e.admissao_id])));
+    } else if (e.tipo === 'TRANSFERÊNCIA') {
+      linhas.push(h('strong', null, (e.origem_nome || '?') + ' → ' + (e.destino_nome || '?')), h('div', { class: 'suave' }, quemAtendeu(e)));
+    } else if (e.tipo === 'SOLICITAÇÃO') {
+      var para = e.para_quem === 'FAMILIAR' ? 'para ' + ([e.familiar_parentesco, e.familiar_nome].filter(Boolean).join(' ') || 'familiar').toLowerCase() : 'para o paciente';
+      var r = ROTULO_RESPOSTA[e.resultado] || ['', 'selo'];
+      var resposta = e.respondida_em ? 'respondida ' + dataHoraBr(e.respondida_em) +
+        (e.dias_resposta === 0 ? ' (no mesmo dia)' : e.dias_resposta !== '' && e.dias_resposta !== undefined ? ' (em ' + textoDias(e.dias_resposta) + ')' : '') :
+        e.pendente ? 'aguardando resposta' : 'sem resposta';
+      linhas.push(h('strong', null, juntar([e.motivo_nome, e.tipo_solicitacao ? 'solicitação da ' + e.tipo_solicitacao.toLowerCase() : ''])),
+        h('div', null, juntar([e.prioridade ? 'prioridade ' + e.prioridade.toLowerCase() : 'sem prioridade', para])),
+        h('div', null, juntar([e.prazo ? 'prazo até ' + prazoBr(e.prazo) : '', resposta]), ' ', r[0] ? h('span', { class: r[1] }, r[0]) : ''),
+        e.observacoes ? h('div', { class: 'suave' }, e.observacoes) : null);
+    } else if (e.tipo === 'ATENDIMENTO') {
+      var publico = e.publico === 'PACIENTE E FAMÍLIA' ? 'paciente e ' + e.quantidade + ' familiar(es)' :
+        e.publico === 'FAMÍLIA' ? 'família · ' + e.quantidade + ' pessoa(s)' : 'paciente';
+      var tipoPrazo = e.tipo_prazo === 'PRIMEIRO' ? '1º atendimento' : e.tipo_prazo === 'RETORNO' ? 'retorno' : '';
+      linhas.push(h('strong', null, 'Atendimento a ' + publico),
+        h('div', null, juntar([e.tipo_atendimento ? e.tipo_atendimento.toLowerCase() : '', quemAtendeu(e), e.unidade_nome])),
+        h('div', null, 'Justificativa: ' + (e.justificativa_nome || '—')),
+        tipoPrazo ? h('div', null, juntar([tipoPrazo, e.prazo ? 'prazo até ' + dataBr(e.prazo) : '']), ' ', resultadoPrazoNoHistorico(e.resultado)) : null,
+        e.interconsultas_respondidas && e.interconsultas_respondidas.length ? h('div', { class: 'suave' }, 'Respondeu à solicitação de ' +
+          e.interconsultas_respondidas.map(function (id) { return (solicitacoes || {})[id] || id; }).join('; ')) : null,
+        e.observacao ? h('div', { class: 'suave' }, e.observacao) : null);
+    } else if (e.tipo === 'JUSTIFICATIVA') {
+      linhas.push(h('strong', null, e.de ? e.de + ' → ' + e.para : 'Definida: ' + e.para), h('div', { class: 'suave' }, quemAtendeu(e)));
+    } else if (e.tipo === 'ATIVIDADE') {
+      linhas.push(h('strong', null, e.atividade + (Number(e.quantidade) > 1 ? ' (' + e.quantidade + ')' : '')), h('div', { class: 'suave' }, juntar([quemAtendeu(e), e.unidade_nome])));
+    } else if (e.tipo === 'DESFECHO') {
+      linhas.push(h('strong', null, e.desfecho_nome),
+        h('div', { class: 'suave' }, juntar([e.encerra_admissao === 'SIM' ? 'encerra a internação' : 'encerra o acompanhamento',
+          e.vigente === 'NÃO' ? 'seguido de retomada' : '', e.unidade_nome])));
+    } else if (e.tipo === 'RETOMADA') {
+      linhas.push(h('strong', null, 'Acompanhamento retomado'),
+        h('div', { class: 'suave' }, juntar([e.profissional_nome ? 'por ' + e.profissional_nome : '', e.desfecho_anterior ? 'desfecho anterior: ' + e.desfecho_anterior.toLowerCase() : ''])));
+    }
+    return h('div', { class: 'descricao-evento' }, linhas);
   }
 
   // ---------- Atendimentos: trabalho diário por admissão ----------
@@ -844,7 +1009,7 @@
             var proximo = a.prazos.proximo;
             return h('tr', { class: 'clicavel', onclick: function () { abrir('atendimentos', { id: a.id }); } },
               h('td', null, h('strong', null, a.paciente_nome),
-                h('div', { class: 'suave' }, 'Pront. ' + a.prontuario + ' · admissão ' + a.id)),
+                h('div', { class: 'suave' }, 'Pront. ' + a.prontuario + ' · admissão ' + a.id, ' · ', botaoHistorico(a.paciente_id, { nome: 'atendimentos' }, 'link'))),
               h('td', null, a.unidade_atual_nome || a.unidade_nome, a.setor_atual_nome ? h('div', { class: 'suave' }, a.setor_atual_nome) : ''),
               h('td', null, dataBr(a.data_admissao), a.data_admissao === g.hoje ? h('div', null, h('span', { class: 'selo hoje' }, 'Admitido hoje')) : null),
               h('td', null, seloStatus(a)),
@@ -893,7 +1058,8 @@
       info('Justificativa', a.justificativa_nome ? a.justificativa_nome + (a.prioridade_demanda ? ' · ' + a.prioridade_demanda.toLowerCase() : '') : '—'),
       a.status === st.acompanhamento ? info('Próximo retorno', dataBr(a.proximo_prazo) || '—') : null,
       selo(a.situacao), seloStatus(a),
-      h('button', { class: 'btn sec', type: 'button', onclick: function () { abrir('admissoes', { id: a.id }); } }, 'Consultar dados da entrada')));
+      h('button', { class: 'btn sec', type: 'button', onclick: function () { abrir('admissoes', { id: a.id }); } }, 'Consultar dados da entrada'),
+      botaoHistorico(a.paciente_id, { nome: 'atendimentos', arg: { id: a.id } })));
     main.appendChild(blocoLocalizacao(det));
     main.appendChild(blocoInterconsultas(det));
     // A descrição da demanda é informada no 1º atendimento e pode ser corrigida depois, a qualquer momento.

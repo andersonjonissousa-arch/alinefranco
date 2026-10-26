@@ -121,6 +121,7 @@ src/
   Compilado.js      compilado, exportação, reuniões e atividades gerenciais
   Interconsultas.js solicitações independentes, migração do legado e vínculo com respostas
   Gestao.js         telas de gestão: pacientes por unidade, interconsultas e prazos
+  Historico.js      histórico completo do paciente: todas as internações numa linha do tempo
   Autoteste.js      testarSistema: teste do fluxo inteiro no Google de verdade
   Desempenho.js     medirDesempenho: tempo de cada ação, antes e depois da leitura pela API
   ui/               tela (HTML, CSS e JavaScript, sem bibliotecas externas)
@@ -270,6 +271,22 @@ Desde a v27 o prazo da interconsulta é de **1, 2 ou 3 dias úteis** (ALTA, MODE
 Bancos anteriores à v27 guardavam os prazos em horas (24, 48 e 72). Ao rodar **configurar**, eles viram 1, 2 e 3 dias úteis uma única vez (o parâmetro `PRAZO_SOLICITACAO_EM_DIAS` marca que a conversão já foi feita). Solicitações gravadas antes continuam com o prazo delas, convertido da mesma forma (24h = 1 dia útil).
 
 As datas de vencimento são recalculadas ao consultar os registros. Os dias que faltam, o tempo até a resposta, o percentual de pontualidade e a média de resposta no compilado usam o mesmo calendário.
+
+### Histórico completo do paciente
+
+O botão **Histórico completo do paciente** fica na tela da internação (Atendimentos), nos dados da entrada (Admissões) e no cadastro do paciente (Pacientes). Na lista de Atendimentos, o link **histórico** ao lado do prontuário abre o histórico sem abrir a internação. A tela só consulta, não altera nada.
+
+Mostra todas as internações do paciente, da mais recente para a mais antiga. Cada uma traz a descrição da demanda e a justificativa atuais, o 1º atendimento e o desfecho, e uma linha do tempo, também da mais recente para a mais antiga, com:
+
+- entrada no hospital;
+- solicitações (interconsultas), com motivo, prioridade, data e hora, para quem, prazo e se foram respondidas no prazo;
+- atendimentos, com data, hora, quem atendeu, a quem (paciente, família ou os dois), tipo, justificativa e o resultado do prazo;
+- mudanças de justificativa (a justificativa de cada atendimento comparada à do atendimento anterior);
+- mudanças de unidade (transferências internas);
+- atividades assistenciais;
+- desfechos e retomadas do acompanhamento.
+
+O filtro **Mostrar** separa cada tipo na própria tela. **Abrir esta internação** leva à tela de atendimentos para registrar ou corrigir. A descrição da demanda aparece com o valor atual: as correções feitas depois do 1º atendimento não guardam a versão anterior.
 
 ### Descrição da demanda
 

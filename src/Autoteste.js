@@ -91,6 +91,11 @@ function testarSistema() {
     det = dados(apiSalvarAdmissao(Object.assign({ desfecho_id: desfecho('ALTA'), data_desfecho: hojeIso }, base)), 'Saída do hospital: registro');
     verificar(det && det.admissao.status === STATUS_ADMISSAO.encerrada, 'Saída do hospital encerra a admissão');
     verificar(det && det.desfechos.length === 2, 'Histórico guarda os dois desfechos', det && det.desfechos.length);
+    var hist = dados(apiHistoricoPaciente(paciente && paciente.id), 'Histórico completo do paciente');
+    var tiposHist = hist && hist.internacoes[0] ? hist.internacoes[0].eventos.map(function (e) { return e.tipo; }) : [];
+    verificar(hist && hist.resumo.internacoes === 1 && hist.resumo.atendimentos === 3 && hist.resumo.desfechos === 2 &&
+      ['ENTRADA', 'SOLICITAÇÃO', 'ATENDIMENTO', 'JUSTIFICATIVA', 'DESFECHO', 'RETOMADA'].every(function (t) { return tiposHist.indexOf(t) !== -1; }),
+      'Histórico: internação, solicitação, atendimentos, justificativa, desfechos e retomada', tiposHist.join(', '));
 
     dados(apiRegistrarReuniao({ data: hojeIso, unidade_id: unidade.id, tipo: 'GRUPO', quantidade: 1 }), 'Registro do dia: reunião de equipe');
     dados(apiRegistrarGerencial({ data: hojeIso, tipo: 'TREINAMENTO', quantidade: 1 }), 'Registro do dia: atividade gerencial');

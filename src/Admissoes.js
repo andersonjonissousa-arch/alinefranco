@@ -292,8 +292,8 @@ function prazoClinicoNoHistorico_(adm, atendimento) {
   return p;
 }
 
-function detalheAdmissao(adm) {
-  var aux = auxiliares();
+function detalheAdmissao(adm, auxPronto, semOutras) {
+  var aux = auxPronto || auxiliares();
   var solicitacoes = aux.interconsultasPorAdmissao[adm.id] || [];
   var respostas = agruparPor_(solicitacoes, 'atendimento_resposta_id');
   var nomeProf = function (pid) { return (aux.profissionais[pid] || {}).nome || ''; };
@@ -317,7 +317,7 @@ function detalheAdmissao(adm) {
         return item;
       });
   };
-  var anteriores = listar('ADMISSOES').filter(function (a) { return a.paciente_id === adm.paciente_id && a.id !== adm.id; })
+  var anteriores = semOutras ? [] : listar('ADMISSOES').filter(function (a) { return a.paciente_id === adm.paciente_id && a.id !== adm.id; })
     .map(function (a) { return resumoAdmissao(a, aux); })
     .sort(function (a, b) { return String(b.data_admissao).localeCompare(String(a.data_admissao)); });
   return {

@@ -125,6 +125,22 @@
   .selo.espaco { margin-left: 8px; vertical-align: middle; }
 
   .cabecalho-caso { display: flex; flex-wrap: wrap; gap: 8px 24px; align-items: center; }
+
+  /* Histórico do paciente: uma linha por acontecimento, do mais recente para o mais antigo. */
+  .linha-tempo { list-style: none; margin: 16px 0 0; padding: 0; border-top: 1px solid var(--borda); }
+  .linha-tempo .evento { display: grid; grid-template-columns: 110px 1fr; gap: 4px 16px; padding: 10px 0 10px 12px;
+    border-bottom: 1px solid var(--borda); border-left: 3px solid var(--borda); }
+  .linha-tempo .quando { font-variant-numeric: tabular-nums; }
+  .linha-tempo .selo.tipo-evento { margin-bottom: 4px; }
+  .linha-tempo .evento-atendimento { border-left-color: var(--primaria); }
+  .linha-tempo .evento-solicitacao { border-left-color: #8e6bbf; }
+  .linha-tempo .evento-justificativa { border-left-color: #e6b84b; }
+  .linha-tempo .evento-transferencia { border-left-color: #5a9bb8; }
+  .linha-tempo .evento-desfecho, .linha-tempo .evento-retomada { border-left-color: var(--perigo); }
+  .linha-tempo .evento-entrada { border-left-color: var(--ok); }
+  @media (max-width: 600px) {
+    .linha-tempo .evento { grid-template-columns: 1fr; }
+  }
   fieldset { border: 1px solid var(--borda); border-radius: var(--raio); padding: 12px 14px 14px; margin: 0 0 14px; }
   legend { font-weight: 600; padding: 0 6px; }
   details > summary { cursor: pointer; list-style: revert; }

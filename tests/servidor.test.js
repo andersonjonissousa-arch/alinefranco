@@ -1741,3 +1741,87 @@ test('cota do Google: linhas novas vão numa gravação por aba e a recusa por c
   assert.equal(ctx.apiSalvarPaciente({ prontuario: '778', nome: 'Outro' }).ok, false);
   assert.equal(esperas.length, 1);
 });
+
+test('histórico completo do paciente: todas as internações, do mais recente para o mais antigo', () => {
+  const sis = sistemaComAdmissao();
+  const { ctx, paciente, unidade, j, admitir, atender, desfecho } = sis;
+  const alta = ctx.listar('JUSTIFICATIVAS').find(x => x.nome === 'RISCO DE SUICÍDIO');
+  const uti = ctx.listar('UNIDADES').find(u => u.nome === 'UTI 1');
+  const primeira = admitir().dados.admissao;
+  const pedido = solicitar(sis, primeira, { data_solicitacao: '2026-10-13', hora_solicitacao: '08:00', para_quem: 'FAMILIAR', familiar_parentesco: 'mãe' });
+  assert.equal(pedido.ok, true, pedido.erro);
+  const i = pedido.dados.interconsultas[0];
+  assert.equal(atender(primeira, { data: '2026-10-13', hora: '09:00', justificativa_id: j.id, interconsulta_id: i.id, publico: 'FAMÍLIA', quantidade: '2' }).ok, true);
+  assert.equal(atender(primeira, { data: '2026-10-14', hora: '10:00', justificativa_id: j.id }).ok, true);
+  assert.equal(atender(primeira, { data: '2026-10-15', hora: '10:00', justificativa_id: alta.id }).ok, true);
+  ctx.novaExecucao();
+  assert.equal(ctx.apiTransferirPaciente({ admissao_id: primeira.id, setor_id: uti.setor_id, unidade_id: uti.id, data: '2026-10-15', hora: '14:00' }).ok, true);
+  ctx.novaExecucao();
+  assert.equal(ctx.apiSalvarDesfechoAdmissao({ id: primeira.id, desfecho_id: desfecho('ALTA PSICOLÓGICA').id, data_desfecho: '2026-10-15' }).ok, true);
+  ctx.novaExecucao();
+  assert.equal(ctx.apiRetomarAcompanhamento({ id: primeira.id, data: '2026-10-16', justificativa_id: alta.id }).ok, true);
+  ctx.novaExecucao();
+  assert.equal(ctx.apiSalvarDesfechoAdmissao({ id: primeira.id, desfecho_id: desfecho('ALTA').id, data_desfecho: '2026-10-17' }).ok, true);
+  ctx.novaExecucao();
+  const segunda = ctx.apiSalvarEntradaAdmissao({ paciente_id: paciente.id, data_admissao: '2026-10-19', unidade_id: unidade.id }).dados.admissao;
+  assert.equal(atender(segunda, { data: '2026-10-20', hora: '08:30', justificativa_id: j.id }).ok, true);
+
+  ctx.novaExecucao();
+  const r = ctx.apiHistoricoPaciente(paciente.id);
+  assert.equal(r.ok, true, r.erro);
+  const h = r.dados;
+  assert.equal(h.paciente.id, paciente.id);
+  assert.deepEqual({ ...h.resumo }, { internacoes: 2, atendimentos: 4, solicitacoes: 1, desfechos: 2 });
+  assert.equal(h.internacoes[0].admissao.id, segunda.id); // a mais recente primeiro
+  assert.equal(h.internacoes[1].admissao.id, primeira.id);
+  assert.equal(h.internacoes[1].admissao.descricao_demanda, 'HUMOR DEPRIMIDO OU ANSIOSO');
+
+  const tipos = h.internacoes[1].eventos.map(e => e.tipo + ' ' + e.data);
+  assert.deepEqual([...tipos], [
+    'DESFECHO 2026-10-17',
+    'RETOMADA 2026-10-16',
+    'DESFECHO 2026-10-15',
+    'TRANSFERÊNCIA 2026-10-15',
+    'JUSTIFICATIVA 2026-10-15',
+    'ATENDIMENTO 2026-10-15',
+    'ATENDIMENTO 2026-10-14',
+    'JUSTIFICATIVA 2026-10-13',
+    'ATENDIMENTO 2026-10-13',
+    'SOLICITAÇÃO 2026-10-13',
+    'ENTRADA 2026-10-09'
+  ]);
+  const ev = (tipo, data) => h.internacoes[1].eventos.find(e => e.tipo === tipo && e.data === data);
+  assert.equal(ev('JUSTIFICATIVA', '2026-10-13').de, '');
+  assert.equal(ev('JUSTIFICATIVA', '2026-10-13').para, j.nome);
+  assert.equal(ev('JUSTIFICATIVA', '2026-10-15').de, j.nome);
+  assert.equal(ev('JUSTIFICATIVA', '2026-10-15').para, 'RISCO DE SUICÍDIO');
+  const fam = ev('ATENDIMENTO', '2026-10-13');
+  assert.equal(fam.publico, 'FAMÍLIA');
+  assert.equal(Number(fam.quantidade), 2);
+  assert.equal(fam.hora, '09:00');
+  assert.ok(fam.profissional_nome);
+  assert.equal(fam.tipo_prazo, 'PRIMEIRO');
+  assert.equal(fam.interconsultas_respondidas[0], i.id);
+  const sol = ev('SOLICITAÇÃO', '2026-10-13');
+  assert.equal(sol.hora, '08:00');
+  assert.equal(sol.prioridade, 'ALTA');
+  assert.equal(sol.para_quem, 'FAMILIAR');
+  assert.equal(sol.resultado, 'SIM');
+  assert.equal(sol.respondida_em, '2026-10-13 09:00');
+  const transf = ev('TRANSFERÊNCIA', '2026-10-15');
+  assert.equal(transf.origem_nome, 'CM 2');
+  assert.equal(transf.destino_nome, 'UTI 1');
+  assert.equal(ev('DESFECHO', '2026-10-15').vigente, 'NÃO'); // seguido de retomada
+  assert.equal(ev('DESFECHO', '2026-10-17').encerra_admissao, 'SIM');
+  assert.equal(ev('RETOMADA', '2026-10-16').desfecho_anterior, 'ALTA PSICOLÓGICA');
+
+  ctx.novaExecucao();
+  assert.equal(ctx.apiHistoricoPaciente('nao-existe').ok, false);
+  // Só consulta: nada muda na planilha.
+  ctx.novaExecucao();
+  const antes = JSON.stringify(ctx.listar('ADMISSOES'));
+  ctx.novaExecucao();
+  ctx.apiHistoricoPaciente(paciente.id);
+  ctx.novaExecucao();
+  assert.equal(JSON.stringify(ctx.listar('ADMISSOES')), antes);
+});

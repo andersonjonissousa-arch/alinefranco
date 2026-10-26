@@ -759,3 +759,78 @@ test('admissões: trocar abertas e encerradas faz uma busca só; setor e busca f
   assert.equal(tela.pedidos.length, 2, 'Uma busca só ao trocar a opção');
   assert.deepEqual(tela.pedidos[1].args[0], { abertas: 'NÃO', limite: 300 });
 });
+
+function historicoDoPaciente() {
+  const adm = detalhe({ status: status.encerrada, data_admissao: '2026-10-09', desfecho_nome: 'ALTA', data_desfecho: '2026-10-17', primeiro_atendimento: '2026-10-13', primeiro_no_prazo: 'SIM' }).admissao;
+  return {
+    paciente: { ...paciente, sexo: 'FEMININO', data_nascimento: '1980-05-02' },
+    resumo: { internacoes: 2, atendimentos: 1, solicitacoes: 1, desfechos: 1 },
+    internacoes: [
+      { admissao: { ...adm, id: 'adm2', data_admissao: '2026-10-19', status: status.aguardando, desfecho_nome: '', primeiro_atendimento: '', primeiro_no_prazo: 'EM ANDAMENTO' }, eventos: [
+        { tipo: 'ENTRADA', data: '2026-10-19', hora: '', unidade_nome: 'UNIDADE TESTE', admissao_id: 'adm2' }] },
+      { admissao: adm, eventos: [
+        { tipo: 'DESFECHO', data: '2026-10-17', hora: '', desfecho_nome: 'ALTA', encerra_admissao: 'SIM', vigente: 'SIM', unidade_nome: 'UNIDADE TESTE' },
+        { tipo: 'TRANSFERÊNCIA', data: '2026-10-15', hora: '14:00', origem_nome: 'UNIDADE TESTE', destino_nome: 'UTI TESTE', profissional_nome: 'PROFISSIONAL TESTE' },
+        { tipo: 'JUSTIFICATIVA', data: '2026-10-13', hora: '09:00', de: '', para: 'JUSTIFICATIVA TESTE', profissional_nome: 'PROFISSIONAL TESTE' },
+        { tipo: 'ATENDIMENTO', data: '2026-10-13', hora: '09:00', publico: 'FAMÍLIA', quantidade: 2, profissional_nome: 'PROFISSIONAL TESTE',
+          categoria: 'RESIDENTE', tipo_atendimento: 'INTERCONSULTA', justificativa_nome: 'JUSTIFICATIVA TESTE', unidade_nome: 'UNIDADE TESTE',
+          tipo_prazo: 'PRIMEIRO', prazo: '2026-10-14', resultado: 'SIM', interconsultas_respondidas: ['i1'], observacao: '' },
+        { tipo: 'SOLICITAÇÃO', data: '2026-10-13', hora: '08:00', solicitacao_id: 'i1', tipo_solicitacao: 'EQUIPE', motivo_nome: 'MOTIVO TESTE',
+          prioridade: 'ALTA', para_quem: 'FAMILIAR', familiar_parentesco: 'MÃE', familiar_nome: '', prazo: '2026-10-14', resultado: 'SIM',
+          respondida_em: '2026-10-13 09:00', dias_resposta: 0, pendente: false, observacoes: '' },
+        { tipo: 'ENTRADA', data: '2026-10-09', hora: '', unidade_nome: 'UNIDADE TESTE', admissao_id: 'adm1' }] }
+    ]
+  };
+}
+
+test('histórico do paciente: abre da internação, mostra a linha do tempo, filtra na tela e volta para onde estava', async () => {
+  const tela = carregar();
+  tela.ctx.desenharAtendimento(detalhe({ status: status.acompanhamento }));
+  botao(tela, /Histórico completo do paciente/).emitir('click');
+  assert.deepEqual(tela.navegacao.at(-1), { nome: 'historico', arg: { paciente_id: 'p1', voltar: { nome: 'atendimentos', arg: { id: 'adm1' } } } });
+
+  tela.ctx.telaHistorico(tela.navegacao.at(-1).arg);
+  assert.equal(tela.pedidos[0].nome, 'apiHistoricoPaciente');
+  assert.deepEqual(tela.pedidos[0].args, ['p1']);
+  await tela.responder(0, historicoDoPaciente());
+  const texto = tela.conteudo.textContent;
+  assert.match(texto, /Histórico · PACIENTE DE TESTE/);
+  assert.match(texto, /Internações 2/);
+  // A internação mais recente vem primeiro.
+  assert.ok(texto.indexOf('Internação de 19/10/2026') !== -1 && texto.indexOf('Internação de 19/10/2026') < texto.indexOf('Internação de 09/10/2026'), texto);
+  assert.match(texto, /Descrição da demanda DEMANDA TESTE/);
+  assert.match(texto, /Atendimento a família · 2 pessoa\(s\)/);
+  assert.match(texto, /por PROFISSIONAL TESTE \(residente\)/);
+  assert.match(texto, /Justificativa: JUSTIFICATIVA TESTE/);
+  assert.match(texto, /prioridade alta · para mãe/);
+  assert.match(texto, /respondida 13\/10\/2026 09:00 \(no mesmo dia\)/);
+  assert.match(texto, /UNIDADE TESTE → UTI TESTE/);
+  assert.match(texto, /Definida: JUSTIFICATIVA TESTE/);
+  assert.match(texto, /encerra a internação/);
+  assert.match(texto, /Respondeu à solicitação de 13\/10\/2026 08:00 · MOTIVO TESTE/);
+  assert.equal(tela.todos().filter(el => el.tagName === 'LI').length, 7);
+
+  // Filtrar não vai ao servidor.
+  const filtro = tela.todos().find(el => el.name === 'tipo');
+  filtro.value = 'ATENDIMENTO';
+  filtro.emitir('change');
+  assert.equal(tela.pedidos.length, 1);
+  assert.equal(tela.todos().filter(el => el.tagName === 'LI').length, 1);
+  assert.match(tela.conteudo.textContent, /Nada deste tipo nesta internação/);
+
+  botao(tela, /Abrir esta internação/).emitir('click');
+  assert.deepEqual(tela.navegacao.at(-1), { nome: 'atendimentos', arg: { id: 'adm2' } });
+  botao(tela, /← Voltar/).emitir('click');
+  assert.deepEqual(tela.navegacao.at(-1), { nome: 'atendimentos', arg: { id: 'adm1' } });
+});
+
+test('histórico do paciente: link na lista de atendimentos abre o histórico sem abrir a internação', async () => {
+  const tela = carregar();
+  tela.ctx.telaAtendimentos();
+  await tela.responder(0, gestao([itemDeGestao()]));
+  const link = tela.todos().find(el => el.tagName === 'BUTTON' && el.textContent === 'histórico');
+  assert.ok(link);
+  link.emitir('click', { stopPropagation() {} });
+  assert.deepEqual(tela.navegacao.at(-1), { nome: 'historico', arg: { paciente_id: 'p1', voltar: { nome: 'atendimentos' } } });
+  assert.equal(tela.navegacao.length, 1);
+});
