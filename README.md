@@ -69,6 +69,19 @@ Início e Gestão abrem diretamente a tela Atendimentos ao selecionar um pacient
 
 Menu **Gestão**, com três abas (todas com filtro de setor, unidade e paciente):
 
+- **Painel de prazos** (abre primeiro): tudo o que tem prazo correndo, uma linha por prazo, com paciente,
+  unidade, tipo (1º atendimento, interconsulta ou retorno), prioridade, prazo (só a data) e situação.
+  - **Cores:** prioridade alta vermelha, moderada laranja, baixa e monitoramento cinza; situação atrasada
+    vermelha, vence hoje laranja, vence amanhã amarela e no prazo verde (no selo e na borda da linha).
+  - **Ordem:** atrasados, vence hoje, vence amanhã e no prazo; em cada grupo, alta antes de moderada e baixa,
+    e depois o prazo mais próximo. O 1º atendimento não tem prioridade e vem depois.
+  - **Filtros:** paciente, setor, unidade, prioridade (inclusive "sem prioridade") e situação, na própria
+    tela. Os totais por situação também filtram ao clicar. No Início, "Com prazo atrasado", "Vencem hoje" e
+    "Vencem amanhã" abrem o painel já filtrado.
+  - Um paciente com mais de um prazo aparece em mais de uma linha (por exemplo, uma interconsulta e o
+    retorno). Clicar na linha abre a internação; o link "histórico" abre o histórico do paciente.
+  - No celular, cada prazo vira um cartão.
+
 - **Pacientes por unidade:** os pacientes internados em acompanhamento, sem desfecho, agrupados por
   setor e unidade. Mostra a situação (aguardando 1º atendimento ou em acompanhamento), a justificativa
   com a prioridade e a frequência da matriz, o último atendimento e o próximo prazo. Dá para incluir
@@ -76,13 +89,10 @@ Menu **Gestão**, com três abas (todas com filtro de setor, unidade e paciente)
 - **Interconsultas:** cada linha representa uma solicitação, com data, motivo, destinatário, prioridade, prazo e resposta próprios. A gestão inclui solicitações com e sem prazo (os tipos com prazo incluem, de início,
   tipo EQUIPE). Aguardando resposta (com os dias úteis que faltam ou o atraso) e respondidas no
   período escolhido (no prazo ou fora, com o tempo de resposta), com totais e % no prazo.
-- **Prazos:** uma linha por paciente com os três prazos lado a lado: 1º atendimento (dias úteis da
-  admissão), interconsulta (dias úteis pela prioridade do motivo) e retorno (dias úteis pela prioridade da
-  justificativa).
 
 A tela **Início** mostra os totais (em acompanhamento, aguardando 1º atendimento, interconsultas
-pendentes, atrasados, vencem hoje), que levam à aba certa da Gestão, e a lista do que vence hoje ou
-está atrasado.
+pendentes, atrasados, vencem hoje, vencem amanhã), que levam à aba certa da Gestão (os de prazo abrem o
+painel de prazos já filtrado), e a lista do que vence hoje ou amanhã ou está atrasado.
 
 ## Compilado
 

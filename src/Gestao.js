@@ -18,6 +18,11 @@ function itemDeGestao(adm, aux) {
     }
   }
   return Object.assign(r, {
+    // Painel de prazos: cada interconsulta pendente com prazo vira uma linha própria.
+    solicitacoes_pendentes: pendentes.map(function (i) {
+      return { id: i.id, prazo: i.prazo_resposta, situacao: i.prazo.situacao, prioridade: i.prioridade_solicitacao || '',
+        motivo_nome: i.motivo_nome, dias_restantes: i.prazo.dias_restantes };
+    }),
     unidade_id: r.unidade_atual_id,
     unidade_nome: r.unidade_atual_nome,
     setor_id: r.setor_atual_id,

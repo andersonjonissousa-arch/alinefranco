@@ -106,6 +106,32 @@
   .selo.hoje { background: #ffe9d5; color: #b54708; }
   .selo.amanha { background: #fff8c5; color: #7a5d00; }
   .selo.prazo { background: #e6f4ea; color: var(--ok); }
+  /* Prioridade no painel de prazos: alta vermelha, moderada laranja, baixa cinza. */
+  .selo.prioridade-alta { background: var(--perigo); color: #fff; }
+  .selo.prioridade-moderada { background: #e8590c; color: #fff; }
+  .selo.prioridade-baixa { background: #e4e7eb; color: #3e4c59; }
+  /* Situação no painel: a borda da linha repete a cor do selo. */
+  table.painel-prazos tr > td:first-child { border-left: 4px solid transparent; }
+  table.painel-prazos tr.situacao-atrasado > td:first-child { border-left-color: var(--perigo); }
+  table.painel-prazos tr.situacao-hoje > td:first-child { border-left-color: #e8590c; }
+  table.painel-prazos tr.situacao-amanha > td:first-child { border-left-color: #e6b84b; }
+  table.painel-prazos tr.situacao-prazo > td:first-child { border-left-color: var(--ok); }
+  /* No celular, cada prazo vira um cartão, com o rótulo de cada coluna. */
+  @media (max-width: 600px) {
+    table.painel-prazos thead { display: none; }
+    table.painel-prazos, table.painel-prazos tbody, table.painel-prazos tr { display: block; width: 100%; }
+    .tabela-rolagem table.painel-prazos { min-width: 0; }
+    table.painel-prazos tr { border-left: 4px solid var(--borda); border-bottom: 1px solid var(--borda); padding: 8px 0 8px 10px; }
+    table.painel-prazos tr.situacao-atrasado { border-left-color: var(--perigo); }
+    table.painel-prazos tr.situacao-hoje { border-left-color: #e8590c; }
+    table.painel-prazos tr.situacao-amanha { border-left-color: #e6b84b; }
+    table.painel-prazos tr.situacao-prazo { border-left-color: var(--ok); }
+    table.painel-prazos tr > td:first-child { border-left: 0; }
+    table.painel-prazos td { display: block; border: 0; padding: 2px 0; overflow-wrap: anywhere; }
+    table.painel-prazos td[data-rotulo] > div { display: inline; margin-left: 6px; }
+    table.painel-prazos td[data-rotulo]::before { content: attr(data-rotulo); color: var(--suave); display: inline-block; min-width: 84px; }
+  }
+  .indicador.selecionado { border-color: var(--primaria); box-shadow: inset 0 0 0 1px var(--primaria); }
 
   .indicadores { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 16px; }
   .indicador { background: var(--cartao); border: 1px solid var(--borda); border-radius: var(--raio); padding: 14px 16px; color: var(--suave); }

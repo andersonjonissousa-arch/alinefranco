@@ -901,3 +901,80 @@ test('descrição da demanda: "Editar" e "A demanda mudou" ao lado da atual, e a
   assert.ok(botao(tela, /^Editar$/));
   assert.equal(tela.todos().some(el => el.tagName === 'BUTTON' && el.textContent === 'A demanda mudou'), false);
 });
+
+test('painel de prazos: uma linha por prazo, atrasados primeiro, alta antes de moderada e baixa, filtros na tela', async () => {
+  const tela = carregar();
+  tela.ctx.estado.cad.prioridades.push({ id: 'p2', tipo: 'SEGUIMENTO', nome: 'MODERADA', prazo: 3, ativo: 'SIM' },
+    { id: 'p3', tipo: 'SEGUIMENTO', nome: 'BAIXA', prazo: 5, ativo: 'SIM' });
+  const pendente = (prazo, situacao) => ({ estado: 'PENDENTE', prazo, situacao });
+  const item = (id, nome, prazos, extra = {}) => ({ ...itemDeGestao({ id, paciente_nome: nome, ...extra }), prazos: {
+    primeiro: { estado: 'CUMPRIDO' }, interconsulta: { estado: '' }, retorno: { estado: '' }, proximo: null, ...prazos } });
+  const itens = [
+    item('a1', 'ANA', { retorno: { ...pendente('2026-10-23', 'NO PRAZO'), prioridade: 'ALTA' } }),
+    item('a2', 'BIA', { retorno: { ...pendente('2026-10-20', 'ATRASADO'), prioridade: 'BAIXA' } },
+      { solicitacoes_pendentes: [{ id: 'i1', prazo: '2026-10-20', situacao: 'ATRASADO', prioridade: 'ALTA', motivo_nome: 'RISCO DE SUICÍDIO' },
+        { id: 'i2', prazo: '2026-10-22', situacao: 'VENCE AMANHÃ', prioridade: 'MODERADA', motivo_nome: 'CUIDADOS PALIATIVOS' }] }),
+    item('a3', 'CAIO', { primeiro: pendente('2026-10-21', 'VENCE HOJE') }, { unidade_id: 'u2', unidade_nome: 'UTI TESTE' }),
+    item('a4', 'DINA', { retorno: { ...pendente('2026-10-19', 'ATRASADO'), prioridade: 'MODERADA' } })
+  ];
+  tela.ctx.gestaoPrazos(tela.conteudo);
+  await tela.responder(0, gestao(itens));
+  const linhas = () => tela.todos().filter(el => el.tagName === 'TR' && el.className && el.className.includes('clicavel'));
+  const resumo = () => linhas().map(tr => tr.children.map(td => td.textContent).join(' | '));
+  assert.deepEqual(resumo().map(l => l.split(' | ').slice(2).join(' | ')), [
+    'InterconsultaRISCO DE SUICÍDIO | alta | 20/10/2026 | atrasado',
+    'Retorno | moderada | 19/10/2026 | atrasado',
+    'Retorno | baixa | 20/10/2026 | atrasado',
+    '1º atendimento | — | 21/10/2026 | vence hoje',
+    'InterconsultaCUIDADOS PALIATIVOS | moderada | 22/10/2026 | vence amanhã',
+    'Retorno | alta | 23/10/2026 | no prazo'
+  ]);
+  // Cores: prioridade e situação.
+  const selos = tela.todos().filter(el => el.tagName === 'SPAN' && /prioridade-/.test(el.className || ''));
+  assert.ok(selos.some(s => s.className.includes('prioridade-alta') && s.textContent === 'alta'));
+  assert.ok(selos.some(s => s.className.includes('prioridade-moderada')));
+  assert.ok(selos.some(s => s.className.includes('prioridade-baixa')));
+  assert.ok(linhas()[0].className.includes('situacao-atrasado'));
+  assert.ok(linhas()[5].className.includes('situacao-prazo'));
+  // Totais por situação.
+  assert.match(tela.conteudo.textContent, /3Atrasados1Vencem hoje1Vencem amanhã1No prazo/);
+
+  const form = formularioCom(tela, 'situacao');
+  preencher(form, 'situacao', 'ATRASADO');
+  form.emitir('change');
+  assert.equal(linhas().length, 3);
+  preencher(form, 'prioridade', 'ALTA');
+  form.emitir('change');
+  assert.equal(linhas().length, 1);
+  assert.match(linhas()[0].textContent, /BIA/);
+  preencher(form, 'situacao', '');
+  preencher(form, 'prioridade', 'SEM');
+  form.emitir('change');
+  assert.equal(linhas().length, 1);
+  assert.match(linhas()[0].textContent, /CAIO/);
+  preencher(form, 'prioridade', '');
+  preencher(form, 'unidade_id', 'u2');
+  form.emitir('change');
+  assert.equal(linhas().length, 1);
+  assert.equal(tela.pedidos.length, 1, 'Os filtros não vão ao servidor');
+  // Clicar no total filtra pela situação.
+  preencher(form, 'unidade_id', '');
+  form.emitir('change');
+  botao(tela, /Vencem amanhã/).emitir('click');
+  assert.equal(linhas().length, 1);
+  assert.match(linhas()[0].textContent, /CUIDADOS PALIATIVOS/);
+  linhas()[0].emitir('click');
+  assert.deepEqual(tela.navegacao.at(-1), { nome: 'atendimentos', arg: { id: 'a2' } });
+});
+
+test('início: os totais de atrasados, vencem hoje e vencem amanhã abrem o painel de prazos já filtrado', async () => {
+  const tela = carregar();
+  tela.ctx.telaInicio();
+  await tela.responder(0, gestao([]));
+  botao(tela, /Com prazo atrasado/).emitir('click');
+  assert.deepEqual(tela.navegacao.at(-1), { nome: 'gestao', arg: { aba: 'prazos', situacao: 'ATRASADO' } });
+  botao(tela, /Vencem hoje/).emitir('click');
+  assert.deepEqual(tela.navegacao.at(-1), { nome: 'gestao', arg: { aba: 'prazos', situacao: 'VENCE HOJE' } });
+  botao(tela, /Vencem amanhã/).emitir('click');
+  assert.deepEqual(tela.navegacao.at(-1), { nome: 'gestao', arg: { aba: 'prazos', situacao: 'VENCE AMANHÃ' } });
+});

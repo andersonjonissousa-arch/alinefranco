@@ -753,6 +753,11 @@ test('gestão: pacientes ativos por unidade, interconsultas pendentes e respondi
   assert.equal(doCm2.dias_internado, 1);
   assert.equal(doCm2.prazos.interconsulta.dias_restantes, 1);
   assert.equal(doCm2.prazos.interconsulta.situacao, 'VENCE AMANHÃ');
+  // Painel de prazos: cada interconsulta pendente com o próprio prazo, situação e prioridade.
+  assert.equal(doCm2.solicitacoes_pendentes.length, 1);
+  assert.deepEqual({ ...doCm2.solicitacoes_pendentes[0], id: '' }, { id: '', prazo: '2026-10-21', situacao: 'VENCE AMANHÃ', prioridade: 'ALTA',
+    motivo_nome: 'RISCO DE SUICÍDIO', dias_restantes: 1 });
+  assert.equal(primeiro.solicitacoes_pendentes.length, 0);
   assert.equal(doCm2.prazos.proximo.tipo, 'INTERCONSULTA');
   ctx.novaExecucao();
   assert.equal(ctx.apiGestao({ unidade_id: outra.id }).dados.itens.length, 1);
