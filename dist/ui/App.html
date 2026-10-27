@@ -813,6 +813,7 @@
     { valor: '', rotulo: 'Tudo' },
     { valor: 'ATENDIMENTO', rotulo: 'Atendimentos' },
     { valor: 'SOLICITAÇÃO', rotulo: 'Solicitações (interconsultas)' },
+    { valor: 'DEMANDA', rotulo: 'Descrição da demanda' },
     { valor: 'JUSTIFICATIVA', rotulo: 'Mudanças de justificativa' },
     { valor: 'TRANSFERÊNCIA', rotulo: 'Mudanças de unidade' },
     { valor: 'DESFECHO', rotulo: 'Desfechos e retomadas' }
@@ -820,7 +821,7 @@
 
   var ROTULO_EVENTO = {
     'ENTRADA': 'Entrada', 'TRANSFERÊNCIA': 'Mudança de unidade', 'SOLICITAÇÃO': 'Solicitação', 'ATENDIMENTO': 'Atendimento',
-    'JUSTIFICATIVA': 'Justificativa', 'ATIVIDADE': 'Atividade', 'DESFECHO': 'Desfecho', 'RETOMADA': 'Retomada'
+    'DEMANDA': 'Demanda', 'JUSTIFICATIVA': 'Justificativa', 'ATIVIDADE': 'Atividade', 'DESFECHO': 'Desfecho', 'RETOMADA': 'Retomada'
   };
 
   function telaHistorico(arg) {
@@ -886,7 +887,7 @@
         info('ID da admissão', a.id),
         info('Unidade da admissão', a.unidade_admissao_nome || a.unidade_nome),
         info('Unidade atual', a.unidade_atual_nome || a.unidade_nome),
-        info('Descrição da demanda', a.descricao_demanda || '—'),
+        info('Descrição da demanda atual', a.descricao_demanda || '—'),
         info('Justificativa atual', a.justificativa_nome || '—'),
         info('1º atendimento', a.primeiro_atendimento ? dataBr(a.primeiro_atendimento) : '—', ' ', a.primeiro_em_avaliacao === false
           ? h('span', { class: 'selo' }, 'Fora do período de avaliação') : seloPrimeiro(a.primeiro_no_prazo)),
@@ -943,6 +944,9 @@
         e.interconsultas_respondidas && e.interconsultas_respondidas.length ? h('div', { class: 'suave' }, 'Respondeu à solicitação de ' +
           e.interconsultas_respondidas.map(function (id) { return (solicitacoes || {})[id] || id; }).join('; ')) : null,
         e.observacao ? h('div', { class: 'suave' }, e.observacao) : null);
+    } else if (e.tipo === 'DEMANDA') {
+      linhas.push(h('strong', null, e.de ? e.de + ' → ' + e.descricao : e.descricao),
+        h('div', { class: 'suave' }, juntar([ROTULO_ORIGEM_DESCRICAO[e.origem] || e.origem, e.unidade_nome, e.profissional_nome ? 'por ' + e.profissional_nome : ''])));
     } else if (e.tipo === 'JUSTIFICATIVA') {
       linhas.push(h('strong', null, e.de ? e.de + ' → ' + e.para : 'Definida: ' + e.para), h('div', { class: 'suave' }, quemAtendeu(e)));
     } else if (e.tipo === 'ATIVIDADE') {
@@ -1063,7 +1067,7 @@
     main.appendChild(blocoLocalizacao(det));
     main.appendChild(blocoInterconsultas(det));
     // A descrição da demanda é informada no 1º atendimento e pode ser corrigida depois, a qualquer momento.
-    if (a.status !== st.aguardando) main.appendChild(formularioDescricao(a));
+    if (a.status !== st.aguardando) main.appendChild(formularioDescricao(a, det.descricoes || []));
     if (a.status === st.aguardando || a.status === st.acompanhamento) {
       main.appendChild(formularioAtendimento(a, det.interconsultas || [], det.transferencias || []));
     } else {
@@ -1101,6 +1105,23 @@
         campo('Setor de destino', setor), campo('Unidade de destino', unidade),
         campo('Data da transferência', h('input', { name: 'data', type: 'date', value: estado.cad.hoje, min: a.data_admissao, max: estado.cad.hoje, required: true })),
         campo('Hora da transferência', h('input', { name: 'hora', type: 'time', value: horaAgora(), required: true })));
+      // Depois do 1º atendimento, a transferência pergunta se a demanda mudou. Se mudou, a nova já é registrada aqui.
+      if (a.status !== estado.cad.status_admissao.aguardando && a.descricao_demanda) {
+        var mudou = seletor('demanda_mudou', [{ valor: 'NÃO', rotulo: 'Continua a mesma (' + a.descricao_demanda.toLowerCase() + ')' },
+          { valor: 'SIM', rotulo: 'Mudou' }], '', 'Selecione…');
+        mudou.required = true;
+        var nova = seletor('descricao_demanda', opcoesLista('DESCRICAO_DEMANDA').filter(function (v) { return v !== a.descricao_demanda; }), '');
+        var campoNova = campo('Nova demanda', nova);
+        var ajustarDemanda = function () {
+          campoNova.hidden = mudou.value !== 'SIM';
+          nova.required = mudou.value === 'SIM';
+          if (mudou.value !== 'SIM') nova.value = '';
+        };
+        mudou.addEventListener('change', ajustarDemanda);
+        ajustarDemanda();
+        form.appendChild(campo('A demanda', mudou));
+        form.appendChild(campoNova);
+      }
       var salvar = h('button', { type: 'submit', class: 'btn' }, 'Alterar setor/unidade atual');
       form.appendChild(salvar);
       form.addEventListener('submit', function (ev) {
@@ -1188,21 +1209,72 @@
     return bloco;
   }
 
-  /** Descrição da demanda, corrigível depois do 1º atendimento (v27): só esse campo. */
-  function formularioDescricao(a) {
+  var ROTULO_ORIGEM_DESCRICAO = { 'AVALIAÇÃO': '1º atendimento', 'MUDANÇA': 'A demanda mudou', 'TRANSFERÊNCIA': 'Na transferência',
+    'LEGADO': 'Registro anterior' };
+
+  /**
+   * Descrição da demanda depois do 1º atendimento: a atual, com "Editar" (erro de preenchimento: substitui)
+   * e "A demanda mudou" (registra uma nova, com data e unidade, sem apagar a anterior).
+   */
+  function formularioDescricao(a, descricoes) {
     var navegacao = estado.navegacao;
+    var encerrada = a.status === estado.cad.status_admissao.encerrada;
+    var depois = function (det) { if (navegacao === estado.navegacao) desenharAtendimento(det); };
+    var atual = descricoes[descricoes.length - 1];
+
     var descricao = seletor('descricao_demanda', opcoesLista('DESCRICAO_DEMANDA'), a.descricao_demanda || '');
     descricao.required = true;
-    var form = h('form', { class: 'linha' }, campo('Descrição da demanda', descricao));
-    var botao = h('button', { class: 'btn sec', type: 'submit' }, 'Salvar descrição');
-    form.appendChild(botao);
-    form.addEventListener('submit', function (ev) {
+    var formEditar = h('form', { class: 'linha' }, campo('Descrição correta', descricao));
+    var salvar = h('button', { class: 'btn sec', type: 'submit' }, 'Salvar descrição');
+    formEditar.appendChild(salvar);
+    formEditar.hidden = true;
+    formEditar.addEventListener('submit', function (ev) {
       ev.preventDefault();
-      enviar(botao, chamar('apiSalvarDescricaoDemanda', Object.assign(lerFormulario(form), { id: a.id })), 'Descrição da demanda salva.')
-        .then(function (det) { if (navegacao === estado.navegacao) desenharAtendimento(det); }).catch(function () {});
+      enviar(salvar, chamar('apiSalvarDescricaoDemanda', Object.assign(lerFormulario(formEditar), { id: a.id })), 'Descrição da demanda corrigida.')
+        .then(depois).catch(function () {});
     });
-    return h('div', { class: 'cartao' }, h('h2', null, 'Descrição da demanda'),
-      h('p', { class: 'suave' }, 'Corrija se houve erro no preenchimento ou se a demanda mudou durante a internação.'), form);
+
+    var nova = seletor('descricao_demanda', opcoesLista('DESCRICAO_DEMANDA').filter(function (v) { return v !== a.descricao_demanda; }), '');
+    nova.required = true;
+    var formMudou = h('form', { class: 'linha' },
+      campo('Nova demanda', nova),
+      campo('Data', h('input', { name: 'data', type: 'date', value: estado.cad.hoje, min: atual ? atual.data : a.data_admissao, max: estado.cad.hoje, required: true })),
+      campo('Hora', h('input', { name: 'hora', type: 'time', value: horaAgora(), required: true })));
+    var registrar = h('button', { class: 'btn', type: 'submit' }, 'Registrar mudança');
+    formMudou.appendChild(registrar);
+    formMudou.hidden = true;
+    formMudou.addEventListener('submit', function (ev) {
+      ev.preventDefault();
+      enviar(registrar, chamar('apiMudarDescricaoDemanda', Object.assign(lerFormulario(formMudou), { id: a.id })), 'Mudança da demanda registrada.')
+        .then(depois).catch(function () {});
+    });
+
+    var editar = h('button', { class: 'btn sec', type: 'button' }, 'Editar');
+    editar.addEventListener('click', function () { formEditar.hidden = !formEditar.hidden; formMudou.hidden = true; });
+    var mudou = h('button', { class: 'btn sec', type: 'button' }, 'A demanda mudou');
+    mudou.addEventListener('click', function () { formMudou.hidden = !formMudou.hidden; formEditar.hidden = true; });
+
+    var cartao = h('div', { class: 'cartao' }, h('h2', null, 'Descrição da demanda'),
+      h('div', { class: 'linha descricao-atual' },
+        h('div', null, h('strong', null, a.descricao_demanda || '—'),
+          atual ? h('div', { class: 'suave' }, 'desde ' + dataBr(atual.data) + (atual.unidade_nome ? ' · ' + atual.unidade_nome : '')) : null),
+        editar, encerrada ? null : mudou),
+      h('p', { class: 'suave' }, '"Editar" corrige um erro de preenchimento e substitui a descrição. "A demanda mudou" registra a nova demanda com data e unidade, sem apagar a anterior; no compilado, cada uma conta no mês e na unidade em que foi registrada.'),
+      formEditar, formMudou);
+    if (descricoes.length > 1 || descricoes.some(function (d) { return d.origem === 'MUDANÇA' || d.origem === 'TRANSFERÊNCIA'; })) {
+      cartao.appendChild(h('div', { class: 'tabela-rolagem' }, h('table', null,
+        h('thead', null, h('tr', null, ['Desde', 'Descrição', 'Unidade', 'Registro', 'Por', ''].map(function (t) { return h('th', null, t); }))),
+        h('tbody', null, descricoes.slice().reverse().map(function (d) {
+          var podeExcluir = (d.origem === 'MUDANÇA' || d.origem === 'TRANSFERÊNCIA') &&
+            (ehCoordenacao() || d.criado_por === estado.usuario.id || d.profissional_id === estado.usuario.id);
+          return h('tr', null,
+            h('td', null, dataBr(d.data), d.hora ? h('div', { class: 'suave' }, d.hora) : null),
+            h('td', null, d.descricao), h('td', null, d.unidade_nome || '—'),
+            h('td', null, ROTULO_ORIGEM_DESCRICAO[d.origem] || d.origem), h('td', null, d.profissional_nome || '—'),
+            h('td', null, podeExcluir ? botaoExcluir('apiExcluirDescricaoDemanda', d.id) : ''));
+        })))));
+    }
+    return cartao;
   }
 
   function formularioDesfecho(a) {

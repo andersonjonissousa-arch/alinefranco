@@ -78,6 +78,10 @@ function testarSistema() {
       'Atendimento ao paciente e à família conta para o prazo (v27)');
 
     dados(apiRegistrarAtividade({ admissao_id: adm.id, data: hojeIso, tipo: 'DISCUSSÃO DE CASO', quantidade: 1 }), 'Atividade assistencial: registro');
+    det = dados(apiMudarDescricaoDemanda({ id: adm.id, descricao_demanda: 'HUMOR DEPRIMIDO OU ANSIOSO', data: hojeIso, hora: horaAgora }),
+      'Descrição da demanda: a demanda mudou');
+    verificar(det && det.descricoes.length === 2 && det.admissao.descricao_demanda === 'HUMOR DEPRIMIDO OU ANSIOSO',
+      'Descrição da demanda: a mudança guarda a anterior', det && det.descricoes.length);
 
     var desfecho = function (nome) { return listar('DESFECHOS').filter(function (d) { return d.nome === nome; })[0].id; };
     var base = {
@@ -108,6 +112,8 @@ function testarSistema() {
     verificar(linha('Atendimentos', 'TOTAL DE PESSOAS') && linha('Atendimentos', 'TOTAL DE PESSOAS').total === 5,
       'Compilado: 5 pessoas atendidas (paciente, 2 familiares, paciente e 1 familiar)', linha('Atendimentos', 'TOTAL DE PESSOAS') && linha('Atendimentos', 'TOTAL DE PESSOAS').total);
     verificar(linha('Desfechos', 'TOTAL') && linha('Desfechos', 'TOTAL').total === 2, 'Compilado: 2 desfechos');
+    verificar(linha('Descrição da demanda', 'TOTAL') && linha('Descrição da demanda', 'TOTAL').total === 2,
+      'Compilado: as duas descrições da demanda', linha('Descrição da demanda', 'TOTAL') && linha('Descrição da demanda', 'TOTAL').total);
     verificar(linha('Resposta à solicitação', '% NO PRAZO') && linha('Resposta à solicitação', '% NO PRAZO').total === 1, 'Compilado: resposta à solicitação 100% no prazo');
     dados(apiCompilado({ ano: hojeIso.slice(0, 4), eixo: 'MES', grupo: 'EMPRESA' }), 'Compilado anual (empresa)');
 

@@ -142,20 +142,29 @@ function montarCompilado(dados, op) {
   };
   var solicitacoes = dados.interconsultas ? dados.interconsultas.filter(function (a) { return aceita(a.data_solicitacao, a.unidade_id); }) : adms;
   var comSolicitacao = function (a) { return Boolean(a.motivo_solicitacao_id || a.data_solicitacao); };
+  var porSolicitacao = function (a) { return chave(a.data_solicitacao, a.unidade_id); };
   [
     ['Tipo de solicitação', function (a) { return a.tipo_solicitacao; }, listas.TIPO_SOLICITACAO, solicitacoes],
     ['Motivo da solicitação', function (a) { return (motivos[a.motivo_solicitacao_id] || {}).nome; },
       (dados.motivos || []).map(function (m) { return m.nome; }), solicitacoes.filter(comSolicitacao)],
     ['Prioridade da solicitação', function (a) { return a.prioridade_solicitacao || 'SEM PRIORIDADE'; },
       nomesPrioridade(TIPOS_PRIORIDADE.solicitacao), solicitacoes.filter(comSolicitacao)],
-    ['Solicitação para', function (a) { return a.para_quem; }, PARA_QUEM_SOLICITACAO, solicitacoes.filter(comSolicitacao)],
-    ['Descrição da demanda', function (a) { return a.descricao_demanda; }, listas.DESCRICAO_DEMANDA, adms],
-    ['Prioridade da demanda (seguimento)', function (a) { return a.prioridade_demanda || 'SEM PRIORIDADE'; },
-      nomesPrioridade(TIPOS_PRIORIDADE.seguimento), adms]
-    // v27: sem a seção "Necessidade de acompanhamento" (o campo saiu das telas).
+    ['Solicitação para', function (a) { return a.para_quem; }, PARA_QUEM_SOLICITACAO, solicitacoes.filter(comSolicitacao)]
   ].forEach(function (d) {
-    secao(d[0], distribuicao(d[3], d[1], d[2], (!dados.interconsultas || d[3] === adms) ? chaveAdm : function (a) { return chave(a.data_solicitacao, a.unidade_id); }), { nota: notaServico });
+    secao(d[0], distribuicao(d[3], d[1], d[2], dados.interconsultas ? porSolicitacao : chaveAdm), { nota: notaServico });
   });
+  // Descrição da demanda: cada registro (1º atendimento ou mudança da demanda) conta no mês e na unidade em que foi feito.
+  // Sem a lista de registros (dados antigos), conta a descrição de cada admissão do período.
+  if (dados.descricoes) {
+    secao('Descrição da demanda', distribuicao(dados.descricoes.filter(function (d) { return aceita(d.data, d.unidade_id); }),
+      function (d) { return d.descricao; }, listas.DESCRICAO_DEMANDA, function (d) { return chave(d.data, d.unidade_id); }),
+      { nota: ['Cada descrição conta no mês e na unidade em que foi registrada: no 1º atendimento ou quando a demanda mudou.', notaServico].filter(Boolean).join(' ') });
+  } else {
+    secao('Descrição da demanda', distribuicao(adms, function (a) { return a.descricao_demanda; }, listas.DESCRICAO_DEMANDA, chaveAdm), { nota: notaServico });
+  }
+  // v27: sem a seção "Necessidade de acompanhamento" (o campo saiu das telas).
+  secao('Prioridade da demanda (seguimento)', distribuicao(adms, function (a) { return a.prioridade_demanda || 'SEM PRIORIDADE'; },
+    nomesPrioridade(TIPOS_PRIORIDADE.seguimento), chaveAdm), { nota: notaServico });
 
   // 3. 1º atendimento em até N dias úteis da admissão
   var lSim = linhaCompilado('NO PRAZO');

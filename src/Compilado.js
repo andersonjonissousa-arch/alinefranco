@@ -25,6 +25,7 @@ function gerarCompilado(f) {
     unidades: listar('UNIDADES').slice().sort(porOrdem),
     admissoes: listar('ADMISSOES'),
     interconsultas: listarInterconsultas_(),
+    descricoes: listarDescricoesDemanda_(),
     atendimentos: listar('ATENDIMENTOS'),
     atividades: listar('ATIVIDADES'),
     reunioes: listar('REUNIOES'),

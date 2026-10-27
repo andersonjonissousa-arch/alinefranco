@@ -124,8 +124,9 @@ function formularioCom(tela, nome) {
   return form;
 }
 function formularioDaDescricao(tela) {
+  // O formulário de "Editar": só a descrição (o de "A demanda mudou" tem data; o da transferência, setor).
   const form = tela.todos().find(el => el.tagName === 'FORM' && el.elements.some(c => c.name === 'descricao_demanda') &&
-    !el.elements.some(c => c.name === 'publico'));
+    !el.elements.some(c => ['publico', 'data', 'setor_id'].includes(c.name)));
   assert.ok(form, 'Formulário só da descrição da demanda está disponível');
   return form;
 }
@@ -798,7 +799,7 @@ test('histórico do paciente: abre da internação, mostra a linha do tempo, fil
   assert.match(texto, /Internações 2/);
   // A internação mais recente vem primeiro.
   assert.ok(texto.indexOf('Internação de 19/10/2026') !== -1 && texto.indexOf('Internação de 19/10/2026') < texto.indexOf('Internação de 09/10/2026'), texto);
-  assert.match(texto, /Descrição da demanda DEMANDA TESTE/);
+  assert.match(texto, /Descrição da demanda atual DEMANDA TESTE/);
   assert.match(texto, /Atendimento a família · 2 pessoa\(s\)/);
   assert.match(texto, /por PROFISSIONAL TESTE \(residente\)/);
   assert.match(texto, /Justificativa: JUSTIFICATIVA TESTE/);
@@ -833,4 +834,70 @@ test('histórico do paciente: link na lista de atendimentos abre o histórico se
   link.emitir('click', { stopPropagation() {} });
   assert.deepEqual(tela.navegacao.at(-1), { nome: 'historico', arg: { paciente_id: 'p1', voltar: { nome: 'atendimentos' } } });
   assert.equal(tela.navegacao.length, 1);
+});
+
+test('descrição da demanda: "Editar" e "A demanda mudou" ao lado da atual, e a transferência pergunta se a demanda mudou', async () => {
+  const tela = carregar();
+  tela.ctx.estado.cad.listas.DESCRICAO_DEMANDA.push({ valor: 'OUTRA DEMANDA', ativo: 'SIM' });
+  const d = detalhe({ status: status.acompanhamento });
+  d.descricoes = [{ id: 'd1', data: '2026-10-20', hora: '09:00', descricao: 'DEMANDA TESTE', origem: 'AVALIAÇÃO', unidade_nome: 'UNIDADE TESTE', profissional_nome: 'PROFISSIONAL TESTE' }];
+  tela.ctx.desenharAtendimento(d);
+  assert.match(tela.conteudo.textContent, /DEMANDA TESTEdesde 20\/10\/2026 · UNIDADE TESTE/);
+  const editar = formularioDaDescricao(tela);
+  const mudou = tela.todos().find(el => el.tagName === 'FORM' && el.elements.some(c => c.name === 'descricao_demanda') &&
+    el.elements.some(c => c.name === 'data') && !el.elements.some(c => c.name === 'setor_id'));
+  assert.ok(mudou);
+  assert.equal(editar.hidden, true);
+  assert.equal(mudou.hidden, true);
+  botao(tela, /^A demanda mudou$/).emitir('click');
+  assert.equal(mudou.hidden, false);
+  assert.equal(editar.hidden, true);
+  // A nova demanda não oferece a atual.
+  assert.equal(mudou.elements.find(el => el.name === 'descricao_demanda').children.some(o => o.value === 'DEMANDA TESTE'), false);
+  preencher(mudou, 'descricao_demanda', 'OUTRA DEMANDA');
+  preencher(mudou, 'data', '2026-10-21');
+  preencher(mudou, 'hora', '10:00');
+  mudou.emitir('submit');
+  assert.equal(tela.pedidos[0].nome, 'apiMudarDescricaoDemanda');
+  assert.deepEqual({ ...tela.pedidos[0].args[0] }, { descricao_demanda: 'OUTRA DEMANDA', data: '2026-10-21', hora: '10:00', id: 'adm1' });
+  botao(tela, /^Editar$/).emitir('click');
+  assert.equal(editar.hidden, false);
+  assert.equal(mudou.hidden, true);
+
+  // Com duas descrições, a lista mostra cada uma; a mudança pode ser excluída.
+  const depois = detalhe({ status: status.acompanhamento, descricao_demanda: 'OUTRA DEMANDA' });
+  depois.descricoes = [d.descricoes[0], { id: 'd2', data: '2026-10-21', hora: '10:00', descricao: 'OUTRA DEMANDA', origem: 'MUDANÇA',
+    unidade_nome: 'UNIDADE TESTE', profissional_nome: 'PROFISSIONAL TESTE', criado_por: 'prof1' }];
+  await tela.responder(0, depois);
+  assert.match(tela.conteudo.textContent, /A demanda mudou/);
+  assert.match(tela.conteudo.textContent, /1º atendimento/);
+  const linhas = tela.todos().filter(el => el.tagName === 'TR' && /OUTRA DEMANDA|DEMANDA TESTE/.test(el.textContent) && /Por|PROFISSIONAL/.test(el.textContent));
+  assert.ok(linhas.length >= 2);
+
+  // Transferência: pergunta se a demanda continua; só pede a nova quando mudou.
+  const transf = formularioCom(tela, 'demanda_mudou');
+  const pergunta = transf.elements.find(el => el.name === 'demanda_mudou');
+  const nova = transf.elements.find(el => el.name === 'descricao_demanda');
+  assert.equal(pergunta.required, true);
+  assert.equal(nova.required, false);
+  pergunta.value = 'SIM';
+  pergunta.emitir('change');
+  assert.equal(nova.required, true);
+  tela.ctx.estado.cad.unidades.push({ id: 'u2', nome: 'UTI TESTE', setor_id: 's1', setor: 'SETOR TESTE', ativo: 'SIM' });
+  const setor = transf.elements.find(el => el.name === 'setor_id');
+  setor.emitir('change');
+  preencher(transf, 'unidade_id', 'u2');
+  preencher(transf, 'data', '2026-10-21');
+  preencher(transf, 'hora', '11:00');
+  nova.value = 'DEMANDA TESTE';
+  transf.emitir('submit');
+  const pedido = tela.pedidos.at(-1);
+  assert.equal(pedido.nome, 'apiTransferirPaciente');
+  assert.equal(pedido.args[0].demanda_mudou, 'SIM');
+  assert.equal(pedido.args[0].descricao_demanda, 'DEMANDA TESTE');
+
+  // Internação encerrada: só "Editar".
+  tela.ctx.desenharAtendimento(detalhe({ status: status.encerrada }));
+  assert.ok(botao(tela, /^Editar$/));
+  assert.equal(tela.todos().some(el => el.tagName === 'BUTTON' && el.textContent === 'A demanda mudou'), false);
 });

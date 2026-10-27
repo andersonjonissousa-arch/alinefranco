@@ -68,6 +68,13 @@ var TABELAS = {
     // v27: prazo em dias úteis. prazo_horas fica só nas solicitações gravadas antes.
     'prazo_dias_uteis'
   ],
+  // Descrição da demanda ao longo da internação: a do 1º atendimento (AVALIAÇÃO) e cada mudança, registrada
+  // na tela da internação (MUDANÇA) ou na transferência (TRANSFERÊNCIA). "Editar" corrige a descrição atual.
+  // A admissão guarda a descrição atual em descricao_demanda. No compilado, cada registro conta no mês e na unidade dele.
+  DESCRICOES_DEMANDA: [
+    'id', 'admissao_id', 'unidade_id', 'data', 'hora', 'descricao', 'origem', 'atendimento_id', 'transferencia_id',
+    'profissional_id', 'criado_por', 'criado_em', 'atualizado_em', 'excluido_em', 'excluido_por'
+  ],
   // Cada atendimento: ao paciente, à família ou aos dois (quantidade = nº de familiares), por quem, em que unidade e se foi no prazo.
   // tipo_prazo: PRIMEIRO (1º atendimento da admissão) ou RETORNO.
   // Todo atendimento conta para os prazos (v27). paciente_impossibilitado fica só nos registros antigos.

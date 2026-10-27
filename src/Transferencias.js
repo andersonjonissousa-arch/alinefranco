@@ -57,6 +57,12 @@ function apiTransferirPaciente(dados) {
       var registro = { id: novoId(), admissao_id: adm.id, origem_unidade_id: origem,
         destino_unidade_id: destino.id, data: data, hora: hora, criado_por: usuario.id, criado_em: agoraIso() };
       inserir('TRANSFERENCIAS', registro);
+      // A tela pergunta se a demanda continua a mesma. Se mudou, a nova descrição é registrada aqui,
+      // na data e na unidade de destino; se continua, nada conta de novo no compilado.
+      if (dados.demanda_mudou === 'SIM') {
+        registrarMudancaDeDemanda_(adm, { descricao: dados.descricao_demanda, data: data, hora: hora, unidade_id: destino.id,
+          origem: ORIGENS_DESCRICAO.transferencia, transferencia_id: registro.id }, usuario);
+      }
       return adm.id;
     });
     return detalheAdmissao(buscarPorId('ADMISSOES', admissaoId));

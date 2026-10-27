@@ -1527,7 +1527,8 @@ test('gravação pela API: registrar atendimento lê uma vez, grava uma linha no
   const { r, cont } = contarChamadas(ctx, () =>
     ctx.apiRegistrarAtendimento({ tipo_atendimento: 'BUSCA ATIVA', admissao_id: adm.id, data: '2026-10-14', hora: '10:00', publico: 'PACIENTE', descricao_demanda: 'HUMOR DEPRIMIDO OU ANSIOSO' }));
   assert.equal(r.ok, true, r.erro);
-  assert.deepEqual({ ...cont }, { batchGet: 1, append: 1, batchUpdate: 1, trava: 1 });
+  // Duas linhas novas, em abas diferentes: o atendimento e a descrição da demanda do 1º atendimento.
+  assert.deepEqual({ ...cont }, { batchGet: 1, append: 2, batchUpdate: 1, trava: 1 });
   assert.equal(r.dados.admissao.primeiro_atendimento, '2026-10-14');
 });
 
@@ -1664,9 +1665,9 @@ test('v27: descrição da demanda é exigida no 1º atendimento e corrigível de
   ctx.novaExecucao();
   const antes = ctx.buscarPorId('ADMISSOES', adm.id);
   ctx.novaExecucao();
-  const corr = ctx.apiSalvarDescricaoDemanda({ id: adm.id, descricao_demanda: 'CONFLITOS FAMILIARES', unidade_id: 'outra', justificativa_id: 'x', observacoes: 'não muda' });
+  const corr = ctx.apiSalvarDescricaoDemanda({ id: adm.id, descricao_demanda: 'RISCO DE SUICÍDIO', unidade_id: 'outra', justificativa_id: 'x', observacoes: 'não muda' });
   assert.equal(corr.ok, true, corr.erro);
-  assert.equal(corr.dados.admissao.descricao_demanda, 'CONFLITOS FAMILIARES');
+  assert.equal(corr.dados.admissao.descricao_demanda, 'RISCO DE SUICÍDIO');
   ctx.novaExecucao();
   const depois = ctx.buscarPorId('ADMISSOES', adm.id);
   for (const campo of ['unidade_id', 'justificativa_id', 'observacoes', 'primeiro_atendimento', 'status']) {
@@ -1755,7 +1756,9 @@ test('histórico completo do paciente: todas as internações, do mais recente p
   assert.equal(atender(primeira, { data: '2026-10-14', hora: '10:00', justificativa_id: j.id }).ok, true);
   assert.equal(atender(primeira, { data: '2026-10-15', hora: '10:00', justificativa_id: alta.id }).ok, true);
   ctx.novaExecucao();
-  assert.equal(ctx.apiTransferirPaciente({ admissao_id: primeira.id, setor_id: uti.setor_id, unidade_id: uti.id, data: '2026-10-15', hora: '14:00' }).ok, true);
+  const tr = ctx.apiTransferirPaciente({ admissao_id: primeira.id, setor_id: uti.setor_id, unidade_id: uti.id, data: '2026-10-15', hora: '14:00',
+    demanda_mudou: 'SIM', descricao_demanda: 'RISCO DE SUICÍDIO' });
+  assert.equal(tr.ok, true, tr.erro);
   ctx.novaExecucao();
   assert.equal(ctx.apiSalvarDesfechoAdmissao({ id: primeira.id, desfecho_id: desfecho('ALTA PSICOLÓGICA').id, data_desfecho: '2026-10-15' }).ok, true);
   ctx.novaExecucao();
@@ -1774,18 +1777,19 @@ test('histórico completo do paciente: todas as internações, do mais recente p
   assert.deepEqual({ ...h.resumo }, { internacoes: 2, atendimentos: 4, solicitacoes: 1, desfechos: 2 });
   assert.equal(h.internacoes[0].admissao.id, segunda.id); // a mais recente primeiro
   assert.equal(h.internacoes[1].admissao.id, primeira.id);
-  assert.equal(h.internacoes[1].admissao.descricao_demanda, 'HUMOR DEPRIMIDO OU ANSIOSO');
 
   const tipos = h.internacoes[1].eventos.map(e => e.tipo + ' ' + e.data);
   assert.deepEqual([...tipos], [
     'DESFECHO 2026-10-17',
     'RETOMADA 2026-10-16',
     'DESFECHO 2026-10-15',
+    'DEMANDA 2026-10-15',
     'TRANSFERÊNCIA 2026-10-15',
     'JUSTIFICATIVA 2026-10-15',
     'ATENDIMENTO 2026-10-15',
     'ATENDIMENTO 2026-10-14',
     'JUSTIFICATIVA 2026-10-13',
+    'DEMANDA 2026-10-13',
     'ATENDIMENTO 2026-10-13',
     'SOLICITAÇÃO 2026-10-13',
     'ENTRADA 2026-10-09'
@@ -1814,6 +1818,13 @@ test('histórico completo do paciente: todas as internações, do mais recente p
   assert.equal(ev('DESFECHO', '2026-10-15').vigente, 'NÃO'); // seguido de retomada
   assert.equal(ev('DESFECHO', '2026-10-17').encerra_admissao, 'SIM');
   assert.equal(ev('RETOMADA', '2026-10-16').desfecho_anterior, 'ALTA PSICOLÓGICA');
+  assert.equal(ev('DEMANDA', '2026-10-13').origem, 'AVALIAÇÃO');
+  assert.equal(ev('DEMANDA', '2026-10-13').descricao, 'HUMOR DEPRIMIDO OU ANSIOSO');
+  assert.equal(ev('DEMANDA', '2026-10-15').origem, 'TRANSFERÊNCIA');
+  assert.equal(ev('DEMANDA', '2026-10-15').de, 'HUMOR DEPRIMIDO OU ANSIOSO');
+  assert.equal(ev('DEMANDA', '2026-10-15').descricao, 'RISCO DE SUICÍDIO');
+  assert.equal(ev('DEMANDA', '2026-10-15').unidade_nome, 'UTI 1');
+  assert.equal(h.internacoes[1].admissao.descricao_demanda, 'RISCO DE SUICÍDIO');
 
   ctx.novaExecucao();
   assert.equal(ctx.apiHistoricoPaciente('nao-existe').ok, false);
@@ -1824,4 +1835,141 @@ test('histórico completo do paciente: todas as internações, do mais recente p
   ctx.apiHistoricoPaciente(paciente.id);
   ctx.novaExecucao();
   assert.equal(JSON.stringify(ctx.listar('ADMISSOES')), antes);
+});
+
+test('descrição da demanda (opção 2): editar substitui, mudança registra com data e unidade, e o compilado conta cada registro', () => {
+  const { ctx, admitir, atender, unidade } = sistemaComAdmissao();
+  const uti = ctx.listar('UNIDADES').find(u => u.nome === 'UTI 1');
+  const cm1 = ctx.listar('UNIDADES').find(u => u.nome === 'CM 1');
+  const adm = admitir().dados.admissao;
+  const contagem = (mes, nomeUnidade) => {
+    ctx.novaExecucao();
+    const c = ctx.apiCompilado({ ano: '2026', mes: String(mes), eixo: 'UNIDADE', grupo: 'TODOS' }).dados;
+    const col = c.colunas.findIndex(x => x.nome === nomeUnidade);
+    const sec = c.secoes.find(s => s.titulo === 'Descrição da demanda');
+    const r = {};
+    sec.linhas.forEach(l => { if (l.valores[col]) r[l.rotulo] = l.valores[col]; });
+    return r;
+  };
+  const registros = () => { ctx.novaExecucao(); return ctx.listar('DESCRICOES_DEMANDA').filter(d => d.admissao_id === adm.id && !d.excluido_em); };
+
+  // 1º atendimento: registro inicial na data e na unidade do atendimento.
+  assert.equal(atender(adm, { data: '2026-10-13', descricao_demanda: 'HUMOR DEPRIMIDO OU ANSIOSO' }).ok, true);
+  assert.equal(registros().length, 1);
+  assert.equal(registros()[0].origem, 'AVALIAÇÃO');
+  assert.equal(registros()[0].unidade_id, unidade.id);
+  assert.deepEqual(contagem(10, 'CM 2'), { 'HUMOR DEPRIMIDO OU ANSIOSO': 1, 'TOTAL': 1 });
+  // Um retorno não registra a descrição de novo.
+  assert.equal(atender(adm, { data: '2026-10-14', descricao_demanda: 'RISCO DE SUICÍDIO' }).ok, true);
+  assert.equal(registros().length, 1);
+
+  // Editar (erro de preenchimento): substitui, sem registro novo.
+  ctx.novaExecucao();
+  const ed = ctx.apiSalvarDescricaoDemanda({ id: adm.id, descricao_demanda: 'RISCO DE SUICÍDIO' });
+  assert.equal(ed.ok, true, ed.erro);
+  assert.equal(ed.dados.admissao.descricao_demanda, 'RISCO DE SUICÍDIO');
+  assert.equal(registros().length, 1);
+  assert.deepEqual(contagem(10, 'CM 2'), { 'RISCO DE SUICÍDIO': 1, 'TOTAL': 1 });
+  ctx.novaExecucao();
+  assert.equal(ctx.apiSalvarDescricaoDemanda({ id: adm.id, descricao_demanda: 'INVENTADA' }).ok, false);
+
+  // A demanda mudou: novo registro, sem apagar o anterior.
+  ctx.novaExecucao();
+  const mesma = ctx.apiMudarDescricaoDemanda({ id: adm.id, descricao_demanda: 'RISCO DE SUICÍDIO', data: '2026-10-16', hora: '09:00' });
+  assert.equal(mesma.ok, false);
+  assert.match(mesma.erro, /já é a descrição atual/);
+  ctx.novaExecucao();
+  assert.equal(ctx.apiMudarDescricaoDemanda({ id: adm.id, descricao_demanda: 'INTERNAÇÃO PROLONGADA', data: '2026-10-12', hora: '09:00' }).ok, false);
+  ctx.novaExecucao();
+  assert.equal(ctx.apiMudarDescricaoDemanda({ id: adm.id, descricao_demanda: 'INTERNAÇÃO PROLONGADA', data: '2026-10-21', hora: '09:00' }).ok, false);
+  ctx.novaExecucao();
+  const mud = ctx.apiMudarDescricaoDemanda({ id: adm.id, descricao_demanda: 'INTERNAÇÃO PROLONGADA', data: '2026-10-16', hora: '09:00' });
+  assert.equal(mud.ok, true, mud.erro);
+  assert.equal(mud.dados.admissao.descricao_demanda, 'INTERNAÇÃO PROLONGADA');
+  assert.equal(mud.dados.descricoes.length, 2);
+  assert.deepEqual([...mud.dados.descricoes.map(d => d.origem)], ['AVALIAÇÃO', 'MUDANÇA']);
+  assert.deepEqual(contagem(10, 'CM 2'), { 'RISCO DE SUICÍDIO': 1, 'INTERNAÇÃO PROLONGADA': 1, 'TOTAL': 2 });
+
+  // Transferência em que a demanda continua a mesma: não conta de novo.
+  ctx.novaExecucao();
+  const t1 = ctx.apiTransferirPaciente({ admissao_id: adm.id, setor_id: uti.setor_id, unidade_id: uti.id, data: '2026-10-17', hora: '08:00', demanda_mudou: 'NÃO' });
+  assert.equal(t1.ok, true, t1.erro);
+  assert.equal(registros().length, 2);
+  assert.deepEqual(contagem(10, 'UTI 1'), {});
+  // Transferência em que a demanda mudou: registra ali, na unidade de destino.
+  ctx.novaExecucao();
+  assert.equal(ctx.apiTransferirPaciente({ admissao_id: adm.id, setor_id: cm1.setor_id, unidade_id: cm1.id, data: '2026-10-19', hora: '08:00',
+    demanda_mudou: 'SIM', descricao_demanda: '' }).ok, false, 'Mudou sem dizer a nova demanda');
+  ctx.novaExecucao();
+  assert.equal(ctx.listar('TRANSFERENCIAS').length, 1, 'A transferência recusada não fica gravada');
+  ctx.novaExecucao();
+  const t2 = ctx.apiTransferirPaciente({ admissao_id: adm.id, setor_id: cm1.setor_id, unidade_id: cm1.id, data: '2026-10-19', hora: '08:00',
+    demanda_mudou: 'SIM', descricao_demanda: 'HUMOR DEPRIMIDO OU ANSIOSO' });
+  assert.equal(t2.ok, true, t2.erro);
+  const ultima = t2.dados.descricoes.at(-1);
+  assert.equal(ultima.origem, 'TRANSFERÊNCIA');
+  assert.equal(ultima.unidade_id, cm1.id);
+  assert.equal(ultima.transferencia_id, t2.dados.transferencias.at(-1).id);
+  assert.deepEqual(contagem(10, 'CM 1'), { 'HUMOR DEPRIMIDO OU ANSIOSO': 1, 'TOTAL': 1 });
+
+  // Mudança registrada por engano: excluir volta a descrição anterior. A do 1º atendimento não se exclui assim.
+  ctx.novaExecucao();
+  const ex = ctx.apiExcluirDescricaoDemanda(ultima.id);
+  assert.equal(ex.ok, true, ex.erro);
+  assert.equal(ex.dados.admissao.descricao_demanda, 'INTERNAÇÃO PROLONGADA');
+  assert.deepEqual(contagem(10, 'CM 1'), {});
+  ctx.novaExecucao();
+  assert.equal(ctx.apiExcluirDescricaoDemanda(registros()[0].id).ok, false);
+
+  // Cada registro conta no mês dele.
+  vm.runInContext("hoje = function () { return '2026-11-03'; }; agora = function () { return '2026-11-03 12:00'; }", ctx);
+  ctx.novaExecucao();
+  assert.equal(ctx.apiMudarDescricaoDemanda({ id: adm.id, descricao_demanda: 'RISCO DE SUICÍDIO', data: '2026-11-03', hora: '10:00' }).ok, true);
+  assert.deepEqual(contagem(11, 'CM 1'), { 'RISCO DE SUICÍDIO': 1, 'TOTAL': 1 });
+  assert.equal(contagem(10, 'CM 2')['TOTAL'], 2);
+});
+
+test('descrição da demanda: internação antiga conta pela admissão, a mudança preserva a antiga e a exclusão do 1º atendimento move o registro', () => {
+  const { ctx, admitir, atender, unidade } = sistemaComAdmissao();
+  const adm = admitir().dados.admissao;
+  assert.equal(atender(adm, { data: '2026-10-13', descricao_demanda: 'HUMOR DEPRIMIDO OU ANSIOSO' }).ok, true);
+  assert.equal(atender(adm, { data: '2026-10-15' }).ok, true);
+  // Como era antes desta versão: a descrição só na admissão, sem registros.
+  ctx.comTrava(() => ctx.listar('DESCRICOES_DEMANDA').forEach(d => ctx.excluir('DESCRICOES_DEMANDA', d.id)));
+  ctx.novaExecucao();
+  let det = ctx.apiObterAdmissao(adm.id).dados;
+  assert.equal(det.descricoes.length, 1);
+  assert.equal(det.descricoes[0].origem, 'LEGADO');
+  assert.equal(det.descricoes[0].data, '2026-10-13'); // data do 1º atendimento
+  ctx.novaExecucao();
+  const c = ctx.apiCompilado({ ano: '2026', mes: '10', eixo: 'UNIDADE' }).dados;
+  const col = c.colunas.findIndex(x => x.nome === 'CM 2');
+  assert.equal(c.secoes.find(s => s.titulo === 'Descrição da demanda').linhas.find(l => l.rotulo === 'HUMOR DEPRIMIDO OU ANSIOSO').valores[col], 1);
+  ctx.novaExecucao();
+  const mud = ctx.apiMudarDescricaoDemanda({ id: adm.id, descricao_demanda: 'RISCO DE SUICÍDIO', data: '2026-10-16', hora: '10:00' });
+  assert.equal(mud.ok, true, mud.erro);
+  assert.deepEqual([...mud.dados.descricoes.map(d => d.origem + ' ' + d.descricao)],
+    ['LEGADO HUMOR DEPRIMIDO OU ANSIOSO', 'MUDANÇA RISCO DE SUICÍDIO']);
+  assert.equal(mud.dados.descricoes[0].unidade_id, unidade.id);
+
+  // Exclusão do 1º atendimento: a descrição inicial passa para o novo 1º atendimento.
+  const outra = sistemaComAdmissao();
+  const adm2 = outra.admitir().dados.admissao;
+  const p1 = outra.atender(adm2, { data: '2026-10-13', descricao_demanda: 'HUMOR DEPRIMIDO OU ANSIOSO' }).dados.atendimentos[0];
+  outra.atender(adm2, { data: '2026-10-15', hora: '11:00' });
+  outra.ctx.novaExecucao();
+  det = outra.ctx.apiExcluirAtendimento(p1.id).dados;
+  assert.equal(det.descricoes.length, 1);
+  assert.equal(det.descricoes[0].data, '2026-10-15');
+  assert.equal(det.descricoes[0].hora, '11:00');
+  assert.equal(det.descricoes[0].descricao, 'HUMOR DEPRIMIDO OU ANSIOSO');
+  // Sem nenhum atendimento, deixa de contar; o próximo 1º atendimento registra de novo.
+  outra.ctx.novaExecucao();
+  det = outra.ctx.apiExcluirAtendimento(det.atendimentos[0].id).dados;
+  assert.equal(det.descricoes.length, 0);
+  assert.equal(det.admissao.status, 'AGUARDANDO 1º ATENDIMENTO');
+  const denovo = outra.atender(adm2, { data: '2026-10-16' });
+  assert.equal(denovo.ok, true, denovo.erro);
+  assert.equal(denovo.dados.descricoes.length, 1);
+  assert.equal(denovo.dados.descricoes[0].data, '2026-10-16');
 });

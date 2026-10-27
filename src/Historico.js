@@ -30,8 +30,8 @@ function apiHistoricoPaciente(pacienteId) {
 }
 
 // Ordem dentro do mesmo dia e hora; a lista sai do mais recente para o mais antigo.
-var ORDEM_EVENTO_HISTORICO = { 'ENTRADA': 0, 'TRANSFERÊNCIA': 1, 'SOLICITAÇÃO': 2, 'ATENDIMENTO': 3, 'JUSTIFICATIVA': 4,
-  'ATIVIDADE': 5, 'DESFECHO': 6, 'RETOMADA': 7 };
+var ORDEM_EVENTO_HISTORICO = { 'ENTRADA': 0, 'TRANSFERÊNCIA': 1, 'SOLICITAÇÃO': 2, 'ATENDIMENTO': 3, 'DEMANDA': 4, 'JUSTIFICATIVA': 5,
+  'ATIVIDADE': 6, 'DESFECHO': 7, 'RETOMADA': 8 };
 
 /** Linha do tempo de uma internação, a partir do detalhe da admissão (detalheAdmissao). */
 function eventosDaInternacao_(det) {
@@ -76,6 +76,14 @@ function eventosDaInternacao_(det) {
       });
     }
     if (at.justificativa_id) anterior = at;
+  });
+
+  // Descrição da demanda: a do 1º atendimento e cada mudança (na tela da internação ou na transferência).
+  var demandaAnterior = '';
+  (det.descricoes || []).forEach(function (d) {
+    incluir('DEMANDA', d.data, d.hora, { origem: d.origem, descricao: d.descricao, de: demandaAnterior,
+      unidade_nome: d.unidade_nome, profissional_nome: d.profissional_nome });
+    demandaAnterior = d.descricao;
   });
 
   (det.atividades || []).forEach(function (a) {

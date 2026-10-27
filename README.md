@@ -96,7 +96,8 @@ está atrasado.
   resposta à solicitação no prazo (com % geral e por prioridade e média de dias úteis); retornos no prazo
   da justificativa; desfechos; atividades assistenciais; reuniões de equipe; atividades gerenciais.
 - **Datas usadas:** atendimentos, atividades e reuniões pela data do registro; admissões e 1º
-  atendimento pela data de admissão; desfechos pela data do desfecho.
+  atendimento pela data de admissão; desfechos pela data do desfecho; descrição da demanda pela data e
+  unidade de cada registro (1º atendimento ou mudança da demanda).
 - **Desfechos** vêm do histórico (`DESFECHOS_REGISTRADOS`): cada desfecho registrado conta, inclusive o
   que foi seguido de retomada. Um paciente com alta psicológica, retomada e depois alta conta duas vezes.
   Corrigir o desfecho (tipo ou data) corrige o registro; apagar o desfecho remove o registro.
@@ -113,6 +114,7 @@ src/
   Indicadores.js    cálculo do compilado (puro, testado no Node)
   PainelIndicadores.js indicadores assistenciais: primeiro atendimento, interconsultas e retornos
   Transferencias.js localização atual e histórico de transferências internas
+  Demanda.js        descrição da demanda ao longo da internação: editar, a demanda mudou e na transferência
   Db.js             leitura e gravação das abas como tabelas
   Setup.js          função "configurar": cria e semeia o banco
   Main.js           doGet, controle de acesso, tratamento de erros
@@ -281,16 +283,28 @@ Mostra todas as internações do paciente, da mais recente para a mais antiga. C
 - entrada no hospital;
 - solicitações (interconsultas), com motivo, prioridade, data e hora, para quem, prazo e se foram respondidas no prazo;
 - atendimentos, com data, hora, quem atendeu, a quem (paciente, família ou os dois), tipo, justificativa e o resultado do prazo;
+- descrição da demanda: a do 1º atendimento e cada mudança, com a anterior;
 - mudanças de justificativa (a justificativa de cada atendimento comparada à do atendimento anterior);
 - mudanças de unidade (transferências internas);
 - atividades assistenciais;
 - desfechos e retomadas do acompanhamento.
 
-O filtro **Mostrar** separa cada tipo na própria tela. **Abrir esta internação** leva à tela de atendimentos para registrar ou corrigir. A descrição da demanda aparece com o valor atual: as correções feitas depois do 1º atendimento não guardam a versão anterior.
+O filtro **Mostrar** separa cada tipo na própria tela. **Abrir esta internação** leva à tela de atendimentos para registrar ou corrigir. A linha do tempo mostra a descrição da demanda do 1º atendimento e cada mudança; uma correção feita com "Editar" substitui o valor, sem guardar a versão anterior.
 
 ### Descrição da demanda
 
-A descrição da demanda é obrigatória em **Registrar 1º atendimento (avaliação)**. Depois do 1º atendimento, ela pode ser corrigida a qualquer momento na tela da internação, no cartão **Descrição da demanda**, que altera só esse campo.
+A descrição da demanda é obrigatória em **Registrar 1º atendimento (avaliação)** e fica registrada com a data, a hora e a unidade desse atendimento. Depois do 1º atendimento, a tela da internação mostra a descrição atual com dois botões:
+
+- **Editar** (erro de preenchimento): substitui a descrição atual. Não cria registro novo nem muda a data ou a unidade.
+- **A demanda mudou**: registra a nova descrição com data, hora e a unidade daquele momento, sem apagar a anterior. A nova não pode ser igual à atual nem anterior a ela. Em internação encerrada, só "Editar".
+
+Na **transferência** de setor ou unidade, a tela pergunta se a demanda continua a mesma ou mudou. Se mudou, a nova descrição é registrada ali, na data da transferência e na unidade de destino. Se continua, nada é registrado.
+
+Quando há mais de uma descrição, o cartão lista todas, com data, unidade, como foi registrada e por quem. Uma mudança registrada por engano pode ser excluída por quem a registrou ou pela coordenação; a descrição anterior volta a ser a atual. A descrição do 1º atendimento acompanha o atendimento: se ele for excluído, passa para o novo 1º atendimento, ou deixa de contar se não houver outro.
+
+**No compilado**, cada descrição conta **no mês e na unidade em que foi registrada**. Uma transferência em que a demanda continua a mesma não conta de novo. As internações registradas antes desta versão, que só têm a descrição na admissão, contam essa descrição na data do 1º atendimento.
+
+Os registros ficam na aba **DESCRICOES_DEMANDA**, criada automaticamente no primeiro acesso. A admissão continua guardando a descrição atual em `descricao_demanda`.
 
 ### Justificativa no registro do atendimento
 

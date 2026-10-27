@@ -47,11 +47,6 @@ function apiSalvarAcompanhamento(dados) {
 }
 
 /** Corrige só a descrição da demanda, em qualquer momento da internação (v27). */
-function apiSalvarDescricaoDemanda(dados) {
-  if (!String((dados || {}).descricao_demanda || '').trim()) return { ok: false, erro: 'Selecione a descrição da demanda.' };
-  return salvarCamposAdmissao_(dados, ['descricao_demanda'], true, false);
-}
-
 /** Registra ou corrige o desfecho da admissão escolhida, mantendo seu histórico. */
 function apiSalvarDesfechoAdmissao(dados) {
   return salvarCamposAdmissao_(dados, ['desfecho_id', 'data_desfecho'], true, false);
@@ -173,6 +168,7 @@ function auxiliares() {
     setores: mapaPorId('SETORES'),
     interconsultas: interconsultas,
     interconsultasPorAdmissao: agruparPor_(interconsultas, 'admissao_id'),
+    descricoesPorAdmissao: agruparPor_(listar('DESCRICOES_DEMANDA'), 'admissao_id'),
     pacientes: mapaPorId('PACIENTES'),
     unidades: mapaPorId('UNIDADES'),
     justificativas: mapaPorId('JUSTIFICATIVAS'),
@@ -328,6 +324,9 @@ function detalheAdmissao(adm, auxPronto, semOutras) {
         destino_nome: (aux.unidades[t.destino_unidade_id] || {}).nome || '', profissional_nome: nomeProf(t.criado_por) });
     }),
     interconsultas: solicitacoes,
+    descricoes: descricoesDaAdmissao_(adm, aux.descricoesPorAdmissao[adm.id] || []).map(function (d) {
+      return Object.assign({ unidade_nome: (aux.unidades[d.unidade_id] || {}).nome || '', profissional_nome: nomeProf(d.profissional_id) }, d);
+    }),
     atendimentos: daAdmissao('ATENDIMENTOS'),
     atividades: daAdmissao('ATIVIDADES'),
     desfechos: listar('DESFECHOS_REGISTRADOS').filter(function (d) { return d.admissao_id === adm.id; })
@@ -555,8 +554,11 @@ function apiRegistrarAtendimento(dados) {
     if (contaParaPrazo(atendimento) && !temContatoPosterior && String(adm.justificativa_id || '') !== String(justificativaId || '')) {
       mudancasAdm.justificativa_id = justificativaId || '';
     }
-    if (descricaoDemanda && descricaoDemanda !== String(adm.descricao_demanda || '')) mudancasAdm.descricao_demanda = descricaoDemanda;
     if (Object.keys(mudancasAdm).length) atualizar('ADMISSOES', adm.id, mudancasAdm);
+    // 1º atendimento: a descrição da demanda passa a ter registro próprio, com data e unidade (Demanda.js).
+    if (adm.status === STATUS_ADMISSAO.aguardando) {
+      registrarDescricaoDaAvaliacao_(adm, salvo, descricaoDemanda ? validarDescricaoDemanda_(descricaoDemanda) : adm.descricao_demanda, usuario);
+    }
     if (dados.interconsulta_id) atualizar('INTERCONSULTAS', dados.interconsulta_id, { atendimento_id: salvo.id });
     return detalheAdmissao(recalcularAdmissao(adm.id));
   });
@@ -576,6 +578,7 @@ function apiExcluirAtendimento(id) {
     if (!atendimento) throw new Error('Atendimento não encontrado.');
     exigirAutorOuCoordenacao(atendimento, usuario);
     excluir('ATENDIMENTOS', id);
+    excluirDescricaoDoAtendimento_(atendimento, usuario);
     return detalheAdmissao(recalcularAdmissao(atendimento.admissao_id));
   });
 }
