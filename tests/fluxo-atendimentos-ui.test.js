@@ -152,7 +152,7 @@ function dadosIndicadores() {
     primeiro: ind, interconsultas: ind, acompanhamento: ind };
 }
 
-test('histórico distingue interconsulta no prazo, primeiro fora do período e retorno atrasado', () => {
+test('lista de atendimentos mostra o prazo da interconsulta e não tem mais a coluna do 1º atendimento / retorno', () => {
   const tela = carregar();
   const d = detalhe({ primeiro_em_avaliacao: false });
   const resposta = { id: 'i1', prazo_resposta: '2026-10-23 17:50', resposta_no_prazo: 'SIM' };
@@ -167,12 +167,14 @@ test('histórico distingue interconsulta no prazo, primeiro fora do período e r
   const linhas = tela.todos().filter(el => el.tagName === 'TR').slice(1);
   assert.match(linhas[0].children[6].textContent, /23\/10\/2026 17:50/);
   assert.match(linhas[0].children[6].textContent, /No prazo/);
-  assert.match(linhas[0].children[7].textContent, /Fora do período de avaliação/);
-  assert.doesNotMatch(linhas[0].children[7].textContent, /21\/10/);
   assert.match(linhas[1].children[6].textContent, /No prazo/);
-  assert.match(linhas[1].children[7].textContent, /Retorno.*21\/10\/2026.*Fora do prazo/);
+  // A coluna "Primeiro atendimento / retorno — prazo e resultado" saiu, a pedido da coordenação.
+  const cabecalho = tela.todos().filter(el => el.tagName === 'TH').map(th => th.textContent);
+  assert.equal(cabecalho.some(t => /Primeiro atendimento \/ retorno/.test(t)), false);
+  assert.equal(linhas[0].children.length, cabecalho.length);
+  assert.doesNotMatch(linhas[1].textContent, /Fora do prazo/);
   tela.ctx.desenharAtendimento(d);
-  assert.match(tela.conteudo.textContent, /Fora do período de avaliação/);
+  assert.match(tela.conteudo.textContent, /Fora do período de avaliação/); // continua no cabeçalho da internação
 });
 
 test('registro usa rótulo Tipo da solicitação e permite selecionar seguimento sem exigir interconsulta', () => {

@@ -1513,7 +1513,7 @@
       return bloco;
     }
     bloco.appendChild(h('table', null,
-      h('thead', null, h('tr', null, ['Data', 'Unidade', 'Tipo da solicitação', 'A quem', 'Profissional', 'Justificativa', 'Interconsulta — prazo e resultado', 'Primeiro atendimento / retorno — prazo e resultado', 'Observação', '']
+      h('thead', null, h('tr', null, ['Data', 'Unidade', 'Tipo da solicitação', 'A quem', 'Profissional', 'Justificativa', 'Interconsulta — prazo e resultado', 'Observação', '']
         .map(function (t) { return h('th', null, t); }))),
       h('tbody', null, det.atendimentos.map(function (at) {
         var familia = at.publico === 'FAMÍLIA' || at.publico === 'PACIENTE E FAMÍLIA';
@@ -1527,7 +1527,6 @@
             ? h('div', { class: 'suave' }, ROTULO_CATEGORIA[at.categoria] || at.categoria) : ''),
           h('td', null, at.justificativa_nome || '—'),
           h('td', null, prazosInterconsultaNoHistorico(at)),
-          h('td', null, prazoClinicoNoHistorico(at)),
           h('td', { class: 'suave' }, at.observacao || ''),
           h('td', null, botaoExcluir('apiExcluirAtendimento', at.id)));
       }))));
@@ -1549,13 +1548,6 @@
         i.prazo_resposta ? h('div', null, 'Até ' + prazoBr(i.prazo_resposta)) : '',
         resultadoPrazoNoHistorico(i.resposta_no_prazo));
     }));
-  }
-
-  function prazoClinicoNoHistorico(at) {
-    var p = at.prazo_acompanhamento || { resultado: 'NÃO AVALIADO' };
-    var titulo = p.tipo === 'PRIMEIRO' ? 'Primeiro atendimento' : p.tipo === 'RETORNO' ? 'Retorno' : 'Prazo do paciente';
-    return h('div', null, h('div', { class: 'suave' }, titulo),
-      p.prazo ? h('div', null, 'Até ' + dataBr(p.prazo)) : '', resultadoPrazoNoHistorico(p.resultado));
   }
 
   function blocoAtividades(det) {
