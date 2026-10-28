@@ -328,7 +328,7 @@ Atrasado, vence hoje, **vence amanhã** (próximo dia útil: numa sexta, o que v
 
 ### Prazos separados no histórico de atendimentos
 
-O histórico apresenta duas avaliações independentes: **Interconsulta — prazo e resultado**, com o prazo em data/hora e resultado de cada solicitação efetivamente respondida pelo atendimento; e **Primeiro atendimento / retorno — prazo e resultado**, identificando qual prazo clínico está sendo avaliado. Um mesmo atendimento pode responder à interconsulta no prazo e, simultaneamente, ultrapassar o prazo do retorno. Sem solicitação vinculada, a tela informa essa ausência e não atribui resultado de interconsulta.
+A lista de atendimentos da internação mostra, em **Interconsulta — prazo e resultado**, o prazo (só a data) e o resultado de cada solicitação respondida pelo atendimento. Sem solicitação vinculada, a tela informa essa ausência e não atribui resultado de interconsulta. A antiga coluna **Primeiro atendimento / retorno — prazo e resultado** saiu a pedido da coordenação: esses prazos aparecem no cabeçalho da internação, no painel de prazos e no histórico do paciente.
 
 Para primeiro atendimento de admissões anteriores a **03/11/2026**, a apresentação mostra **Fora do período de avaliação**, sem exibir um vencimento antigo como atraso desse indicador. Retornos anteriores à data de início continuam sendo avaliados pela justificativa do contato anterior. A data de início é compartilhada entre o painel e o histórico em `APP.inicioIndicadorPrimeiro`. Os campos históricos originais são preservados; a apresentação consulta separadamente o vínculo da interconsulta e o prazo clínico.
 
