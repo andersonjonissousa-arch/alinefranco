@@ -98,7 +98,9 @@ var TABELAS = {
 var CATEGORIAS_PROFISSIONAL = ['PROFISSIONAL DA EMPRESA', 'RESIDENTE', 'ESTAGIÁRIO'];
 var CATEGORIA_EMPRESA = 'PROFISSIONAL DA EMPRESA';
 var PERFIS = ['COORDENAÇÃO', 'PROFISSIONAL'];
-var TIPOS_ATENDIMENTO = ['INTERCONSULTA', 'BUSCA ATIVA', 'ESPONTÂNEA', 'SEGUIMENTO PSICOLÓGICO'];
+// Tipo da solicitação do atendimento. Só INTERCONSULTA responde a uma interconsulta registrada; EQUIPE é o pedido
+// da equipe sem interconsulta vinculada (incluído a pedido da coordenação, ao lado de INTERCONSULTA).
+var TIPOS_ATENDIMENTO = ['INTERCONSULTA', 'EQUIPE', 'BUSCA ATIVA', 'ESPONTÂNEA', 'SEGUIMENTO PSICOLÓGICO'];
 var SEXOS_PACIENTE = ['FEMININO', 'MASCULINO', 'INTERSEXO'];
 var PUBLICOS_ATENDIMENTO = ['PACIENTE', 'FAMÍLIA', 'PACIENTE E FAMÍLIA'];
 var PARA_QUEM_SOLICITACAO = ['PACIENTE', 'FAMILIAR'];
@@ -893,6 +895,10 @@ function montarCompilado(dados, op) {
     }
   });
   secao('Atendimentos', [lPac, lFam, lFamAt, lTot]);
+  // Cada registro de atendimento conta 1, pelo tipo da solicitação escolhido no registro.
+  secao('Atendimentos por tipo da solicitação', distribuicao(atend, function (a) { return a.tipo_atendimento || 'NÃO INFORMADO'; },
+    TIPOS_ATENDIMENTO, function (a) { return chave(a.data, a.unidade_id); }),
+    { nota: 'Cada atendimento registrado conta 1 (paciente e família no mesmo registro contam 1).' });
 
   // 2. Admissões no período (pela data de admissão no hospital)
   var adms = dados.admissoes.filter(function (a) { return aceita(a.data_admissao, a.unidade_id); });
@@ -2867,7 +2873,7 @@ function apiRegistrarAtendimento(dados) {
     if (!hora) throw new Error('Informe a hora do atendimento.');
     if (dataHora(data, hora) > agora()) throw new Error('O atendimento não pode estar no futuro.');
     if (PUBLICOS_ATENDIMENTO.indexOf(dados.publico) === -1) throw new Error('Escolha se o atendimento foi ao paciente, à família ou aos dois.');
-    if (TIPOS_ATENDIMENTO.indexOf(dados.tipo_atendimento) === -1) throw new Error('Selecione o tipo da solicitação: interconsulta, busca ativa, espontânea ou seguimento psicológico.');
+    if (TIPOS_ATENDIMENTO.indexOf(dados.tipo_atendimento) === -1) throw new Error('Selecione o tipo da solicitação: interconsulta, equipe, busca ativa, espontânea ou seguimento psicológico.');
     if (dados.tipo_atendimento === 'INTERCONSULTA' && !dados.interconsulta_id) throw new Error('Selecione a interconsulta respondida.');
     if (dados.tipo_atendimento !== 'INTERCONSULTA' && dados.interconsulta_id) throw new Error('Somente atendimento por interconsulta pode responder a uma solicitação.');
     // quantidade = número de familiares atendidos (com "PACIENTE E FAMÍLIA", o paciente conta à parte).

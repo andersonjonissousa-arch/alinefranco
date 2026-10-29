@@ -1341,13 +1341,15 @@ test('atendimentos: tipo de situação é obrigatório, persiste e exige víncul
   const { ctx, admitir, atender } = sis;
   const adm = admitir().dados.admissao;
   const i = solicitar(sis, adm).dados.interconsultas[0];
-  for (const extra of [{ tipo_atendimento: '' }, { tipo_atendimento: 'EQUIPE' }, { tipo_atendimento: 'INTERCONSULTA' },
-    { tipo_atendimento: 'BUSCA ATIVA', interconsulta_id: i.id }, { tipo_atendimento: 'ESPONTÂNEA', interconsulta_id: i.id }]) {
+  for (const extra of [{ tipo_atendimento: '' }, { tipo_atendimento: 'INVENTADO' }, { tipo_atendimento: 'INTERCONSULTA' },
+    { tipo_atendimento: 'BUSCA ATIVA', interconsulta_id: i.id }, { tipo_atendimento: 'ESPONTÂNEA', interconsulta_id: i.id },
+    { tipo_atendimento: 'EQUIPE', interconsulta_id: i.id }]) {
     const r = atender(adm, extra);
     assert.equal(r.ok, false, JSON.stringify(extra));
   }
   assert.equal(ctx.listar('ATENDIMENTOS').length, 0);
-  for (const tipo_atendimento of ['BUSCA ATIVA', 'ESPONTÂNEA']) {
+  // EQUIPE (pedido da equipe sem interconsulta vinculada) é aceito ao lado de INTERCONSULTA.
+  for (const tipo_atendimento of ['BUSCA ATIVA', 'ESPONTÂNEA', 'EQUIPE']) {
     const r = atender(adm, { tipo_atendimento });
     assert.equal(r.ok, true, r.erro);
     assert.equal(ctx.listar('ATENDIMENTOS').at(-1).tipo_atendimento, tipo_atendimento);
@@ -1977,4 +1979,29 @@ test('descrição da demanda: internação antiga conta pela admissão, a mudan�
   assert.equal(denovo.ok, true, denovo.erro);
   assert.equal(denovo.dados.descricoes.length, 1);
   assert.equal(denovo.dados.descricoes[0].data, '2026-10-16');
+});
+
+test('compilado: atendimentos por tipo da solicitação, com equipe ao lado de interconsulta', () => {
+  const sis = sistemaComAdmissao();
+  const { ctx, admitir, atender } = sis;
+  const adm = admitir().dados.admissao;
+  const i = solicitar(sis, adm).dados.interconsultas[0];
+  assert.equal(atender(adm, { data: '2026-10-13', tipo_atendimento: 'EQUIPE' }).ok, true);
+  assert.equal(atender(adm, { data: '2026-10-14', tipo_atendimento: 'EQUIPE', publico: 'PACIENTE E FAMÍLIA', quantidade: '2' }).ok, true);
+  assert.equal(atender(adm, { data: '2026-10-19', tipo_atendimento: 'INTERCONSULTA', interconsulta_id: i.id }).ok, true);
+  assert.equal(atender(adm, { data: '2026-10-20', hora: '09:00', tipo_atendimento: 'BUSCA ATIVA' }).ok, true);
+  ctx.novaExecucao();
+  const c = ctx.apiCompilado({ ano: '2026', mes: '10', eixo: 'UNIDADE' }).dados;
+  const sec = c.secoes.find(s => s.titulo === 'Atendimentos por tipo da solicitação');
+  assert.ok(sec);
+  const total = rot => sec.linhas.find(l => l.rotulo === rot).total;
+  assert.deepEqual(sec.linhas.map(l => l.rotulo).join(','), 'INTERCONSULTA,EQUIPE,BUSCA ATIVA,ESPONTÂNEA,SEGUIMENTO PSICOLÓGICO,TOTAL');
+  assert.equal(total('EQUIPE'), 2);
+  assert.equal(total('INTERCONSULTA'), 1);
+  assert.equal(total('BUSCA ATIVA'), 1);
+  assert.equal(total('TOTAL'), 4);
+  // A tela de registro oferece as duas opções.
+  ctx.novaExecucao();
+  assert.ok(ctx.apiInicio().dados.tipos_atendimento.includes('EQUIPE'));
+  assert.ok(ctx.apiInicio().dados.tipos_atendimento.includes('INTERCONSULTA'));
 });

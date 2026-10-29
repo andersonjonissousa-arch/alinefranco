@@ -105,6 +105,7 @@ painel de prazos já filtrado), e a lista do que vence hoje ou amanhã ou está 
   do seguimento); 1º atendimento no prazo (com % e média de dias);
   resposta à solicitação no prazo (com % geral e por prioridade e média de dias úteis); retornos no prazo
   da justificativa; desfechos; atividades assistenciais; reuniões de equipe; atividades gerenciais.
+- **Atendimentos por tipo da solicitação:** cada atendimento registrado conta 1, por tipo (interconsulta, equipe, busca ativa, espontânea, seguimento psicológico), pela data e unidade do atendimento e com o filtro de profissionais. A seção **Tipo de solicitação** continua contando as interconsultas registradas.
 - **Datas usadas:** atendimentos, atividades e reuniões pela data do registro; admissões e 1º
   atendimento pela data de admissão; desfechos pela data do desfecho; descrição da demanda pela data e
   unidade de cada registro (1º atendimento ou mudança da demanda).
@@ -247,7 +248,7 @@ gestão, exportação e registro do dia) com os serviços do Google simulados em
 
 - A admissão guarda os dados da entrada. Interconsultas são registros separados vinculados ao ID da internação; uma nova solicitação não sobrescreve a anterior.
 - Em Atendimentos, abra **Nova interconsulta**, informe data/hora, motivo e destinatário; a solicitação é sempre da equipe. A prioridade e o prazo vigentes ficam registrados nessa solicitação; mudanças posteriores na matriz valem para as próximas solicitações.
-- Ao registrar um atendimento, selecione **Tipo da solicitação** (interconsulta, busca ativa, espontânea ou seguimento psicológico); para interconsulta, informe a solicitação respondida. Atendimentos de rotina não encerram solicitações automaticamente. Também é possível vincular um atendimento já registrado; o servidor valida a internação, o horário e o público atendido. Um atendimento pode ser vinculado explicitamente a mais de uma solicitação, se respondeu a ambas.
+- Ao registrar um atendimento, selecione **Tipo da solicitação** (interconsulta, equipe, busca ativa, espontânea ou seguimento psicológico); para interconsulta, informe a solicitação respondida. **Equipe** é o pedido da equipe sem interconsulta registrada: não responde a uma solicitação nem tem prazo de interconsulta, só o prazo do seguimento. Atendimentos de rotina não encerram solicitações automaticamente. Também é possível vincular um atendimento já registrado; o servidor valida a internação, o horário e o público atendido. Um atendimento pode ser vinculado explicitamente a mais de uma solicitação, se respondeu a ambas.
 - Alta psicológica não impede novas solicitações enquanto o paciente segue internado. Use **Retomar acompanhamento** para voltar a registrar atendimentos. A saída hospitalar impede novas solicitações nessa internação.
 - Gestão conta solicitações pendentes, inclusive várias do mesmo paciente; o resumo de prazos mostra a mais urgente. O compilado conta cada solicitação no mês em que foi feita, independentemente do mês de admissão.
 - A migração preserva a associação automática das solicitações antigas ao primeiro atendimento elegível. Nas novas, o vínculo é explícito. Excluir um atendimento vinculado deixa a solicitação novamente sem resposta.

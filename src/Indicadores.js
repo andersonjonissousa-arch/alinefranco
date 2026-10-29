@@ -126,6 +126,10 @@ function montarCompilado(dados, op) {
     }
   });
   secao('Atendimentos', [lPac, lFam, lFamAt, lTot]);
+  // Cada registro de atendimento conta 1, pelo tipo da solicitação escolhido no registro.
+  secao('Atendimentos por tipo da solicitação', distribuicao(atend, function (a) { return a.tipo_atendimento || 'NÃO INFORMADO'; },
+    TIPOS_ATENDIMENTO, function (a) { return chave(a.data, a.unidade_id); }),
+    { nota: 'Cada atendimento registrado conta 1 (paciente e família no mesmo registro contam 1).' });
 
   // 2. Admissões no período (pela data de admissão no hospital)
   var adms = dados.admissoes.filter(function (a) { return aceita(a.data_admissao, a.unidade_id); });
