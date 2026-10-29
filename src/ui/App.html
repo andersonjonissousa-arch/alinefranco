@@ -265,9 +265,9 @@
     (painelInicial ? Promise.resolve(painelInicial) : chamar('apiGestao', {})).then(function (g) {
       var r = g.resumo;
       resumo.textContent = '';
-      resumo.appendChild(cartaoIndicador(r.pacientes, 'Pacientes em acompanhamento', '', function () { abrir('gestao', { aba: 'unidades' }); }));
-      resumo.appendChild(cartaoIndicador(r.aguardando_primeiro, 'Aguardando 1º atendimento', '', function () { abrir('gestao', { aba: 'prazos', situacao: '' }); }));
-      resumo.appendChild(cartaoIndicador(r.interconsultas_pendentes, 'Interconsultas pendentes', '', function () { abrir('gestao', { aba: 'interconsultas' }); }));
+      resumo.appendChild(cartaoIndicador(r.pacientes, 'Pacientes em acompanhamento', 'cor-azul', function () { abrir('gestao', { aba: 'unidades' }); }));
+      resumo.appendChild(cartaoIndicador(r.aguardando_primeiro, 'Aguardando 1º atendimento', 'cor-rosa', function () { abrir('gestao', { aba: 'prazos', situacao: '' }); }));
+      resumo.appendChild(cartaoIndicador(r.interconsultas_pendentes, 'Interconsultas pendentes', 'cor-azul', function () { abrir('gestao', { aba: 'interconsultas' }); }));
       resumo.appendChild(cartaoIndicador(r.atrasados, 'Com prazo atrasado', 'atrasado', function () { abrir('gestao', { aba: 'prazos', situacao: 'ATRASADO' }); }));
       resumo.appendChild(cartaoIndicador(r.vencem_hoje, 'Vencem hoje', 'hoje', function () { abrir('gestao', { aba: 'prazos', situacao: 'VENCE HOJE' }); }));
       resumo.appendChild(cartaoIndicador(r.vencem_amanha || 0, 'Vencem amanhã', 'amanha', function () { abrir('gestao', { aba: 'prazos', situacao: 'VENCE AMANHÃ' }); }));
