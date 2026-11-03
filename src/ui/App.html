@@ -715,7 +715,14 @@
       form.addEventListener('submit', function (ev) {
         ev.preventDefault();
         var novo = !p.id;
-        enviar(botao, chamar('apiSalvarPaciente', lerFormulario(form)), novo ? 'Paciente cadastrado.' : 'Alterações salvas.').then(function (salvo) {
+        var dados = lerFormulario(form);
+        // Alterar o nome ou o prontuário muda o dono de tudo o que já foi registrado neste cadastro: confirma antes.
+        if (!novo && (textoBusca(dados.nome) !== textoBusca(p.nome) || prontuarioBusca(dados.prontuario) !== prontuarioBusca(p.prontuario)) &&
+          !confirm('Você está ALTERANDO o cadastro de ' + p.nome + ' (prontuário ' + p.prontuario + ') para ' +
+            String(dados.nome).toUpperCase() + ' (prontuário ' + dados.prontuario + ').\n\n' +
+            'As internações, atendimentos e interconsultas deste cadastro passam a aparecer com os dados novos. ' +
+            'Se for OUTRO paciente, clique em Cancelar e use "Novo paciente".')) return;
+        enviar(botao, chamar('apiSalvarPaciente', dados), novo ? 'Paciente cadastrado.' : 'Alterações salvas.').then(function (salvo) {
           clearTimeout(espera);
           busca.value = salvo.prontuario;
           buscar(1);
@@ -728,7 +735,18 @@
             '. Ele já aparece na lista acima.'));
         }).catch(function () {});
       });
-      formulario.appendChild(h('h2', null, p.id ? 'Editar paciente' : 'Novo paciente'));
+      formulario.className = p.id ? 'cartao editando' : 'cartao';
+      if (p.id) {
+        // Deixa claro que o formulário está mexendo num cadastro existente, e não criando outro paciente.
+        var novoPaciente = h('button', { class: 'btn sec', type: 'button' }, '+ Novo paciente');
+        novoPaciente.addEventListener('click', function () { editar({}); });
+        formulario.appendChild(h('div', { class: 'linha' },
+          h('h2', null, 'Alterando o cadastro de ' + p.nome + ' · prontuário ' + p.prontuario), novoPaciente));
+        formulario.appendChild(h('p', { class: 'aviso-edicao' }, 'Use este formulário só para corrigir os dados deste paciente. ' +
+          'Para cadastrar outra pessoa, clique em "+ Novo paciente".'));
+      } else {
+        formulario.appendChild(h('h2', null, 'Novo paciente'));
+      }
       formulario.appendChild(form);
       if (p.id) formulario.appendChild(botaoHistorico(p.id, { nome: 'pacientes' }));
       // Cadastro feito por engano: só a coordenação exclui, e só paciente sem internação (o servidor confere).
@@ -755,7 +773,7 @@
     });
     main.appendChild(h('div', { class: 'cartao' }, campo('Buscar', busca), resultado));
     main.appendChild(confirmacao);
-    main.appendChild(h('div', { class: 'cartao' }, formulario));
+    main.appendChild(formulario);
     editar({});
     buscar(1);
     busca.focus();

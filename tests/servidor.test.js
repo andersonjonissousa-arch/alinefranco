@@ -2223,3 +2223,24 @@ test('registro de alterações: banco antigo sem a aba AUDITORIA cria a aba na p
   assert.equal(ctx.listar('AUDITORIA').length, 1);
   assert.equal(google.planilha.getSheetByName('AUDITORIA').linhas[0][0], 'id');
 });
+
+test('paciente: trocar nome e prontuário de quem tem internação é recusado (seria trocar de pessoa)', () => {
+  const { ctx, admitir, paciente } = sistemaComAdmissao();
+  admitir();
+  ctx.novaExecucao();
+  const troca = ctx.apiSalvarPaciente({ id: paciente.id, prontuario: '888888', nome: 'Outra Pessoa' });
+  assert.equal(troca.ok, false);
+  assert.match(troca.erro, /trocaria o nome e o prontuário de FRANCISCA KELYANE, que tem 1 internação/);
+  ctx.novaExecucao();
+  assert.equal(ctx.buscarPorId('PACIENTES', paciente.id).nome, 'FRANCISCA KELYANE', 'Nada muda quando recusa');
+  // Corrigir um de cada vez continua possível.
+  ctx.novaExecucao();
+  assert.equal(ctx.apiSalvarPaciente({ id: paciente.id, prontuario: '161349', nome: 'Francisca Kelyane Diniz' }).ok, true);
+  ctx.novaExecucao();
+  assert.equal(ctx.apiSalvarPaciente({ id: paciente.id, prontuario: '161350', nome: 'Francisca Kelyane Diniz' }).ok, true);
+  // Sem internação, a correção completa é aceita.
+  ctx.novaExecucao();
+  const sem = ctx.apiSalvarPaciente({ prontuario: '777', nome: 'Nome Errado' }).dados;
+  ctx.novaExecucao();
+  assert.equal(ctx.apiSalvarPaciente({ id: sem.id, prontuario: '778', nome: 'Nome Certo' }).ok, true);
+});

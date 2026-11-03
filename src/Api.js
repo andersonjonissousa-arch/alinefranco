@@ -119,6 +119,20 @@ function apiSalvarPaciente(dados) {
       }
       if (paciente.data_nascimento > hoje()) throw new Error('A data de nascimento não pode estar no futuro.');
     }
+    if (paciente.id) {
+      // Trocar nome e prontuário ao mesmo tempo é trocar de pessoa: as internações já registradas passariam
+      // a ser de outro paciente. Para outra pessoa, o caminho é um cadastro novo.
+      var atual = buscarPorId('PACIENTES', paciente.id);
+      if (!atual) throw new Error('Paciente não encontrado.');
+      var trocaNome = normalizarTexto(atual.nome) !== normalizarTexto(paciente.nome);
+      var trocaProntuario = normalizarProntuario(atual.prontuario) !== paciente.prontuario;
+      var internacoes = listar('ADMISSOES').filter(function (a) { return a.paciente_id === paciente.id; }).length;
+      if (trocaNome && trocaProntuario && internacoes) {
+        throw new Error('Isso trocaria o nome e o prontuário de ' + atual.nome + ', que tem ' + internacoes +
+          ' internação(ões) registrada(s): elas passariam a ser de outra pessoa. Para outro paciente, use "Novo paciente". ' +
+          'Para corrigir, altere o nome ou o prontuário, um de cada vez.');
+      }
+    }
     var duplicado = acharDuplicado(listar('PACIENTES'), paciente);
     if (duplicado) throw new Error('Já existe paciente com o prontuário ' + paciente.prontuario + ': ' + duplicado.nome + '.');
     if (paciente.id) return atualizar('PACIENTES', paciente.id, paciente);

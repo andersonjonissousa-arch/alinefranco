@@ -1061,3 +1061,34 @@ test('cadastros: histórico de alterações mostra quem fez o quê e filtra na t
   assert.equal(tela.pedidos[1].nome, 'apiHistoricoAlteracoes');
   assert.deepEqual(tela.pedidos[1].args, [{ desde: '2026-01-01', ate: '2026-10-21' }]);
 });
+
+test('pacientes: clicar num paciente deixa claro que é alteração, pede confirmação ao trocar nome e tem "+ Novo paciente"', async () => {
+  const tela = carregar();
+  const confirmacoes = [];
+  let resposta = false;
+  tela.ctx.confirm = (msg) => { confirmacoes.push(msg); return resposta; };
+  tela.ctx.telaPacientes();
+  await tela.responder(0, { pacientes: [{ id: 'p1', prontuario: '161349', nome: 'FRANCISCA KELYANE' }], pagina: 1, paginas: 1, total: 1, tamanho_pagina: 20 });
+  tela.todos().find(el => el.tagName === 'TR' && /FRANCISCA/.test(el.textContent)).emitir('click');
+  assert.match(tela.conteudo.textContent, /Alterando o cadastro de FRANCISCA KELYANE · prontuário 161349/);
+  assert.match(tela.conteudo.textContent, /Para cadastrar outra pessoa, clique em "\+ Novo paciente"/);
+  assert.ok(tela.todos().some(el => el.className === 'cartao editando'));
+  // Digitar outro paciente por cima: pede confirmação; cancelando, nada é enviado.
+  const form = formularioCom(tela, 'prontuario');
+  preencher(form, 'prontuario', '999');
+  preencher(form, 'nome', 'Sebastião Matias');
+  form.emitir('submit');
+  assert.equal(confirmacoes.length, 1);
+  assert.match(confirmacoes[0], /ALTERANDO o cadastro de FRANCISCA KELYANE \(prontuário 161349\) para SEBASTIÃO MATIAS \(prontuário 999\)/);
+  assert.equal(tela.pedidos.length, 1, 'Cancelado: nada foi enviado');
+  // Só corrigir o sexo: sem confirmação.
+  preencher(form, 'prontuario', '161349');
+  preencher(form, 'nome', 'Francisca Kelyane');
+  form.emitir('submit');
+  assert.equal(confirmacoes.length, 1);
+  assert.equal(tela.pedidos[1].nome, 'apiSalvarPaciente');
+  // "+ Novo paciente" volta ao formulário vazio.
+  botao(tela, /\+ Novo paciente/).emitir('click');
+  assert.match(tela.conteudo.textContent, /Novo paciente/);
+  assert.equal(formularioCom(tela, 'prontuario').elements.find(el => el.name === 'id').value, '');
+});
