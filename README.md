@@ -94,7 +94,7 @@ Menu **Gestão**, com três abas (todas com filtro de setor, unidade e paciente)
   tipo EQUIPE). Aguardando resposta (com os dias úteis que faltam ou o atraso) e respondidas no
   período escolhido (no prazo ou fora, com o tempo de resposta), com totais e % no prazo.
 
-A tela **Início** mostra os totais (em acompanhamento, aguardando 1º atendimento, interconsultas
+A tela **Início** mostra os totais (em acompanhamento, interconsultas
 pendentes, atrasados, vencem hoje, vencem amanhã), que levam à aba certa da Gestão (os de prazo abrem o
 painel de prazos já filtrado), e a lista do que vence hoje ou amanhã ou está atrasado.
 

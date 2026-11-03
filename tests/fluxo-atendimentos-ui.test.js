@@ -975,6 +975,9 @@ test('início: os totais de atrasados, vencem hoje e vencem amanhã abrem o pain
   const tela = carregar();
   tela.ctx.telaInicio();
   await tela.responder(0, gestao([]));
+  // O cartão "Aguardando 1º atendimento" saiu: contava de novo os pacientes das interconsultas pendentes.
+  assert.equal(tela.todos().some(el => el.tagName === 'BUTTON' && /Aguardando 1º atendimento/.test(el.textContent)), false);
+  assert.ok(botao(tela, /Interconsultas pendentes/));
   botao(tela, /Com prazo atrasado/).emitir('click');
   assert.deepEqual(tela.navegacao.at(-1), { nome: 'gestao', arg: { aba: 'prazos', situacao: 'ATRASADO' } });
   botao(tela, /Vencem hoje/).emitir('click');
