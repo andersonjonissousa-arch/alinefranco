@@ -927,9 +927,10 @@ test('painel de prazos: uma linha por prazo, atrasados primeiro, alta antes de m
     'InterconsultaRISCO DE SUICÍDIO | alta | 20/10/2026 | atrasado',
     'Retorno | moderada | 19/10/2026 | atrasado',
     'Retorno | baixa | 20/10/2026 | atrasado',
-    '1º atendimento | — | 21/10/2026 | vence hoje',
     'InterconsultaCUIDADOS PALIATIVOS | moderada | 22/10/2026 | vence amanhã',
-    'Retorno | alta | 23/10/2026 | no prazo'
+    'Retorno | alta | 23/10/2026 | no prazo',
+    // Sem pedido nem atendimento: só aguardando, sem prazo e sem atrasado (o prazo da admissão fica no compilado).
+    '1º atendimento | — | — | aguardando 1º atendimento'
   ]);
   // Cores: prioridade e situação.
   const selos = tela.todos().filter(el => el.tagName === 'SPAN' && /prioridade-/.test(el.className || ''));
@@ -937,9 +938,10 @@ test('painel de prazos: uma linha por prazo, atrasados primeiro, alta antes de m
   assert.ok(selos.some(s => s.className.includes('prioridade-moderada')));
   assert.ok(selos.some(s => s.className.includes('prioridade-baixa')));
   assert.ok(linhas()[0].className.includes('situacao-atrasado'));
-  assert.ok(linhas()[5].className.includes('situacao-prazo'));
+  assert.ok(linhas()[4].className.includes('situacao-prazo'));
+  assert.ok(linhas()[5].className.includes('situacao-aguardando'));
   // Totais por situação.
-  assert.match(tela.conteudo.textContent, /3Atrasados1Vencem hoje1Vencem amanhã1No prazo/);
+  assert.match(tela.conteudo.textContent, /3Atrasados0Vencem hoje1Vencem amanhã1No prazo1Aguardando 1º atendimento/);
 
   const form = formularioCom(tela, 'situacao');
   preencher(form, 'situacao', 'ATRASADO');
@@ -1091,4 +1093,18 @@ test('pacientes: clicar num paciente deixa claro que é alteração, pede confir
   botao(tela, /\+ Novo paciente/).emitir('click');
   assert.match(tela.conteudo.textContent, /Novo paciente/);
   assert.equal(formularioCom(tela, 'prontuario').elements.find(el => el.name === 'id').value, '');
+});
+
+test('painel de prazos: paciente com interconsulta aberta mostra só o prazo da interconsulta, sem a linha do 1º atendimento', async () => {
+  const tela = carregar();
+  const it = { ...itemDeGestao({ id: 'a9', paciente_nome: 'COM PEDIDO' }), prazos: {
+    primeiro: { estado: 'PENDENTE', prazo: '2026-10-15', situacao: 'ATRASADO' }, interconsulta: { estado: 'PENDENTE' }, retorno: { estado: '' },
+    proximo: { tipo: 'INTERCONSULTA', prazo: '2026-10-22', situacao: 'VENCE AMANHÃ' } },
+    solicitacoes_pendentes: [{ id: 'i9', prazo: '2026-10-22', situacao: 'VENCE AMANHÃ', prioridade: 'MODERADA', motivo_nome: 'MOTIVO' }] };
+  tela.ctx.gestaoPrazos(tela.conteudo);
+  await tela.responder(0, gestao([it]));
+  const linhas = tela.todos().filter(el => el.tagName === 'TR' && el.className && el.className.includes('clicavel'));
+  assert.equal(linhas.length, 1);
+  assert.match(linhas[0].textContent, /Interconsulta/);
+  assert.doesNotMatch(tela.conteudo.textContent, /atrasado\b(?!s)/i);
 });

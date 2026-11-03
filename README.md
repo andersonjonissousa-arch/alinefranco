@@ -70,7 +70,11 @@ Início e Gestão abrem diretamente a tela Atendimentos ao selecionar um pacient
 Menu **Gestão**, com três abas (todas com filtro de setor, unidade e paciente):
 
 - **Painel de prazos** (abre primeiro): tudo o que tem prazo correndo, uma linha por prazo, com paciente,
-  unidade, tipo (1º atendimento, interconsulta ou retorno), prioridade, prazo (só a data) e situação.
+  unidade, tipo (interconsulta ou retorno), prioridade, prazo (só a data) e situação.
+  - **Sem o prazo do 1º atendimento** (pedido da coordenação): com interconsulta aberta, aparece o prazo dela;
+    depois do 1º atendimento, o do retorno; sem pedido nem atendimento, só "aguardando 1º atendimento", sem prazo e
+    sem atrasado. O mesmo vale para o Início e as listas. O prazo de dias úteis da admissão continua no compilado e
+    na tela Indicadores.
   - **Cores:** prioridade alta vermelha, moderada laranja, baixa e monitoramento cinza; situação atrasada
     vermelha, vence hoje laranja, vence amanhã amarela e no prazo verde (no selo e na borda da linha).
   - **Ordem:** atrasados, vence hoje, vence amanhã e no prazo; em cada grupo, alta antes de moderada e baixa,

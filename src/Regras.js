@@ -548,7 +548,10 @@ function prazosDaAdmissao(adm, hojeIso, agoraDh, feriados) {
     retorno.situacao = situacaoPrazo(retorno.prazo, hojeIso, feriados);
   } else retorno.estado = 'SEM PRAZO';
 
-  var pendentes = [['1º ATENDIMENTO', primeiro], ['INTERCONSULTA', interconsulta], ['RETORNO', retorno]]
+  // O prazo do 1º atendimento (dias úteis da admissão) não entra no próximo prazo do dia a dia: o painel, o Início
+  // e as listas mostram a interconsulta aberta ou o retorno, e quem não tem pedido nem atendimento aparece só como
+  // aguardando, sem atrasado (pedido da coordenação). Ele continua calculado em "primeiro", para o compilado e os indicadores.
+  var pendentes = [['INTERCONSULTA', interconsulta], ['RETORNO', retorno]]
     .filter(function (p) { return p[1].estado === 'PENDENTE'; });
   pendentes.sort(function (a, b) {
     var g = GRAVIDADE_SITUACAO[b[1].situacao] - GRAVIDADE_SITUACAO[a[1].situacao];

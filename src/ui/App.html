@@ -437,7 +437,7 @@
                       a.prioridade_demanda ? h('div', { class: 'suave' }, a.prioridade_demanda.toLowerCase() + (a.periodicidade ? ' · ' + a.periodicidade : '')) : ''),
                     h('td', null, dataBr(a.ultimo_contato) || h('span', { class: 'suave' }, 'nenhum')),
                     h('td', null, p ? h('div', null, h('div', { class: 'suave' }, ROTULO_TIPO_PRAZO[p.tipo]),
-                      p.prazo.length > 10 ? dataHoraBr(p.prazo) : dataBr(p.prazo), ' ', selo(p.situacao)) : h('span', { class: 'suave' }, '—')));
+                      p.prazo.length > 10 ? dataHoraBr(p.prazo) : dataBr(p.prazo), ' ', selo(p.situacao)) : semProximoPrazo(a)));
                 })))));
           });
         });
@@ -450,7 +450,7 @@
   // ---------- Painel de prazos (Gestão > Painel de prazos) ----------
 
   var filtrosPainel = { prioridade: '', situacao: '' };
-  var ORDEM_SITUACAO_PAINEL = { 'ATRASADO': 0, 'VENCE HOJE': 1, 'VENCE AMANHÃ': 2, 'NO PRAZO': 3 };
+  var ORDEM_SITUACAO_PAINEL = { 'ATRASADO': 0, 'VENCE HOJE': 1, 'VENCE AMANHÃ': 2, 'NO PRAZO': 3, 'AGUARDANDO': 4 };
   var ORDEM_PRIORIDADE_PAINEL = { 'ALTA': 0, 'MODERADA': 1, 'BAIXA': 2, 'MONITORAMENTO': 3 };
   var CLASSE_PRIORIDADE = { 'ALTA': 'selo prioridade-alta', 'MODERADA': 'selo prioridade-moderada', 'BAIXA': 'selo prioridade-baixa',
     'MONITORAMENTO': 'selo prioridade-baixa' };
@@ -460,8 +460,9 @@
     var linhas = [];
     itens.forEach(function (a) {
       var base = { admissao: a, paciente_nome: a.paciente_nome };
-      if (a.prazos.primeiro.estado === 'PENDENTE') {
-        linhas.push(Object.assign({ tipo: '1º ATENDIMENTO', prazo: a.prazos.primeiro.prazo, situacao: a.prazos.primeiro.situacao, prioridade: '' }, base));
+      // Sem interconsulta aberta e sem atendimento: só "aguardando 1º atendimento", sem prazo e sem atrasado.
+      if (a.prazos.primeiro.estado === 'PENDENTE' && !(a.solicitacoes_pendentes || []).length) {
+        linhas.push(Object.assign({ tipo: '1º ATENDIMENTO', prazo: '', situacao: 'AGUARDANDO', prioridade: '' }, base));
       }
       (a.solicitacoes_pendentes || []).forEach(function (i) {
         linhas.push(Object.assign({ tipo: 'INTERCONSULTA', prazo: i.prazo, situacao: i.situacao, prioridade: i.prioridade, detalhe: i.motivo_nome }, base));
@@ -478,6 +479,11 @@
         ordem(ORDEM_PRIORIDADE_PAINEL, x.prioridade) - ordem(ORDEM_PRIORIDADE_PAINEL, y.prioridade) ||
         String(x.prazo).localeCompare(String(y.prazo)) || String(x.paciente_nome).localeCompare(String(y.paciente_nome));
     });
+  }
+
+  /** Sem interconsulta aberta nem retorno: quem ainda não foi atendido aparece só como aguardando, sem prazo. */
+  function semProximoPrazo(a) {
+    return h('span', { class: 'suave' }, a.status === estado.cad.status_admissao.aguardando ? 'aguardando 1º atendimento' : '—');
   }
 
   function seloPrioridade(p) {
@@ -497,7 +503,8 @@
       campo('Prioridade', seletor('prioridade', nomes.map(function (n) { return { valor: n, rotulo: n.toLowerCase().replace(/^./, function (c) { return c.toUpperCase(); }) }; })
         .concat([{ valor: 'SEM', rotulo: 'Sem prioridade' }]), filtrosPainel.prioridade, 'Todas')),
       campo('Situação', seletor('situacao', [{ valor: 'ATRASADO', rotulo: 'Atrasados' }, { valor: 'VENCE HOJE', rotulo: 'Vence hoje' },
-        { valor: 'VENCE AMANHÃ', rotulo: 'Vence amanhã' }, { valor: 'NO PRAZO', rotulo: 'No prazo' }], filtrosPainel.situacao, 'Todas')));
+        { valor: 'VENCE AMANHÃ', rotulo: 'Vence amanhã' }, { valor: 'NO PRAZO', rotulo: 'No prazo' },
+        { valor: 'AGUARDANDO', rotulo: 'Aguardando 1º atendimento' }], filtrosPainel.situacao, 'Todas')));
     var resumo = h('div', { class: 'indicadores' });
     var lista = h('div', { class: 'cartao tabela-rolagem' }, h('p', { class: 'carregando' }, 'Carregando…'));
     var dados = null;
@@ -524,7 +531,8 @@
       var linhas = todas.filter(function (l) { return !filtrosPainel.situacao || l.situacao === filtrosPainel.situacao; });
       // Totais por situação (com os outros filtros); clicar filtra.
       resumo.textContent = '';
-      [['ATRASADO', 'Atrasados', 'atrasado'], ['VENCE HOJE', 'Vencem hoje', 'hoje'], ['VENCE AMANHÃ', 'Vencem amanhã', 'amanha'], ['NO PRAZO', 'No prazo', 'prazo']]
+      [['ATRASADO', 'Atrasados', 'atrasado'], ['VENCE HOJE', 'Vencem hoje', 'hoje'], ['VENCE AMANHÃ', 'Vencem amanhã', 'amanha'], ['NO PRAZO', 'No prazo', 'prazo'],
+        ['AGUARDANDO', 'Aguardando 1º atendimento', 'cor-rosa']]
         .forEach(function (c) {
           var n = todas.filter(function (l) { return l.situacao === c[0]; }).length;
           var cartao = cartaoIndicador(n, c[1], c[2] + (filtrosPainel.situacao === c[0] ? ' selecionado' : ''), function () {
@@ -535,22 +543,23 @@
           resumo.appendChild(cartao);
         });
       lista.textContent = '';
-      lista.appendChild(h('p', { class: 'suave' }, 'Tudo o que tem prazo correndo, do mais urgente para o menos urgente: 1º atendimento em até ' +
-        parametroPrazoPrimeiro() + ' dia(s) útil(eis) da admissão, resposta a cada interconsulta pela prioridade do motivo e retorno pela prioridade da justificativa.'));
+      lista.appendChild(h('p', { class: 'suave' }, 'Tudo o que tem prazo correndo, do mais urgente para o menos urgente: resposta a cada interconsulta ' +
+        'pela prioridade do motivo e retorno pela prioridade da justificativa. Quem ainda não tem pedido nem atendimento aparece como ' +
+        'aguardando 1º atendimento, sem prazo (o prazo de ' + parametroPrazoPrimeiro() + ' dia(s) útil(eis) da admissão fica no compilado).'));
       if (!linhas.length) { lista.appendChild(h('p', { class: 'suave' }, 'Nenhum prazo encontrado com esses filtros.')); return; }
       lista.appendChild(h('table', { class: 'painel-prazos' },
         h('thead', null, h('tr', null, ['Paciente', 'Unidade', 'Tipo', 'Prioridade', 'Prazo', 'Situação'].map(function (t) { return h('th', null, t); }))),
         h('tbody', null, linhas.map(function (l) {
           var a = l.admissao;
-          return h('tr', { class: 'clicavel situacao-' + ({ 'ATRASADO': 'atrasado', 'VENCE HOJE': 'hoje', 'VENCE AMANHÃ': 'amanha', 'NO PRAZO': 'prazo' }[l.situacao] || ''),
+          return h('tr', { class: 'clicavel situacao-' + ({ 'ATRASADO': 'atrasado', 'VENCE HOJE': 'hoje', 'VENCE AMANHÃ': 'amanha', 'NO PRAZO': 'prazo', 'AGUARDANDO': 'aguardando' }[l.situacao] || ''),
             onclick: function () { abrir('atendimentos', { id: a.id }); } },
             h('td', null, h('strong', null, a.paciente_nome),
               h('div', { class: 'suave' }, 'Pront. ' + a.prontuario, ' · ', botaoHistorico(a.paciente_id, { nome: 'gestao', arg: { aba: 'prazos' } }, 'link'))),
             h('td', { 'data-rotulo': 'Unidade' }, a.unidade_nome, a.setor_atual_nome ? h('div', { class: 'suave' }, a.setor_atual_nome) : null),
             h('td', { 'data-rotulo': 'Tipo' }, ROTULO_TIPO_PRAZO[l.tipo] || l.tipo, l.detalhe ? h('div', { class: 'suave' }, l.detalhe) : null),
             h('td', { 'data-rotulo': 'Prioridade' }, seloPrioridade(l.prioridade)),
-            h('td', { 'data-rotulo': 'Prazo' }, dataBr(l.prazo)),
-            h('td', { 'data-rotulo': 'Situação' }, selo(l.situacao)));
+            h('td', { 'data-rotulo': 'Prazo' }, l.prazo ? dataBr(l.prazo) : h('span', { class: 'suave' }, '—')),
+            h('td', { 'data-rotulo': 'Situação' }, l.situacao === 'AGUARDANDO' ? h('span', { class: 'selo' }, 'aguardando 1º atendimento') : selo(l.situacao)));
         }))));
     }
     form.addEventListener('input', aplicar);
@@ -1158,7 +1167,7 @@
               h('td', null, dataBr(a.data_admissao), a.data_admissao === g.hoje ? h('div', null, h('span', { class: 'selo hoje' }, 'Admitido hoje')) : null),
               h('td', null, seloStatus(a)),
               h('td', null, proximo ? h('div', null, h('div', { class: 'suave' }, ROTULO_TIPO_PRAZO[proximo.tipo]),
-                proximo.prazo.length > 10 ? dataHoraBr(proximo.prazo) : dataBr(proximo.prazo), ' ', selo(proximo.situacao)) : '—'));
+                proximo.prazo.length > 10 ? dataHoraBr(proximo.prazo) : dataBr(proximo.prazo), ' ', selo(proximo.situacao)) : semProximoPrazo(a)));
           }))));
     }
     form.addEventListener('input', aplicar);

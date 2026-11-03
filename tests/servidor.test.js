@@ -2244,3 +2244,31 @@ test('paciente: trocar nome e prontuário de quem tem internação é recusado (
   ctx.novaExecucao();
   assert.equal(ctx.apiSalvarPaciente({ id: sem.id, prontuario: '778', nome: 'Nome Certo' }).ok, true);
 });
+
+test('painel e Início: o prazo do 1º atendimento não marca atrasado; o compilado continua contando pela admissão', () => {
+  const sis = sistemaComAdmissao();
+  const { ctx, admitir } = sis;
+  // Admitido em 09/10, hoje 20/10: o prazo de 3 dias úteis da admissão (15/10) já passou.
+  const adm = admitir().dados.admissao;
+  ctx.novaExecucao();
+  let g = ctx.apiGestao({}).dados;
+  let item = g.itens.find(i => i.id === adm.id);
+  assert.equal(item.prazos.primeiro.estado, 'PENDENTE');
+  assert.equal(item.prazos.primeiro.situacao, 'ATRASADO', 'O cálculo do 1º atendimento continua existindo');
+  assert.equal(item.prazos.proximo, null, 'Sem pedido nem atendimento: nenhum prazo no dia a dia');
+  assert.equal(g.resumo.atrasados, 0);
+  assert.equal(g.resumo.aguardando_primeiro, 1);
+  // Com interconsulta aberta, o próximo prazo é o dela.
+  solicitar(sis, adm, { data_solicitacao: '2026-10-20', hora_solicitacao: '08:00' });
+  ctx.novaExecucao();
+  g = ctx.apiGestao({}).dados;
+  item = g.itens.find(i => i.id === adm.id);
+  assert.equal(item.prazos.proximo.tipo, 'INTERCONSULTA');
+  assert.equal(item.prazos.proximo.situacao, 'VENCE AMANHÃ');
+  assert.equal(g.resumo.atrasados, 0);
+  // O compilado e a admissão seguem com o 1º atendimento contado da admissão.
+  ctx.novaExecucao();
+  assert.equal(ctx.buscarPorId('ADMISSOES', adm.id).primeiro_no_prazo, 'NÃO');
+  const c = ctx.apiCompilado({ ano: '2026', mes: '10', eixo: 'UNIDADE' }).dados;
+  assert.equal(c.secoes.find(s => s.titulo.startsWith('1º atendimento')).linhas.find(l => l.rotulo === 'FORA DO PRAZO').total, 1);
+});
