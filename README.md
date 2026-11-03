@@ -143,6 +143,15 @@ dist/               o mesmo código em 4 arquivos, para instalar copiando e cola
 tests/              testes com Node, com os serviços do Google simulados
 ```
 
+## Problemas de acesso
+
+- **"Você não tem permissão para chamar SpreadsheetApp.openById"**: a conta abriu o sistema sem dar todas as
+  permissões na tela de consentimento do Google (ela deixa desmarcar opções). O sistema agora mostra uma página
+  com o botão **Autorizar o acesso**. Se a mensagem continuar: em myaccount.google.com/connections, remova a
+  conexão com "Gestão da Psicologia", abra o link de novo e marque todas as opções ("Selecionar tudo").
+- Como o sistema roda com a conta de quem acessa, cada pessoa também precisa estar cadastrada em
+  **Cadastros > Profissionais** (ativa) e ter acesso de edição à planilha do banco.
+
 ## Limpeza dos dados de teste
 
 Antes de começar a usar com dados reais, rode **`limparDadosDeTeste`** no editor do Apps Script, com a conta da coordenação.

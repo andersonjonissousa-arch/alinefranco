@@ -980,3 +980,12 @@ test('início: os totais de atrasados, vencem hoje e vencem amanhã abrem o pain
   botao(tela, /Vencem amanhã/).emitir('click');
   assert.deepEqual(tela.navegacao.at(-1), { nome: 'gestao', arg: { aba: 'prazos', situacao: 'VENCE AMANHÃ' } });
 });
+
+test('erro de permissão do Google vira instrução para autorizar de novo', () => {
+  const tela = carregar();
+  const e = tela.ctx.erroDoGoogle(new Error('Você não tem permissão para chamar SpreadsheetApp.openById. Permissões necessárias: https://www.googleapis.com/auth/spreadsheets'));
+  assert.match(e.message, /myaccount\.google\.com\/connections/);
+  assert.match(e.message, /Selecionar tudo/);
+  const outro = new Error('Paciente não encontrado.');
+  assert.equal(tela.ctx.erroDoGoogle(outro), outro);
+});

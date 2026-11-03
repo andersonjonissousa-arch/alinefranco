@@ -1959,6 +1959,14 @@ function semearCoordenacao() {
 /** Ponto de entrada do aplicativo web e controle de acesso. */
 
 function doGet() {
+  // Na tela de consentimento, o Google deixa desmarcar permissões. Sem a de planilhas, nada funciona:
+  // em vez do erro técnico, a página pede para autorizar de novo.
+  var autorizar = enderecoParaAutorizar_();
+  if (autorizar) {
+    return HtmlService.createHtmlOutput(paginaDeAutorizacao_(autorizar))
+      .setTitle(APP.nome)
+      .addMetaTag('viewport', 'width=device-width, initial-scale=1');
+  }
   var pagina = HtmlService.createTemplateFromFile('ui/Index');
   // Os dados da primeira tela já vão junto com a página: o navegador não precisa pedir de novo.
   pagina.dadosIniciais = dadosIniciaisDaPagina();
@@ -1975,6 +1983,32 @@ function doGet() {
 function dadosIniciaisDaPagina() {
   var r = apiInicio(true);
   return JSON.stringify(r).replace(/</g, '\\u003c').replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029');
+}
+
+/** Endereço para autorizar o sistema, quando falta alguma permissão para quem está acessando; senão, ''. */
+function enderecoParaAutorizar_() {
+  try {
+    if (typeof ScriptApp === 'undefined') return '';
+    var info = ScriptApp.getAuthorizationInfo(ScriptApp.AuthMode.FULL);
+    return info.getAuthorizationStatus() === ScriptApp.AuthorizationStatus.REQUIRED ? info.getAuthorizationUrl() : '';
+  } catch (e) {
+    return '';
+  }
+}
+
+function paginaDeAutorizacao_(url) {
+  var link = String(url).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+  return '<!doctype html><html><head><meta charset="utf-8"><style>' +
+    'body{margin:0;font:16px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;background:#D8ECFF;color:#1f2933}' +
+    '.c{max-width:560px;margin:48px auto;padding:24px;background:#fff;border:1px solid #c9d8ea;border-radius:8px}' +
+    'h1{font-size:20px;margin:0 0 12px}a.b{display:inline-block;margin-top:12px;padding:10px 16px;border-radius:6px;' +
+    'background:#2f6f9f;color:#fff;text-decoration:none}li{margin:4px 0}</style></head><body><div class="c">' +
+    '<h1>Gestão da Psicologia: falta autorizar o acesso</h1>' +
+    '<p>Sua conta Google ainda não deu ao sistema todas as permissões de que ele precisa para ler e gravar a planilha.</p>' +
+    '<ol><li>Clique no botão abaixo.</li><li>Escolha a conta cadastrada no sistema.</li>' +
+    '<li>Na tela do Google, marque <strong>todas</strong> as opções (ou "Selecionar tudo") e clique em <strong>Continuar</strong>.</li>' +
+    '<li>Depois, abra o link do sistema de novo.</li></ol>' +
+    '<a class="b" href="' + link + '" target="_top">Autorizar o acesso</a></div></body></html>';
 }
 
 /** Usado nos templates HTML: <?!= incluir('ui/Estilo') ?> */

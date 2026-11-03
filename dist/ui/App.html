@@ -28,9 +28,18 @@
     });
   }
 
+  // A conta abriu o sistema sem dar todas as permissões na tela de consentimento do Google.
+  var MENSAGEM_PERMISSAO = 'Sua conta Google não deu ao sistema a permissão de acessar as planilhas. Para corrigir: ' +
+    '1) abra myaccount.google.com/connections (Sua conta Google > Segurança > Conexões com apps e serviços de terceiros); ' +
+    '2) em "Gestão da Psicologia", clique em "Excluir todas as conexões"; ' +
+    '3) abra o link do sistema de novo e, na tela do Google, marque todas as opções ("Selecionar tudo") e clique em Continuar.';
+
   /** Erro de armazenamento do Google (código INTERNAL): instabilidade do Google ou mais de uma conta no navegador. */
   function erroDoGoogle(e) {
     var msg = String((e && e.message) || e || '');
+    if (/permiss[aã]o para chamar|permission to call|Permiss[oõ]es necess[aá]rias|required permissions/i.test(msg)) {
+      return new Error(MENSAGEM_PERMISSAO);
+    }
     if (/INTERNAL|armazenamento|storage/i.test(msg)) {
       return new Error('O Google não respondeu (código INTERNAL). Espere alguns minutos e atualize a página. ' +
         'Se continuar, pode ser mais de uma conta Google aberta no navegador: abra o sistema numa janela anônima ' +
@@ -2248,7 +2257,7 @@
   function abertura() {
     var d = typeof DADOS_INICIAIS !== 'undefined' ? DADOS_INICIAIS : null;
     if (!d) return chamar('apiInicio', true);
-    return d.ok ? Promise.resolve(d.dados) : Promise.reject(new Error(d.erro));
+    return d.ok ? Promise.resolve(d.dados) : Promise.reject(erroDoGoogle(new Error(d.erro)));
   }
 
   abertura().then(function (dados) {

@@ -2050,3 +2050,27 @@ test('limparDadosDeTeste: apaga pacientes e registros, mantém as configuraçõe
   assert.equal(ctx.listar('PACIENTES').length, 1);
   assert.equal(ctx.apiGestao({}).dados.itens.length, 0);
 });
+
+test('abertura: sem todas as permissões do Google, a página pede para autorizar de novo em vez do erro técnico', () => {
+  const { ctx } = carregarSistema();
+  ctx.configurar();
+  let status = 'REQUIRED';
+  ctx.ScriptApp = {
+    AuthMode: { FULL: 'FULL' }, AuthorizationStatus: { REQUIRED: 'REQUIRED', NOT_REQUIRED: 'NOT_REQUIRED' },
+    getAuthorizationInfo: () => ({ getAuthorizationStatus: () => status, getAuthorizationUrl: () => 'https://script.google.com/autorizar?x=1&y="2"' })
+  };
+  let html = '';
+  ctx.HtmlService = {
+    createHtmlOutput: (conteudo) => { html = conteudo; const p = { setTitle: () => p, addMetaTag: () => p }; return p; },
+    createTemplateFromFile: () => ({ evaluate: () => { html = 'SISTEMA'; const p = { setTitle: () => p, addMetaTag: () => p, setXFrameOptionsMode: () => p }; return p; } })
+  };
+  vm.runInContext('ScriptApp = this.ScriptApp; HtmlService = this.HtmlService; HtmlService.XFrameOptionsMode = { DEFAULT: 1 }', ctx);
+  ctx.doGet();
+  assert.match(html, /falta autorizar o acesso/);
+  assert.match(html, /Selecionar tudo/);
+  assert.match(html, /href="https:\/\/script\.google\.com\/autorizar\?x=1&amp;y=&quot;2&quot;" target="_top"/);
+  status = 'NOT_REQUIRED';
+  ctx.novaExecucao();
+  ctx.doGet();
+  assert.equal(html, 'SISTEMA');
+});
