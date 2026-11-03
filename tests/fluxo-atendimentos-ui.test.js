@@ -1010,3 +1010,54 @@ test('pacientes: a coordenação exclui um cadastro feito por engano; profission
   prof.todos().find(el => el.tagName === 'TR' && /SEBASTIÃO/.test(el.textContent)).emitir('click');
   assert.equal(prof.todos().some(el => el.tagName === 'BUTTON' && el.textContent === 'Excluir paciente'), false);
 });
+
+test('pacientes: depois de cadastrar, uma confirmação fica na tela com o nome e o prontuário gravados', async () => {
+  const tela = carregar();
+  tela.ctx.telaPacientes();
+  await tela.responder(0, { pacientes: [], pagina: 1, paginas: 1, total: 0, tamanho_pagina: 20 });
+  const confirmacao = () => tela.todos().find(el => el.className === 'cartao confirmacao');
+  assert.equal(confirmacao().hidden, true);
+  const form = formularioCom(tela, 'prontuario');
+  preencher(form, 'prontuario', '4321');
+  preencher(form, 'nome', 'Sebastião Matias de Lima');
+  form.emitir('submit');
+  assert.equal(tela.pedidos[1].nome, 'apiSalvarPaciente');
+  await tela.responder(1, { id: 'p1', prontuario: '4321', nome: 'SEBASTIÃO MATIAS DE LIMA' });
+  assert.equal(confirmacao().hidden, false);
+  assert.match(confirmacao().textContent, /✓ Paciente cadastrado: SEBASTIÃO MATIAS DE LIMA/);
+  assert.match(confirmacao().textContent, /Prontuário 4321 · gravado às \d{2}:\d{2}/);
+  assert.equal(tela.pedidos[2].nome, 'apiListarPacientes', 'A lista é buscada de novo com o paciente gravado');
+  assert.deepEqual(tela.pedidos[2].args, [{ termo: '4321', pagina: 1 }]);
+});
+
+test('cadastros: histórico de alterações mostra quem fez o quê e filtra na tela', async () => {
+  const tela = carregar();
+  const alvo = tela.conteudo;
+  tela.ctx.cadHistoricoAlteracoes(alvo);
+  assert.equal(tela.pedidos[0].nome, 'apiHistoricoAlteracoes');
+  await tela.responder(0, { desde: '2026-09-21', ate: '2026-10-21', total: 2, itens: [
+    { quando: '2026-10-21 10:17:05', email: 'aline@exemplo.com', profissional_nome: 'ALINE', acao: 'EXCLUSÃO', tabela: 'PACIENTES',
+      tabela_nome: 'Paciente', paciente_nome: 'SEBASTIÃO MATIAS DE LIMA', prontuario: '4321', resumo: 'nome: SEBASTIÃO MATIAS DE LIMA · prontuario: 4321' },
+    { quando: '2026-10-21 09:02:11', email: 'carla@exemplo.com', profissional_nome: 'CARLA', acao: 'INCLUSÃO', tabela: 'ATENDIMENTOS',
+      tabela_nome: 'Atendimento', paciente_nome: 'MARIA', prontuario: '7', resumo: 'data: 2026-10-21 · hora: 09:00' }
+  ] });
+  const linhas = () => tela.todos().filter(el => el.tagName === 'TR').slice(1);
+  assert.equal(linhas().length, 2);
+  assert.match(linhas()[0].textContent, /21\/10\/202610:17:05ALINEaline@exemplo\.comexclusãoPacienteSEBASTIÃO MATIAS DE LIMAPront\. 4321/);
+  const form = formularioCom(tela, 'acao');
+  preencher(form, 'acao', 'EXCLUSÃO');
+  form.emitir('change');
+  assert.equal(linhas().length, 1);
+  preencher(form, 'acao', '');
+  preencher(form, 'termo', 'maria');
+  form.emitir('input');
+  assert.equal(linhas().length, 1);
+  assert.match(linhas()[0].textContent, /CARLA/);
+  assert.equal(tela.pedidos.length, 1, 'Filtros de pessoa, ação e busca não vão ao servidor');
+  // Mudar o período busca de novo.
+  const desde = form.elements.find(el => el.name === 'desde');
+  desde.value = '2026-01-01';
+  form.listeners.change.forEach(fn => fn({ target: desde }));
+  assert.equal(tela.pedidos[1].nome, 'apiHistoricoAlteracoes');
+  assert.deepEqual(tela.pedidos[1].args, [{ desde: '2026-01-01', ate: '2026-10-21' }]);
+});

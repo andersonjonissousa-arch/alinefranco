@@ -1534,8 +1534,8 @@ test('gravação pela API: registrar atendimento lê uma vez, grava uma linha no
   const { r, cont } = contarChamadas(ctx, () =>
     ctx.apiRegistrarAtendimento({ tipo_atendimento: 'BUSCA ATIVA', admissao_id: adm.id, data: '2026-10-14', hora: '10:00', publico: 'PACIENTE', descricao_demanda: 'HUMOR DEPRIMIDO OU ANSIOSO' }));
   assert.equal(r.ok, true, r.erro);
-  // Duas linhas novas, em abas diferentes: o atendimento e a descrição da demanda do 1º atendimento.
-  assert.deepEqual({ ...cont }, { batchGet: 1, append: 2, batchUpdate: 1, trava: 1 });
+  // Três abas com linhas novas: o atendimento, a descrição da demanda do 1º atendimento e o registro de alterações.
+  assert.deepEqual({ ...cont }, { batchGet: 1, append: 3, batchUpdate: 1, trava: 1 });
   assert.equal(r.dados.admissao.primeiro_atendimento, '2026-10-14');
 });
 
@@ -1699,6 +1699,8 @@ test('cota do Google: linhas novas vão numa gravação por aba e a recusa por c
   V.append = (...a) => { chamadas.append++; return originais.append(...a); };
   V.batchUpdate = (...a) => { chamadas.batchUpdate++; return originais.batchUpdate(...a); };
   ctx.configurar();
+  // Aqui se mede só o agrupamento das linhas: o registro de alterações (uma aba a mais) fica desligado.
+  vm.runInContext('_semAuditoria = true', ctx);
   // Banco novo: centenas de linhas, no máximo uma gravação por aba (o limite do Google é 60 por minuto).
   assert.ok(chamadas.append <= Object.keys(ctx.TABELAS).length, 'appends: ' + chamadas.append);
   ctx.novaExecucao();
@@ -2019,8 +2021,8 @@ test('limparDadosDeTeste: apaga pacientes e registros, mantém as configuraçõe
   ctx.novaExecucao();
   const configuracao = ['SETORES', 'UNIDADES', 'PROFISSIONAIS', 'LISTAS', 'PRIORIDADES', 'MOTIVOS_SOLICITACAO', 'JUSTIFICATIVAS',
     'FERIADOS', 'DESFECHOS', 'PARAMETROS'];
-  // Toda aba é configuração (fica) ou registro (sai): uma aba nova precisa entrar numa das listas.
-  assert.deepEqual([...configuracao, ...ctx.TABELAS_DE_REGISTROS].sort(), Object.keys(ctx.TABELAS).sort());
+  // Toda aba é configuração (fica), registro (sai) ou o registro de alterações (fica): uma aba nova precisa entrar numa lista.
+  assert.deepEqual([...configuracao, ...ctx.TABELAS_DE_REGISTROS, 'AUDITORIA'].sort(), Object.keys(ctx.TABELAS).sort());
   const antes = JSON.stringify(configuracao.map(t => ctx.listar(t)));
   assert.ok(ctx.listar('PACIENTES').length > 0 && ctx.listar('ATENDIMENTOS').length > 0 && ctx.listar('REUNIOES').length > 0);
 
@@ -2121,4 +2123,85 @@ test('excluir paciente: só a coordenação e só sem internação', () => {
   assert.equal(ctx.buscarPorId('PACIENTES', engano.id), null);
   assert.ok(ctx.buscarPorId('PACIENTES', paciente.id));
   assert.equal(ctx.apiExcluirPaciente(engano.id).ok, false);
+});
+
+test('registro de alterações: inclusão, alteração e exclusão com quem e quando; recálculos e configurar ficam de fora', () => {
+  const { ctx, google, admitir, atender } = sistemaComAdmissao();
+  ctx.novaExecucao();
+  const auditoria = () => { ctx.novaExecucao(); return ctx.listar('AUDITORIA'); };
+  // O configurar e a preparação do teste (prioridade) não poluem o registro além do que foi feito pela tela.
+  const inicio = auditoria().length;
+  const p = ctx.apiSalvarPaciente({ prontuario: '4321', nome: 'Sebastião Matias de Lima' }).dados;
+  let linhas = auditoria().slice(inicio);
+  assert.equal(linhas.length, 1);
+  assert.equal(linhas[0].acao, 'INCLUSÃO');
+  assert.equal(linhas[0].tabela, 'PACIENTES');
+  assert.equal(linhas[0].email, 'coordenacao@exemplo.com');
+  assert.equal(linhas[0].paciente_id, p.id);
+  assert.match(linhas[0].quando, /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/);
+  assert.equal(JSON.parse(linhas[0].dados).nome, 'SEBASTIÃO MATIAS DE LIMA');
+
+  ctx.novaExecucao();
+  ctx.apiSalvarPaciente({ id: p.id, prontuario: '4321', nome: 'Sebastião Matias de Lima Filho' });
+  ctx.novaExecucao();
+  ctx.apiSalvarPaciente({ id: p.id, prontuario: '4321', nome: 'Sebastião Matias de Lima Filho' }); // sem mudança: não registra
+  linhas = auditoria().slice(inicio);
+  assert.equal(linhas.length, 2);
+  assert.equal(linhas[1].acao, 'ALTERAÇÃO');
+  assert.deepEqual(JSON.parse(linhas[1].dados), { antes: { nome: 'SEBASTIÃO MATIAS DE LIMA' }, depois: { nome: 'SEBASTIÃO MATIAS DE LIMA FILHO' } });
+
+  ctx.novaExecucao();
+  assert.equal(ctx.apiExcluirPaciente(p.id).ok, true);
+  linhas = auditoria().slice(inicio);
+  assert.equal(linhas[2].acao, 'EXCLUSÃO');
+  assert.equal(JSON.parse(linhas[2].dados).prontuario, '4321', 'A exclusão guarda o registro inteiro');
+
+  // Atendimento: o registro e as linhas que ele cria; os recálculos de prazo não entram.
+  const adm = admitir().dados.admissao;
+  const antesAtendimento = auditoria().length;
+  atender(adm, { data: '2026-10-13' });
+  const doAtendimento = auditoria().slice(antesAtendimento);
+  assert.deepEqual([...doAtendimento.map(a => a.acao + ' ' + a.tabela)].sort(),
+    ['INCLUSÃO ATENDIMENTOS', 'INCLUSÃO DESCRICOES_DEMANDA', 'ALTERAÇÃO ADMISSOES'].sort());
+  assert.ok(doAtendimento.every(a => a.admissao_id === adm.id));
+
+  // A consulta: só a coordenação; mostra o nome do paciente mesmo depois de excluído.
+  ctx.novaExecucao();
+  const h = ctx.apiHistoricoAlteracoes({ desde: '2026-01-01', ate: '2099-12-31' });
+  assert.equal(h.ok, true, h.erro);
+  const exclusao = h.dados.itens.find(i => i.acao === 'EXCLUSÃO');
+  assert.equal(exclusao.paciente_nome, 'SEBASTIÃO MATIAS DE LIMA FILHO');
+  assert.equal(exclusao.prontuario, '4321');
+  assert.equal(exclusao.tabela_nome, 'Paciente');
+  assert.equal(exclusao.profissional_nome, ctx.listar('PROFISSIONAIS')[0].nome);
+  const alteracao = h.dados.itens.find(i => i.acao === 'ALTERAÇÃO' && i.tabela === 'PACIENTES');
+  assert.equal(alteracao.resumo, 'nome: SEBASTIÃO MATIAS DE LIMA → SEBASTIÃO MATIAS DE LIMA FILHO');
+  assert.ok(h.dados.itens[0].quando >= h.dados.itens.at(-1).quando, 'Do mais recente para o mais antigo');
+  assert.ok(h.dados.itens.some(i => i.tabela === 'ATENDIMENTOS' && i.paciente_nome === 'FRANCISCA KELYANE'));
+  ctx.novaExecucao();
+  google.sessao.email = 'ninguem@exemplo.com';
+  assert.equal(ctx.apiHistoricoAlteracoes({}).ok, false);
+  google.sessao.email = 'coordenacao@exemplo.com';
+
+  // As telas do dia a dia não leem a AUDITORIA, que só cresce.
+  const batchGet = google.globais.Sheets.Spreadsheets.Values.batchGet;
+  const lidas = [];
+  google.globais.Sheets.Spreadsheets.Values.batchGet = (id, o) => { lidas.push(...o.ranges); return batchGet(id, o); };
+  ctx.novaExecucao();
+  ctx.apiGestao({});
+  assert.equal(lidas.some(r => r.includes('AUDITORIA')), false);
+  google.globais.Sheets.Spreadsheets.Values.batchGet = batchGet;
+});
+
+test('registro de alterações: banco antigo sem a aba AUDITORIA cria a aba na primeira gravação', () => {
+  const { ctx, google } = carregarSistema();
+  ctx.configurar();
+  google.planilha.deleteSheet(google.planilha.getSheetByName('AUDITORIA'));
+  ctx.novaExecucao();
+  const r = ctx.apiSalvarPaciente({ prontuario: '77', nome: 'Paciente Novo' });
+  assert.equal(r.ok, true, r.erro);
+  ctx.novaExecucao();
+  assert.equal(ctx.listar('PACIENTES').length, 1);
+  assert.equal(ctx.listar('AUDITORIA').length, 1);
+  assert.equal(google.planilha.getSheetByName('AUDITORIA').linhas[0][0], 'id');
 });

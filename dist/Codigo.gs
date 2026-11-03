@@ -91,8 +91,14 @@ var TABELAS = {
   // Reuniões de equipe por unidade.
   REUNIOES: ['id', 'data', 'unidade_id', 'tipo', 'quantidade', 'profissional_id', 'categoria', 'criado_por', 'criado_em'],
   // Atividades gerenciais do serviço.
-  GERENCIAIS: ['id', 'data', 'tipo', 'quantidade', 'profissional_id', 'categoria', 'criado_por', 'criado_em']
+  GERENCIAIS: ['id', 'data', 'tipo', 'quantidade', 'profissional_id', 'categoria', 'criado_por', 'criado_em'],
+  // Registro de alterações: cada inclusão, alteração e exclusão feita pelo sistema, com quem e quando.
+  // Nas exclusões, "dados" guarda o registro inteiro. Nunca é apagado pelo sistema.
+  AUDITORIA: ['id', 'quando', 'email', 'acao', 'tabela', 'registro_id', 'admissao_id', 'paciente_id', 'dados']
 };
+
+/** Tabelas lidas só quando pedidas (crescem sem parar e não são usadas nas telas do dia a dia). */
+var TABELAS_SOB_DEMANDA = ['AUDITORIA'];
 
 /** Só a primeira categoria entra nos números da empresa; residentes e estagiários aparecem à parte. */
 var CATEGORIAS_PROFISSIONAL = ['PROFISSIONAL DA EMPRESA', 'RESIDENTE', 'ESTAGIÁRIO'];
@@ -1366,7 +1372,9 @@ var _apiIndisponivel = false;
 function carregarTabelas(pedida) {
   if (!TABELAS[pedida]) throw new Error('Tabela desconhecida: ' + pedida);
   if (!_forcarLeituraPorAba && !_apiIndisponivel && typeof Sheets !== 'undefined') {
-    var nomes = Object.keys(TABELAS).filter(function (n) { return !_cacheTabelas[n]; });
+    var nomes = Object.keys(TABELAS).filter(function (n) {
+      return !_cacheTabelas[n] && (n === pedida || TABELAS_SOB_DEMANDA.indexOf(n) === -1);
+    });
     try {
       var faixas = lerPelaApi(nomes);
       var migrar = nomes.filter(function (nome, i) { return precisaPrepararAba(nome, ((faixas[i] && faixas[i].values) || [])[0]); });
@@ -1536,6 +1544,7 @@ function inserir(nome, registro) {
     if (!obj.id) obj.id = novoId();
     if (colunas.indexOf('criado_em') !== -1 && !obj.criado_em) obj.criado_em = agoraIso();
     var valores = linhaDe(colunas, obj);
+    auditar_('INCLUSÃO', nome, obj, semVazios_(obj));
     if (!gravarPelaApi()) {
       abaDaTabela(nome).appendRow(valores);
       _pendenteNaPlanilha = true;
@@ -1591,6 +1600,7 @@ function atualizarVarios(nome, mudancas, unico) {
       }
       var obj = Object.assign({}, lista[i]);
       aplicarCampos(colunas, obj, mudancas[id], unico);
+      if (unico) auditarAlteracao_(nome, lista[i], obj);
       var valores = linhaDe(colunas, obj);
       if (linha) _gravacoes["'" + nome + "'!A" + linha + ':' + letraDaColuna(colunas.length) + linha] = valores;
       else pendentes.linhas[novo] = valores;
@@ -1623,7 +1633,9 @@ function atualizarNaPlanilha(nome, mudancas, unico) {
     if (!campos) return;
     var obj = {};
     colunas.forEach(function (col, i) { obj[col] = linha[i]; });
+    var antes = Object.assign({}, obj);
     aplicarCampos(colunas, obj, campos, unico);
+    if (unico) auditarAlteracao_(nome, antes, obj);
     colunas.forEach(function (col, i) { linha[i] = obj[col]; });
     gravados.push(obj);
   });
@@ -1650,6 +1662,8 @@ function excluir(nome, id) {
     var aba = abaDaTabela(nome);
     if (!linha) linha = numeroDaLinha(aba, id);
     if (!linha) throw new Error('Registro não encontrado: ' + id);
+    var excluido = buscarPorId(nome, id);
+    if (excluido) auditar_('EXCLUSÃO', nome, excluido, excluido);
     aba.deleteRow(linha);
     // Exclui de fato agora: as próximas leituras e gravações pela API contam com as linhas já no lugar.
     SpreadsheetApp.flush();
@@ -1685,10 +1699,21 @@ function enviarGravacoes() {
   }
   tabelas.forEach(function (nome) {
     var pendentes = insercoes[nome];
-    var r = comEsperaDaCota_(function () {
-      return Sheets.Spreadsheets.Values.append({ values: pendentes.linhas }, idDoBanco(), "'" + nome + "'!A1",
-        { valueInputOption: 'RAW', insertDataOption: 'INSERT_ROWS' });
-    });
+    var acrescentar = function () {
+      return comEsperaDaCota_(function () {
+        return Sheets.Spreadsheets.Values.append({ values: pendentes.linhas }, idDoBanco(), "'" + nome + "'!A1",
+          { valueInputOption: 'RAW', insertDataOption: 'INSERT_ROWS' });
+      });
+    };
+    var r;
+    try {
+      r = acrescentar();
+    } catch (e) {
+      // Aba que ainda não existe (tabela nova, como a AUDITORIA): cria e tenta de novo.
+      if (!/parse range|Unable to parse|não encontrad|not found/i.test(String(e && e.message)) || abrirBanco().getSheetByName(nome)) throw e;
+      prepararAbas([nome]);
+      r = acrescentar();
+    }
     // Ex.: 'ATENDIMENTOS'!A12:R14 — as linhas novas começam na 12.
     var inicio = /!A(\d+)/.exec(String(r && r.updates && r.updates.updatedRange));
     if (inicio && _cacheTabelas[nome] && _linhas[nome]) {
@@ -1758,6 +1783,7 @@ function comTrava(fn) {
   _indicesTabelas = {};
   _gravacoes = {};
   _insercoes = {};
+  _emailAuditoria = null;
   try {
     var resultado = fn();
     enviarGravacoes();
@@ -1776,6 +1802,53 @@ function comTrava(fn) {
   }
 }
 
+// ---------- Registro de alterações (aba AUDITORIA) ----------
+
+// Desligado no "configurar" (semeia centenas de cadastros) e quando o autoteste usa a planilha de teste.
+var _semAuditoria = false;
+var _emailAuditoria = null;
+
+function emailDeQuemGrava_() {
+  if (_emailAuditoria === null) {
+    try { _emailAuditoria = String(Session.getActiveUser().getEmail() || '').toLowerCase(); } catch (e) { _emailAuditoria = ''; }
+  }
+  return _emailAuditoria;
+}
+
+function semVazios_(obj) {
+  var r = {};
+  Object.keys(obj).forEach(function (k) { if (obj[k] !== '' && obj[k] !== undefined && obj[k] !== null) r[k] = obj[k]; });
+  return r;
+}
+
+/** Uma linha na AUDITORIA, gravada junto com o resto da operação (se a operação falhar, não fica registro). */
+function auditar_(acao, nome, registro, dados) {
+  if (_semAuditoria || _bancoTeste || nome === 'AUDITORIA' || !TABELAS.AUDITORIA) return;
+  registro = registro || {};
+  var json = JSON.stringify(dados || {});
+  if (json.length > 45000) json = json.slice(0, 45000) + '…';
+  inserir('AUDITORIA', {
+    quando: Utilities.formatDate(new Date(), APP.fusoHorario, 'yyyy-MM-dd HH:mm:ss'),
+    email: emailDeQuemGrava_(), acao: acao, tabela: nome, registro_id: registro.id || '',
+    admissao_id: registro.admissao_id || (nome === 'ADMISSOES' ? registro.id : '') || '',
+    paciente_id: registro.paciente_id || (nome === 'PACIENTES' ? registro.id : '') || '',
+    dados: json
+  });
+}
+
+/** Só os campos que mudaram, com o valor de antes e o de depois. Sem mudança, não registra nada. */
+function auditarAlteracao_(nome, antes, depois) {
+  var de = {}, para = {};
+  Object.keys(depois).forEach(function (k) {
+    if (k === 'atualizado_em') return;
+    if (String(antes[k] === undefined ? '' : antes[k]) !== String(depois[k] === undefined ? '' : depois[k])) {
+      de[k] = antes[k] === undefined ? '' : antes[k];
+      para[k] = depois[k];
+    }
+  });
+  if (Object.keys(para).length) auditar_('ALTERAÇÃO', nome, depois, { antes: de, depois: para });
+}
+
 // ===== Setup.js =====
 /**
  * Configuração inicial. Rode "configurar" uma vez pelo editor do Apps Script:
@@ -1784,7 +1857,13 @@ function comTrava(fn) {
  */
 
 function configurar() {
-  return comTrava(configurarComTrava);
+  // Os cadastros iniciais não entram no registro de alterações.
+  _semAuditoria = true;
+  try {
+    return comTrava(configurarComTrava);
+  } finally {
+    _semAuditoria = false;
+  }
 }
 
 function configurarComTrava() {
@@ -3866,6 +3945,94 @@ function eventosDaInternacao_(det) {
   });
 }
 
+// ===== RegistroAlteracoes.js =====
+/**
+ * Consulta do registro de alterações (aba AUDITORIA): quem incluiu, alterou ou excluiu o quê, e quando.
+ * Só a coordenação. A gravação fica em Db.js (auditar_), junto com cada operação.
+ */
+var ROTULO_TABELA_AUDITORIA = {
+  PACIENTES: 'Paciente', ADMISSOES: 'Admissão', ATENDIMENTOS: 'Atendimento', INTERCONSULTAS: 'Interconsulta',
+  TRANSFERENCIAS: 'Transferência', DESCRICOES_DEMANDA: 'Descrição da demanda', ATIVIDADES: 'Atividade assistencial',
+  DESFECHOS_REGISTRADOS: 'Desfecho', REUNIOES: 'Reunião de equipe', GERENCIAIS: 'Atividade gerencial',
+  PROFISSIONAIS: 'Cadastro: profissional', SETORES: 'Cadastro: setor', UNIDADES: 'Cadastro: unidade', LISTAS: 'Cadastro: lista',
+  PRIORIDADES: 'Cadastro: prioridade', MOTIVOS_SOLICITACAO: 'Cadastro: motivo', JUSTIFICATIVAS: 'Cadastro: justificativa',
+  FERIADOS: 'Cadastro: feriado', DESFECHOS: 'Cadastro: desfecho', PARAMETROS: 'Cadastro: parâmetro', TODAS: 'Limpeza dos dados de teste'
+};
+
+// Campos que ajudam a reconhecer o registro, nesta ordem; ids e carimbos ficam de fora.
+var CAMPOS_RESUMO_AUDITORIA = ['nome', 'prontuario', 'data_admissao', 'data', 'hora', 'publico', 'quantidade', 'tipo_atendimento',
+  'descricao', 'tipo', 'chave', 'valor', 'prazo', 'data_solicitacao', 'hora_solicitacao', 'data_desfecho', 'email', 'perfil', 'observacao', 'observacoes'];
+
+function resumoDaAuditoria_(a, nomes) {
+  var dados = {};
+  try { dados = JSON.parse(a.dados || '{}'); } catch (e) { return String(a.dados || ''); }
+  var valor = function (campo, v) {
+    if (v === '' || v === undefined || v === null) return '—';
+    if (/unidade_id$/.test(campo) && nomes.unidades[v]) return nomes.unidades[v];
+    if (campo === 'justificativa_id' && nomes.justificativas[v]) return nomes.justificativas[v];
+    if (campo === 'desfecho_id' && nomes.desfechos[v]) return nomes.desfechos[v];
+    return String(v);
+  };
+  if (a.acao === 'ALTERAÇÃO') {
+    return Object.keys(dados.depois || {}).map(function (c) {
+      return c + ': ' + valor(c, (dados.antes || {})[c]) + ' → ' + valor(c, dados.depois[c]);
+    }).join(' · ');
+  }
+  if (a.acao === 'LIMPEZA') {
+    return Object.keys(dados.apagados || {}).map(function (t) { return t + ': ' + dados.apagados[t]; }).join(' · ') +
+      (dados.copia ? ' · ' + dados.copia : '');
+  }
+  var partes = CAMPOS_RESUMO_AUDITORIA.filter(function (c) { return dados[c] !== undefined && dados[c] !== ''; })
+    .slice(0, 6).map(function (c) { return c + ': ' + valor(c, dados[c]); });
+  ['unidade_id', 'justificativa_id', 'desfecho_id'].forEach(function (c) {
+    if (dados[c] && partes.length < 8) partes.push(c.replace(/_id$/, '') + ': ' + valor(c, dados[c]));
+  });
+  return partes.join(' · ');
+}
+
+/**
+ * filtros: { desde, ate } ('AAAA-MM-DD'; padrão: últimos 30 dias). O resto (pessoa, tipo, busca) a tela filtra.
+ * Devolve do mais recente para o mais antigo, até 1000 linhas.
+ */
+function apiHistoricoAlteracoes(filtros) {
+  return responder(function () {
+    exigirCoordenacao();
+    var f = filtros || {};
+    var ate = normalizarData(f.ate) || hoje();
+    var desde = normalizarData(f.desde) || adicionarDias(ate, -30);
+    if (desde > ate) throw new Error('A data inicial é depois da final.');
+    var pacientes = mapaPorId('PACIENTES');
+    var admissoes = mapaPorId('ADMISSOES');
+    var profissionais = {};
+    listar('PROFISSIONAIS').forEach(function (p) { profissionais[String(p.email).toLowerCase()] = p.nome; });
+    var nomeDe = function (tabela) {
+      var m = {};
+      listar(tabela).forEach(function (x) { m[x.id] = x.nome; });
+      return m;
+    };
+    var nomes = { unidades: nomeDe('UNIDADES'), justificativas: nomeDe('JUSTIFICATIVAS'), desfechos: nomeDe('DESFECHOS') };
+    var todos = listar('AUDITORIA').filter(function (a) {
+      var dia = String(a.quando).slice(0, 10);
+      return dia >= desde && dia <= ate;
+    }).sort(function (a, b) { return String(b.quando).localeCompare(String(a.quando)); });
+    var itens = todos.slice(0, 1000).map(function (a) {
+      var pacienteId = a.paciente_id || ((admissoes[a.admissao_id] || {}).paciente_id) || '';
+      var paciente = pacientes[pacienteId] || {};
+      var dados = {};
+      try { dados = JSON.parse(a.dados || '{}'); } catch (e) { dados = {}; }
+      // Paciente já excluído: o nome está no próprio registro da exclusão.
+      if (!paciente.nome && a.tabela === 'PACIENTES') paciente = dados.depois || dados;
+      return {
+        quando: a.quando, email: a.email, profissional_nome: profissionais[String(a.email).toLowerCase()] || '',
+        acao: a.acao, tabela: a.tabela, tabela_nome: ROTULO_TABELA_AUDITORIA[a.tabela] || a.tabela, registro_id: a.registro_id,
+        admissao_id: a.admissao_id, paciente_nome: paciente.nome || '', prontuario: paciente.prontuario || '',
+        resumo: resumoDaAuditoria_(a, nomes)
+      };
+    });
+    return { desde: desde, ate: ate, total: todos.length, itens: itens };
+  });
+}
+
 // ===== Limpeza.js =====
 /**
  * Limpeza dos dados de teste antes do uso real. Rode "limparDadosDeTeste" no editor do Apps Script,
@@ -3882,6 +4049,7 @@ function limparDadosDeTeste() {
   var usuario = exigirCoordenacao();
   var banco = abrirBanco();
   var linhas = [];
+  var apagados = {};
   comTrava(function () {
     var copia = banco.copy('CÓPIA ANTES DA LIMPEZA ' + agora() + ' — ' + banco.getName());
     linhas.push('Cópia de segurança (pode apagar depois que conferir): ' + copia.getUrl());
@@ -3894,9 +4062,12 @@ function limparDadosDeTeste() {
       // A planilha não deixa apagar todas as linhas abaixo do cabeçalho fixo: sobra uma linha vazia no fim.
       if (ultima >= aba.getMaxRows()) aba.insertRowsAfter(ultima, 1);
       aba.deleteRows(2, ultima - 1);
+      apagados[nome] = ultima - 1;
       linhas.push('  ' + nome + ': ' + (ultima - 1));
     });
     SpreadsheetApp.flush();
+    // A limpeza fica no registro de alterações, com a cópia de segurança e quantas linhas saíram de cada aba.
+    auditar_('LIMPEZA', 'TODAS', {}, { copia: linhas[0], apagados: apagados });
   });
   _cacheTabelas = {};
   _indicesTabelas = {};

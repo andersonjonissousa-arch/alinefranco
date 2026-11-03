@@ -106,12 +106,20 @@
     return el;
   }
 
+  /** Confirmações somem sozinhas; erros ficam na tela até a pessoa clicar, para ninguém perder a mensagem. */
   function avisar(msg, tipo) {
     var el = document.getElementById('aviso');
     el.textContent = msg;
-    el.className = 'aviso mostrar ' + (tipo || '');
     clearTimeout(avisar.t);
-    avisar.t = setTimeout(function () { el.className = 'aviso'; }, tipo === 'erro' ? 6000 : 3000);
+    if (tipo === 'erro') {
+      el.className = 'aviso mostrar erro fixo';
+      el.appendChild(h('span', { class: 'fechar-aviso' }, ' (clique para fechar)'));
+      el.onclick = function () { el.className = 'aviso'; el.onclick = null; };
+      return;
+    }
+    el.onclick = null;
+    el.className = 'aviso mostrar ' + (tipo || '');
+    avisar.t = setTimeout(function () { el.className = 'aviso'; }, 4000);
   }
 
   function campo(rotulo, controle) {
@@ -652,6 +660,8 @@
     var resultado = h('div', { class: 'tabela-rolagem' });
     var busca = h('input', { type: 'search', placeholder: 'Prontuário ou parte do nome', autocomplete: 'off' });
     var formulario = h('div');
+    var confirmacao = h('div', { class: 'cartao confirmacao', role: 'status' });
+    confirmacao.hidden = true;
     var pedido = 0;
     var espera;
 
@@ -704,11 +714,18 @@
       form.appendChild(botao);
       form.addEventListener('submit', function (ev) {
         ev.preventDefault();
-        enviar(botao, chamar('apiSalvarPaciente', lerFormulario(form)), 'Paciente salvo.').then(function (salvo) {
+        var novo = !p.id;
+        enviar(botao, chamar('apiSalvarPaciente', lerFormulario(form)), novo ? 'Paciente cadastrado.' : 'Alterações salvas.').then(function (salvo) {
           clearTimeout(espera);
           busca.value = salvo.prontuario;
           buscar(1);
           editar({});
+          // Confirmação que fica na tela: o servidor devolveu o cadastro gravado na planilha.
+          confirmacao.textContent = '';
+          confirmacao.hidden = false;
+          confirmacao.appendChild(h('strong', null, (novo ? '✓ Paciente cadastrado: ' : '✓ Cadastro atualizado: ') + salvo.nome));
+          confirmacao.appendChild(h('div', null, 'Prontuário ' + salvo.prontuario + ' · gravado às ' + horaAgora() +
+            '. Ele já aparece na lista acima.'));
         }).catch(function () {});
       });
       formulario.appendChild(h('h2', null, p.id ? 'Editar paciente' : 'Novo paciente'));
@@ -736,6 +753,7 @@
       espera = setTimeout(function () { buscar(1); }, 300);
     });
     main.appendChild(h('div', { class: 'cartao' }, campo('Buscar', busca), resultado));
+    main.appendChild(confirmacao);
     main.appendChild(h('div', { class: 'cartao' }, formulario));
     editar({});
     buscar(1);
@@ -1966,7 +1984,8 @@
       'Parâmetros': cadParametros,
       'Setores e unidades': cadUnidades,
       Listas: cadListas,
-      Feriados: cadFeriados
+      Feriados: cadFeriados,
+      'Histórico de alterações': cadHistoricoAlteracoes
     };
     var atual = 'Profissionais';
 
@@ -2175,6 +2194,77 @@
         h('p', { class: 'suave' }, 'Tipos de solicitação que têm prazo de resposta pela matriz de atendimento (1, 2 ou 3 dias úteis…).'),
         h('div', { class: 'linha' }, caixas, botaoT)));
     }
+  }
+
+  var ROTULO_ACAO_AUDITORIA = { 'INCLUSÃO': ['inclusão', 'selo prazo'], 'ALTERAÇÃO': ['alteração', 'selo amanha'],
+    'EXCLUSÃO': ['exclusão', 'selo atrasado'], 'LIMPEZA': ['limpeza', 'selo atrasado'] };
+
+  /** Registro de alterações: quem incluiu, alterou ou excluiu o quê, e quando. Só consulta. */
+  function cadHistoricoAlteracoes(alvo) {
+    var ate = estado.cad.hoje;
+    var form = h('form', { class: 'linha' },
+      campo('De', h('input', { name: 'desde', type: 'date', value: diasAntes(ate, 30), max: ate })),
+      campo('Até', h('input', { name: 'ate', type: 'date', value: ate, max: ate })),
+      campo('Quem', seletor('email', ativos(estado.cad.profissionais).map(function (p) { return { valor: String(p.email).toLowerCase(), rotulo: p.nome }; }), '', 'Todos')),
+      campo('O quê', seletor('tabela', [{ valor: 'PACIENTES', rotulo: 'Pacientes' }, { valor: 'ADMISSOES', rotulo: 'Admissões' },
+        { valor: 'ATENDIMENTOS', rotulo: 'Atendimentos' }, { valor: 'INTERCONSULTAS', rotulo: 'Interconsultas' },
+        { valor: 'DESFECHOS_REGISTRADOS', rotulo: 'Desfechos' }, { valor: 'CADASTROS', rotulo: 'Cadastros da coordenação' }], '', 'Tudo')),
+      campo('Ação', seletor('acao', [{ valor: 'INCLUSÃO', rotulo: 'Inclusões' }, { valor: 'ALTERAÇÃO', rotulo: 'Alterações' },
+        { valor: 'EXCLUSÃO', rotulo: 'Exclusões' }], '', 'Todas')),
+      campo('Paciente ou texto', h('input', { name: 'termo', type: 'search', placeholder: 'Nome, prontuário ou detalhe' })));
+    var lista = h('div', { class: 'cartao tabela-rolagem' }, h('p', { class: 'carregando' }, 'Carregando…'));
+    var dados = null, periodo = '';
+    var navegacao = estado.navegacao;
+    function carregar() {
+      var f = lerFormulario(form);
+      var pedido = periodo = f.desde + '|' + f.ate;
+      dados = null;
+      lista.textContent = '';
+      lista.appendChild(h('p', { class: 'carregando' }, 'Carregando…'));
+      chamar('apiHistoricoAlteracoes', { desde: f.desde, ate: f.ate }).then(function (d) {
+        if (pedido !== periodo || navegacao !== estado.navegacao) return;
+        dados = d;
+        desenhar();
+      }).catch(function (e) { lista.textContent = 'Não foi possível carregar o histórico. ' + e.message; });
+    }
+    var CADASTROS = ['PROFISSIONAIS', 'SETORES', 'UNIDADES', 'LISTAS', 'PRIORIDADES', 'MOTIVOS_SOLICITACAO', 'JUSTIFICATIVAS', 'FERIADOS', 'DESFECHOS', 'PARAMETROS', 'TODAS'];
+    function desenhar() {
+      if (!dados) return;
+      var f = lerFormulario(form);
+      var termo = textoBusca(f.termo);
+      var itens = dados.itens.filter(function (a) {
+        if (f.email && String(a.email).toLowerCase() !== f.email) return false;
+        if (f.acao && a.acao !== f.acao) return false;
+        if (f.tabela === 'CADASTROS' ? CADASTROS.indexOf(a.tabela) === -1 : f.tabela && a.tabela !== f.tabela) return false;
+        if (termo && textoBusca([a.paciente_nome, a.prontuario, a.resumo, a.profissional_nome, a.email].join(' ')).indexOf(termo) === -1) return false;
+        return true;
+      });
+      lista.textContent = '';
+      lista.appendChild(h('p', { class: 'suave' }, itens.length + ' registro(s)' + (dados.total > dados.itens.length ?
+        ' (mostrando os ' + dados.itens.length + ' mais recentes de ' + dados.total + ' no período; diminua o período para ver os outros)' : '') +
+        '. Tudo o que é incluído, alterado ou excluído no sistema fica aqui, com quem fez e quando.'));
+      if (!itens.length) return;
+      lista.appendChild(h('table', null,
+        h('thead', null, h('tr', null, ['Quando', 'Quem', 'Ação', 'O quê', 'Paciente', 'Detalhes'].map(function (t) { return h('th', null, t); }))),
+        h('tbody', null, itens.map(function (a) {
+          var r = ROTULO_ACAO_AUDITORIA[a.acao] || [a.acao, 'selo'];
+          return h('tr', null,
+            h('td', null, dataBr(a.quando.slice(0, 10)), h('div', { class: 'suave' }, a.quando.slice(11, 19))),
+            h('td', null, a.profissional_nome || a.email || '—', a.profissional_nome ? h('div', { class: 'suave' }, a.email) : null),
+            h('td', null, h('span', { class: r[1] }, r[0])),
+            h('td', null, a.tabela_nome),
+            h('td', null, a.paciente_nome || '—', a.prontuario ? h('div', { class: 'suave' }, 'Pront. ' + a.prontuario) : null),
+            h('td', { class: 'detalhe-auditoria' }, a.resumo || '—'));
+        }))));
+    }
+    form.addEventListener('change', function (ev) {
+      if (ev.target && (ev.target.name === 'desde' || ev.target.name === 'ate')) carregar(); else desenhar();
+    });
+    form.addEventListener('input', function (ev) { if (!ev.target || (ev.target.name !== 'desde' && ev.target.name !== 'ate')) desenhar(); });
+    form.addEventListener('submit', function (ev) { ev.preventDefault(); });
+    alvo.appendChild(h('div', { class: 'cartao' }, form));
+    alvo.appendChild(lista);
+    carregar();
   }
 
   function cadFeriados(alvo, aoSalvar) {

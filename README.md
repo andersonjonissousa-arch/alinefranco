@@ -135,6 +135,7 @@ src/
   Interconsultas.js solicitações independentes, migração do legado e vínculo com respostas
   Gestao.js         telas de gestão: pacientes por unidade, interconsultas e prazos
   Historico.js      histórico completo do paciente: todas as internações numa linha do tempo
+  RegistroAlteracoes.js consulta do registro de alterações (aba AUDITORIA), só para a coordenação
   Limpeza.js        limparDadosDeTeste: apaga os registros de teste e mantém a configuração
   Autoteste.js      testarSistema: teste do fluxo inteiro no Google de verdade
   Desempenho.js     medirDesempenho: tempo de cada ação, antes e depois da leitura pela API
@@ -142,6 +143,24 @@ src/
 dist/               o mesmo código em 4 arquivos, para instalar copiando e colando (npm run empacotar)
 tests/              testes com Node, com os serviços do Google simulados
 ```
+
+## Registro de alterações
+
+Tudo o que é incluído, alterado ou excluído pelo sistema fica registrado na aba **AUDITORIA**, gravada junto com
+a própria operação: se a gravação falhar, não fica registro, e se ficar registro, a gravação aconteceu.
+- **Inclusão:** os dados do novo registro.
+- **Alteração:** só os campos que mudaram, com o valor de antes e o de depois.
+- **Exclusão:** o registro inteiro, para dar para recuperar.
+- **Limpeza dos dados de teste:** quantas linhas saíram de cada aba e o link da cópia de segurança.
+
+Cada linha tem a data e a hora (com segundos), o e-mail de quem fez, a tabela, o registro e, quando houver, a
+internação e o paciente. Os recálculos automáticos de prazo e os cadastros iniciais do `configurar` não entram.
+A coordenação consulta em **Cadastros > Histórico de alterações**, com filtro de período, pessoa, tipo, ação e
+paciente. A aba é criada sozinha na primeira gravação e não é lida pelas telas do dia a dia, para não pesar.
+A limpeza dos dados de teste não apaga esse registro.
+
+Ao cadastrar um paciente, a tela mostra uma confirmação que fica visível ("✓ Paciente cadastrado", com nome,
+prontuário e hora) e a lista já aparece filtrada nele. Mensagens de erro ficam na tela até a pessoa clicar.
 
 ## Problemas de acesso
 

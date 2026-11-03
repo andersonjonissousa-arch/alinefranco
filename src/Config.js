@@ -88,8 +88,14 @@ var TABELAS = {
   // Reuniões de equipe por unidade.
   REUNIOES: ['id', 'data', 'unidade_id', 'tipo', 'quantidade', 'profissional_id', 'categoria', 'criado_por', 'criado_em'],
   // Atividades gerenciais do serviço.
-  GERENCIAIS: ['id', 'data', 'tipo', 'quantidade', 'profissional_id', 'categoria', 'criado_por', 'criado_em']
+  GERENCIAIS: ['id', 'data', 'tipo', 'quantidade', 'profissional_id', 'categoria', 'criado_por', 'criado_em'],
+  // Registro de alterações: cada inclusão, alteração e exclusão feita pelo sistema, com quem e quando.
+  // Nas exclusões, "dados" guarda o registro inteiro. Nunca é apagado pelo sistema.
+  AUDITORIA: ['id', 'quando', 'email', 'acao', 'tabela', 'registro_id', 'admissao_id', 'paciente_id', 'dados']
 };
+
+/** Tabelas lidas só quando pedidas (crescem sem parar e não são usadas nas telas do dia a dia). */
+var TABELAS_SOB_DEMANDA = ['AUDITORIA'];
 
 /** Só a primeira categoria entra nos números da empresa; residentes e estagiários aparecem à parte. */
 var CATEGORIAS_PROFISSIONAL = ['PROFISSIONAL DA EMPRESA', 'RESIDENTE', 'ESTAGIÁRIO'];

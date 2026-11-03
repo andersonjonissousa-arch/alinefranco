@@ -13,6 +13,7 @@ function limparDadosDeTeste() {
   var usuario = exigirCoordenacao();
   var banco = abrirBanco();
   var linhas = [];
+  var apagados = {};
   comTrava(function () {
     var copia = banco.copy('CÓPIA ANTES DA LIMPEZA ' + agora() + ' — ' + banco.getName());
     linhas.push('Cópia de segurança (pode apagar depois que conferir): ' + copia.getUrl());
@@ -25,9 +26,12 @@ function limparDadosDeTeste() {
       // A planilha não deixa apagar todas as linhas abaixo do cabeçalho fixo: sobra uma linha vazia no fim.
       if (ultima >= aba.getMaxRows()) aba.insertRowsAfter(ultima, 1);
       aba.deleteRows(2, ultima - 1);
+      apagados[nome] = ultima - 1;
       linhas.push('  ' + nome + ': ' + (ultima - 1));
     });
     SpreadsheetApp.flush();
+    // A limpeza fica no registro de alterações, com a cópia de segurança e quantas linhas saíram de cada aba.
+    auditar_('LIMPEZA', 'TODAS', {}, { copia: linhas[0], apagados: apagados });
   });
   _cacheTabelas = {};
   _indicesTabelas = {};

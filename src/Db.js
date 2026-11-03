@@ -67,7 +67,9 @@ var _apiIndisponivel = false;
 function carregarTabelas(pedida) {
   if (!TABELAS[pedida]) throw new Error('Tabela desconhecida: ' + pedida);
   if (!_forcarLeituraPorAba && !_apiIndisponivel && typeof Sheets !== 'undefined') {
-    var nomes = Object.keys(TABELAS).filter(function (n) { return !_cacheTabelas[n]; });
+    var nomes = Object.keys(TABELAS).filter(function (n) {
+      return !_cacheTabelas[n] && (n === pedida || TABELAS_SOB_DEMANDA.indexOf(n) === -1);
+    });
     try {
       var faixas = lerPelaApi(nomes);
       var migrar = nomes.filter(function (nome, i) { return precisaPrepararAba(nome, ((faixas[i] && faixas[i].values) || [])[0]); });
@@ -237,6 +239,7 @@ function inserir(nome, registro) {
     if (!obj.id) obj.id = novoId();
     if (colunas.indexOf('criado_em') !== -1 && !obj.criado_em) obj.criado_em = agoraIso();
     var valores = linhaDe(colunas, obj);
+    auditar_('INCLUSÃO', nome, obj, semVazios_(obj));
     if (!gravarPelaApi()) {
       abaDaTabela(nome).appendRow(valores);
       _pendenteNaPlanilha = true;
@@ -292,6 +295,7 @@ function atualizarVarios(nome, mudancas, unico) {
       }
       var obj = Object.assign({}, lista[i]);
       aplicarCampos(colunas, obj, mudancas[id], unico);
+      if (unico) auditarAlteracao_(nome, lista[i], obj);
       var valores = linhaDe(colunas, obj);
       if (linha) _gravacoes["'" + nome + "'!A" + linha + ':' + letraDaColuna(colunas.length) + linha] = valores;
       else pendentes.linhas[novo] = valores;
@@ -324,7 +328,9 @@ function atualizarNaPlanilha(nome, mudancas, unico) {
     if (!campos) return;
     var obj = {};
     colunas.forEach(function (col, i) { obj[col] = linha[i]; });
+    var antes = Object.assign({}, obj);
     aplicarCampos(colunas, obj, campos, unico);
+    if (unico) auditarAlteracao_(nome, antes, obj);
     colunas.forEach(function (col, i) { linha[i] = obj[col]; });
     gravados.push(obj);
   });
@@ -351,6 +357,8 @@ function excluir(nome, id) {
     var aba = abaDaTabela(nome);
     if (!linha) linha = numeroDaLinha(aba, id);
     if (!linha) throw new Error('Registro não encontrado: ' + id);
+    var excluido = buscarPorId(nome, id);
+    if (excluido) auditar_('EXCLUSÃO', nome, excluido, excluido);
     aba.deleteRow(linha);
     // Exclui de fato agora: as próximas leituras e gravações pela API contam com as linhas já no lugar.
     SpreadsheetApp.flush();
@@ -386,10 +394,21 @@ function enviarGravacoes() {
   }
   tabelas.forEach(function (nome) {
     var pendentes = insercoes[nome];
-    var r = comEsperaDaCota_(function () {
-      return Sheets.Spreadsheets.Values.append({ values: pendentes.linhas }, idDoBanco(), "'" + nome + "'!A1",
-        { valueInputOption: 'RAW', insertDataOption: 'INSERT_ROWS' });
-    });
+    var acrescentar = function () {
+      return comEsperaDaCota_(function () {
+        return Sheets.Spreadsheets.Values.append({ values: pendentes.linhas }, idDoBanco(), "'" + nome + "'!A1",
+          { valueInputOption: 'RAW', insertDataOption: 'INSERT_ROWS' });
+      });
+    };
+    var r;
+    try {
+      r = acrescentar();
+    } catch (e) {
+      // Aba que ainda não existe (tabela nova, como a AUDITORIA): cria e tenta de novo.
+      if (!/parse range|Unable to parse|não encontrad|not found/i.test(String(e && e.message)) || abrirBanco().getSheetByName(nome)) throw e;
+      prepararAbas([nome]);
+      r = acrescentar();
+    }
     // Ex.: 'ATENDIMENTOS'!A12:R14 — as linhas novas começam na 12.
     var inicio = /!A(\d+)/.exec(String(r && r.updates && r.updates.updatedRange));
     if (inicio && _cacheTabelas[nome] && _linhas[nome]) {
@@ -459,6 +478,7 @@ function comTrava(fn) {
   _indicesTabelas = {};
   _gravacoes = {};
   _insercoes = {};
+  _emailAuditoria = null;
   try {
     var resultado = fn();
     enviarGravacoes();
@@ -475,4 +495,51 @@ function comTrava(fn) {
     }
     trava.releaseLock();
   }
+}
+
+// ---------- Registro de alterações (aba AUDITORIA) ----------
+
+// Desligado no "configurar" (semeia centenas de cadastros) e quando o autoteste usa a planilha de teste.
+var _semAuditoria = false;
+var _emailAuditoria = null;
+
+function emailDeQuemGrava_() {
+  if (_emailAuditoria === null) {
+    try { _emailAuditoria = String(Session.getActiveUser().getEmail() || '').toLowerCase(); } catch (e) { _emailAuditoria = ''; }
+  }
+  return _emailAuditoria;
+}
+
+function semVazios_(obj) {
+  var r = {};
+  Object.keys(obj).forEach(function (k) { if (obj[k] !== '' && obj[k] !== undefined && obj[k] !== null) r[k] = obj[k]; });
+  return r;
+}
+
+/** Uma linha na AUDITORIA, gravada junto com o resto da operação (se a operação falhar, não fica registro). */
+function auditar_(acao, nome, registro, dados) {
+  if (_semAuditoria || _bancoTeste || nome === 'AUDITORIA' || !TABELAS.AUDITORIA) return;
+  registro = registro || {};
+  var json = JSON.stringify(dados || {});
+  if (json.length > 45000) json = json.slice(0, 45000) + '…';
+  inserir('AUDITORIA', {
+    quando: Utilities.formatDate(new Date(), APP.fusoHorario, 'yyyy-MM-dd HH:mm:ss'),
+    email: emailDeQuemGrava_(), acao: acao, tabela: nome, registro_id: registro.id || '',
+    admissao_id: registro.admissao_id || (nome === 'ADMISSOES' ? registro.id : '') || '',
+    paciente_id: registro.paciente_id || (nome === 'PACIENTES' ? registro.id : '') || '',
+    dados: json
+  });
+}
+
+/** Só os campos que mudaram, com o valor de antes e o de depois. Sem mudança, não registra nada. */
+function auditarAlteracao_(nome, antes, depois) {
+  var de = {}, para = {};
+  Object.keys(depois).forEach(function (k) {
+    if (k === 'atualizado_em') return;
+    if (String(antes[k] === undefined ? '' : antes[k]) !== String(depois[k] === undefined ? '' : depois[k])) {
+      de[k] = antes[k] === undefined ? '' : antes[k];
+      para[k] = depois[k];
+    }
+  });
+  if (Object.keys(para).length) auditar_('ALTERAÇÃO', nome, depois, { antes: de, depois: para });
 }

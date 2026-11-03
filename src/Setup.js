@@ -5,7 +5,13 @@
  */
 
 function configurar() {
-  return comTrava(configurarComTrava);
+  // Os cadastros iniciais não entram no registro de alterações.
+  _semAuditoria = true;
+  try {
+    return comTrava(configurarComTrava);
+  } finally {
+    _semAuditoria = false;
+  }
 }
 
 function configurarComTrava() {
