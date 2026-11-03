@@ -714,6 +714,19 @@
       formulario.appendChild(h('h2', null, p.id ? 'Editar paciente' : 'Novo paciente'));
       formulario.appendChild(form);
       if (p.id) formulario.appendChild(botaoHistorico(p.id, { nome: 'pacientes' }));
+      // Cadastro feito por engano: só a coordenação exclui, e só paciente sem internação (o servidor confere).
+      if (p.id && ehCoordenacao()) {
+        var excluirPaciente = h('button', { class: 'btn perigo', type: 'button' }, 'Excluir paciente');
+        excluirPaciente.addEventListener('click', function () {
+          if (!confirm('Excluir o cadastro de ' + p.nome + ' (prontuário ' + p.prontuario + ')? Isso não pode ser desfeito.')) return;
+          enviar(excluirPaciente, chamar('apiExcluirPaciente', p.id), 'Paciente excluído.').then(function () {
+            busca.value = '';
+            buscar(1);
+            editar({});
+          }).catch(function () {});
+        });
+        formulario.appendChild(excluirPaciente);
+      }
     }
 
     busca.addEventListener('input', function () {

@@ -989,3 +989,24 @@ test('erro de permissão do Google vira instrução para autorizar de novo', () 
   const outro = new Error('Paciente não encontrado.');
   assert.equal(tela.ctx.erroDoGoogle(outro), outro);
 });
+
+test('pacientes: a coordenação exclui um cadastro feito por engano; profissional não vê o botão', async () => {
+  const tela = carregar();
+  tela.ctx.telaPacientes();
+  const lista = { pacientes: [{ id: 'p9', prontuario: '999', nome: 'SEBASTIÃO MATIAS DE LIMA' }], pagina: 1, paginas: 1, total: 1, tamanho_pagina: 20 };
+  await tela.responder(0, lista);
+  const linha = () => tela.todos().find(el => el.tagName === 'TR' && /SEBASTIÃO/.test(el.textContent));
+  linha().emitir('click');
+  botao(tela, /^Excluir paciente$/).emitir('click');
+  assert.equal(tela.pedidos[1].nome, 'apiExcluirPaciente');
+  assert.deepEqual(tela.pedidos[1].args, ['p9']);
+  await tela.responder(1, { id: 'p9', nome: 'SEBASTIÃO MATIAS DE LIMA' });
+  assert.equal(tela.pedidos[2].nome, 'apiListarPacientes', 'A lista é atualizada depois de excluir');
+
+  const prof = carregar();
+  prof.ctx.estado.usuario.perfil = 'PROFISSIONAL';
+  prof.ctx.telaPacientes();
+  await prof.responder(0, lista);
+  prof.todos().find(el => el.tagName === 'TR' && /SEBASTIÃO/.test(el.textContent)).emitir('click');
+  assert.equal(prof.todos().some(el => el.tagName === 'BUTTON' && el.textContent === 'Excluir paciente'), false);
+});

@@ -2095,3 +2095,30 @@ test('permissão da planilha: sem acesso de edição, a mensagem diz o que pedir
   ctx.novaExecucao();
   assert.match(ctx.apiSalvarPaciente({ prontuario: '555', nome: 'Repetido' }).erro, /prontuário|cadastrad/i);
 });
+
+test('excluir paciente: só a coordenação e só sem internação', () => {
+  const { ctx, admitir, paciente } = sistemaComAdmissao();
+  ctx.novaExecucao();
+  const engano = ctx.apiSalvarPaciente({ prontuario: '999', nome: 'Sebastião Matias de Lima' }).dados;
+  // Profissional comum não exclui.
+  ctx.novaExecucao();
+  ctx.comTrava(() => ctx.inserir('PROFISSIONAIS', { nome: 'PSI', email: 'psi@exemplo.com', categoria: 'PROFISSIONAL DA EMPRESA', perfil: 'PROFISSIONAL', ativo: 'SIM' }));
+  vm.runInContext("Session = { getActiveUser: function () { return { getEmail: function () { return 'psi@exemplo.com'; } }; } }", ctx);
+  ctx.novaExecucao();
+  assert.match(ctx.apiExcluirPaciente(engano.id).erro, /coordenação/);
+  vm.runInContext("Session = { getActiveUser: function () { return { getEmail: function () { return 'coordenacao@exemplo.com'; } }; } }", ctx);
+  // Com internação, não exclui.
+  admitir();
+  ctx.novaExecucao();
+  const comInternacao = ctx.apiExcluirPaciente(paciente.id);
+  assert.equal(comInternacao.ok, false);
+  assert.match(comInternacao.erro, /1 internação/);
+  // Sem internação, exclui.
+  ctx.novaExecucao();
+  const r = ctx.apiExcluirPaciente(engano.id);
+  assert.equal(r.ok, true, r.erro);
+  ctx.novaExecucao();
+  assert.equal(ctx.buscarPorId('PACIENTES', engano.id), null);
+  assert.ok(ctx.buscarPorId('PACIENTES', paciente.id));
+  assert.equal(ctx.apiExcluirPaciente(engano.id).ok, false);
+});

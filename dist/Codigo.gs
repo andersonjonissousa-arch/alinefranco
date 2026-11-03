@@ -2203,6 +2203,25 @@ function apiSalvarPaciente(dados) {
   });
 }
 
+/**
+ * Exclui um paciente cadastrado por engano. Só a coordenação, e só se ele não tiver nenhuma internação:
+ * com internação, os atendimentos e indicadores dependem dele.
+ */
+function apiExcluirPaciente(id) {
+  return responderGravando(function () {
+    exigirCoordenacao();
+    var paciente = buscarPorId('PACIENTES', id);
+    if (!paciente) throw new Error('Paciente não encontrado.');
+    var internacoes = listar('ADMISSOES').filter(function (a) { return a.paciente_id === paciente.id; }).length;
+    if (internacoes) {
+      throw new Error(paciente.nome + ' tem ' + internacoes + ' internação(ões) registrada(s) e não pode ser excluído(a). ' +
+        'Para corrigir o nome ou o prontuário, edite o cadastro.');
+    }
+    excluir('PACIENTES', paciente.id);
+    return { id: paciente.id, nome: paciente.nome };
+  });
+}
+
 // ---------- Cadastros da coordenação ----------
 
 function apiSalvarProfissional(dados) {

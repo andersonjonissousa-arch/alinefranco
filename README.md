@@ -274,6 +274,8 @@ gestão, exportação e registro do dia) com os serviços do Google simulados em
 - Gestão conta solicitações pendentes, inclusive várias do mesmo paciente; o resumo de prazos mostra a mais urgente. O compilado conta cada solicitação no mês em que foi feita, independentemente do mês de admissão.
 - A migração preserva a associação automática das solicitações antigas ao primeiro atendimento elegível. Nas novas, o vínculo é explícito. Excluir um atendimento vinculado deixa a solicitação novamente sem resposta.
 
+Um paciente cadastrado por engano pode ser excluído pela coordenação: em **Pacientes**, clique no paciente e em **Excluir paciente**. Só é permitido se ele não tiver nenhuma internação registrada; com internação, corrija o cadastro em vez de excluir.
+
 O cadastro do paciente inclui **sexo** (feminino, masculino, intersexo ou não informado) e **data de nascimento**, tanto na tela Pacientes quanto no cadastro durante a admissão. São campos opcionais para permitir completar os cadastros existentes. O servidor rejeita datas inválidas ou futuras; a atualização acrescenta as colunas ao final da aba PACIENTES, preservando IDs e dados anteriores.
 
 Na tela **Atendimentos**, o filtro **Situação do acompanhamento** oferece Ativos (sem desfecho vigente), Inativos (qualquer desfecho vigente, inclusive saída hospitalar) e Todos. Retomar o acompanhamento torna a admissão ativa novamente. Cada novo atendimento exige o tipo da solicitação e o mostra no histórico; registros antigos sem essa informação ficam como Não informado. Vincular um atendimento existente como resposta a uma interconsulta classifica esse atendimento como Interconsulta.
