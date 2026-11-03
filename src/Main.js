@@ -94,8 +94,21 @@ function responder(fn) {
     return { ok: true, dados: fn() };
   } catch (e) {
     if (!_semRegistroDeErros) console.error(e);
-    return { ok: false, erro: e.message || String(e) };
+    return { ok: false, erro: mensagemDeErro_(e) };
   }
+}
+
+/** Erros de permissão do Google viram o que a pessoa precisa pedir; os demais seguem como vieram. */
+function mensagemDeErro_(e) {
+  var msg = (e && e.message) || String(e);
+  if (/caller does not have permission|PERMISSION_DENIED|does not have permission to access|não tem permissão para acessar/i.test(msg)) {
+    var email = '';
+    try { email = String(Session.getActiveUser().getEmail() || ''); } catch (x) { email = ''; }
+    return 'Sua conta' + (email ? ' (' + email + ')' : '') + ' não tem permissão para gravar na planilha do banco. ' +
+      'Peça à coordenação para compartilhar a planilha com você como "Editor" (no Google Planilhas: Compartilhar > ' +
+      'escolher a pessoa > Editor). Depois, atualize a página.';
+  }
+  return msg;
 }
 
 /** Para as funções que gravam: a operação inteira roda com a trava (ver comTrava, em Db.js). */

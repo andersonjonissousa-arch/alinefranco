@@ -149,6 +149,8 @@ tests/              testes com Node, com os serviços do Google simulados
   permissões na tela de consentimento do Google (ela deixa desmarcar opções). O sistema agora mostra uma página
   com o botão **Autorizar o acesso**. Se a mensagem continuar: em myaccount.google.com/connections, remova a
   conexão com "Gestão da Psicologia", abra o link de novo e marque todas as opções ("Selecionar tudo").
+- **"The caller does not have permission"** ao gravar: a planilha do banco está compartilhada com a pessoa só
+  como leitora ou comentarista. Compartilhe como **Editor**. O sistema mostra essa orientação com o e-mail da conta.
 - Como o sistema roda com a conta de quem acessa, cada pessoa também precisa estar cadastrada em
   **Cadastros > Profissionais** (ativa) e ter acesso de edição à planilha do banco.
 

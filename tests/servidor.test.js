@@ -2074,3 +2074,24 @@ test('abertura: sem todas as permissões do Google, a página pede para autoriza
   ctx.doGet();
   assert.equal(html, 'SISTEMA');
 });
+
+test('permissão da planilha: sem acesso de edição, a mensagem diz o que pedir à coordenação', () => {
+  const { ctx, google } = carregarSistema();
+  ctx.configurar();
+  ctx.novaExecucao();
+  const append = google.globais.Sheets.Spreadsheets.Values.append;
+  google.globais.Sheets.Spreadsheets.Values.append = () => {
+    throw new Error('Falha na chamada de API para sheets.spreadsheets.values.append com o erro The caller does not have permission');
+  };
+  const r = ctx.apiSalvarPaciente({ prontuario: '555', nome: 'Paciente Sem Permissão' });
+  assert.equal(r.ok, false);
+  assert.match(r.erro, /não tem permissão para gravar na planilha/);
+  assert.match(r.erro, /coordenacao@exemplo\.com/);
+  assert.match(r.erro, /Editor/);
+  google.globais.Sheets.Spreadsheets.Values.append = append;
+  ctx.novaExecucao();
+  assert.equal(ctx.apiSalvarPaciente({ prontuario: '555', nome: 'Paciente Com Permissão' }).ok, true);
+  // Os outros erros continuam como vieram.
+  ctx.novaExecucao();
+  assert.match(ctx.apiSalvarPaciente({ prontuario: '555', nome: 'Repetido' }).erro, /prontuário|cadastrad/i);
+});
