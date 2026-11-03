@@ -2282,22 +2282,46 @@ function apiSalvarPaciente(dados) {
   });
 }
 
+// Registros que pertencem a uma internação. Os marcados como excluídos não impedem a exclusão.
+var REGISTROS_DA_INTERNACAO = [
+  ['ATENDIMENTOS', 'atendimento(s)'], ['INTERCONSULTAS', 'interconsulta(s)'], ['TRANSFERENCIAS', 'transferência(s)'],
+  ['ATIVIDADES', 'atividade(s) assistencial(is)'], ['DESFECHOS_REGISTRADOS', 'desfecho(s)'], ['DESCRICOES_DEMANDA', 'descrição(ões) da demanda']
+];
+
 /**
- * Exclui um paciente cadastrado por engano. Só a coordenação, e só se ele não tiver nenhuma internação:
- * com internação, os atendimentos e indicadores dependem dele.
+ * Exclui um paciente cadastrado por engano. Só a coordenação. Internações dele sem nenhum registro
+ * (só a entrada) saem junto. Se alguma internação tiver atendimento, interconsulta ou outro registro,
+ * recusa e diz o que há, para não apagar trabalho registrado sem querer.
  */
 function apiExcluirPaciente(id) {
   return responderGravando(function () {
     exigirCoordenacao();
     var paciente = buscarPorId('PACIENTES', id);
     if (!paciente) throw new Error('Paciente não encontrado.');
-    var internacoes = listar('ADMISSOES').filter(function (a) { return a.paciente_id === paciente.id; }).length;
-    if (internacoes) {
-      throw new Error(paciente.nome + ' tem ' + internacoes + ' internação(ões) registrada(s) e não pode ser excluído(a). ' +
-        'Para corrigir o nome ou o prontuário, edite o cadastro.');
+    prepararInterconsultas_();
+    var internacoes = listar('ADMISSOES').filter(function (a) { return a.paciente_id === paciente.id; });
+    var doTipo = function (tabela, adm) { return listar(tabela).filter(function (r) { return r.admissao_id === adm.id; }); };
+    var impedimentos = [];
+    internacoes.forEach(function (adm) {
+      var partes = REGISTROS_DA_INTERNACAO.map(function (t) {
+        var n = doTipo(t[0], adm).filter(function (r) { return !r.excluido_em; }).length;
+        return n ? n + ' ' + t[1] : '';
+      }).filter(Boolean);
+      if (partes.length) impedimentos.push('internação de ' + String(adm.data_admissao).split('-').reverse().join('/') + ': ' + partes.join(', '));
+    });
+    if (impedimentos.length) {
+      throw new Error(paciente.nome + ' não pode ser excluído(a) porque tem registros: ' + impedimentos.join('; ') + '. ' +
+        'Exclua esses registros na tela da internação (Atendimentos) e tente de novo, ou, se o cadastro só está com dado errado, corrija-o.');
     }
+    // Internações vazias: saem junto, com o que estava marcado como excluído nelas.
+    internacoes.forEach(function (adm) {
+      REGISTROS_DA_INTERNACAO.forEach(function (t) {
+        doTipo(t[0], adm).forEach(function (r) { excluir(t[0], r.id); });
+      });
+      excluir('ADMISSOES', adm.id);
+    });
     excluir('PACIENTES', paciente.id);
-    return { id: paciente.id, nome: paciente.nome };
+    return { id: paciente.id, nome: paciente.nome, internacoes_excluidas: internacoes.length };
   });
 }
 

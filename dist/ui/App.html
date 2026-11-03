@@ -736,7 +736,8 @@
         var excluirPaciente = h('button', { class: 'btn perigo', type: 'button' }, 'Excluir paciente');
         excluirPaciente.addEventListener('click', function () {
           if (!confirm('Excluir o cadastro de ' + p.nome + ' (prontuário ' + p.prontuario + ')? Isso não pode ser desfeito.')) return;
-          enviar(excluirPaciente, chamar('apiExcluirPaciente', p.id), 'Paciente excluído.').then(function () {
+          enviar(excluirPaciente, chamar('apiExcluirPaciente', p.id), 'Paciente excluído.').then(function (r) {
+            if (r && r.internacoes_excluidas) avisar('Paciente excluído, com ' + r.internacoes_excluidas + ' internação(ões) sem registros.', 'ok');
             busca.value = '';
             buscar(1);
             editar({});

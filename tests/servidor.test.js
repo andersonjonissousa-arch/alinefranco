@@ -2098,8 +2098,9 @@ test('permissão da planilha: sem acesso de edição, a mensagem diz o que pedir
   assert.match(ctx.apiSalvarPaciente({ prontuario: '555', nome: 'Repetido' }).erro, /prontuário|cadastrad/i);
 });
 
-test('excluir paciente: só a coordenação e só sem internação', () => {
-  const { ctx, admitir, paciente } = sistemaComAdmissao();
+test('excluir paciente: só a coordenação; internação vazia sai junto; com registros, recusa e diz o quê', () => {
+  const sis = sistemaComAdmissao();
+  const { ctx, admitir, paciente } = sis;
   ctx.novaExecucao();
   const engano = ctx.apiSalvarPaciente({ prontuario: '999', nome: 'Sebastião Matias de Lima' }).dados;
   // Profissional comum não exclui.
@@ -2109,20 +2110,37 @@ test('excluir paciente: só a coordenação e só sem internação', () => {
   ctx.novaExecucao();
   assert.match(ctx.apiExcluirPaciente(engano.id).erro, /coordenação/);
   vm.runInContext("Session = { getActiveUser: function () { return { getEmail: function () { return 'coordenacao@exemplo.com'; } }; } }", ctx);
-  // Com internação, não exclui.
-  admitir();
+  // Internação com atendimento: não exclui e diz o que impede.
+  const adm = admitir().dados.admissao;
+  sis.atender(adm, { data: '2026-10-13' });
   ctx.novaExecucao();
   const comInternacao = ctx.apiExcluirPaciente(paciente.id);
   assert.equal(comInternacao.ok, false);
-  assert.match(comInternacao.erro, /1 internação/);
+  assert.match(comInternacao.erro, /internação de 09\/10\/2026: 1 atendimento\(s\), 1 descrição\(ões\) da demanda/);
+  ctx.novaExecucao();
+  assert.ok(ctx.buscarPorId('ADMISSOES', adm.id), 'Nada é apagado quando recusa');
+  // Excluído o atendimento, a internação fica vazia e sai junto com o paciente.
+  ctx.novaExecucao();
+  assert.equal(ctx.apiExcluirAtendimento(ctx.listar('ATENDIMENTOS')[0].id).ok, true);
+  ctx.novaExecucao();
+  const vazia = ctx.apiExcluirPaciente(paciente.id);
+  assert.equal(vazia.ok, true, vazia.erro);
+  assert.equal(vazia.dados.internacoes_excluidas, 1);
+  ctx.novaExecucao();
+  assert.equal(ctx.buscarPorId('ADMISSOES', adm.id), null);
+  assert.equal(ctx.listar('DESCRICOES_DEMANDA').filter(d => d.admissao_id === adm.id).length, 0, 'Os registros marcados como excluídos saem junto');
+  assert.equal(ctx.buscarPorId('PACIENTES', paciente.id), null);
   // Sem internação, exclui.
   ctx.novaExecucao();
   const r = ctx.apiExcluirPaciente(engano.id);
   assert.equal(r.ok, true, r.erro);
   ctx.novaExecucao();
   assert.equal(ctx.buscarPorId('PACIENTES', engano.id), null);
-  assert.ok(ctx.buscarPorId('PACIENTES', paciente.id));
   assert.equal(ctx.apiExcluirPaciente(engano.id).ok, false);
+  // Tudo ficou no registro de alterações.
+  ctx.novaExecucao();
+  const exclusoes = ctx.listar('AUDITORIA').filter(a => a.acao === 'EXCLUSÃO').map(a => a.tabela);
+  assert.ok(['PACIENTES', 'ADMISSOES', 'ATENDIMENTOS'].every(t => exclusoes.includes(t)));
 });
 
 test('registro de alterações: inclusão, alteração e exclusão com quem e quando; recálculos e configurar ficam de fora', () => {
