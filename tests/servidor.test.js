@@ -2005,3 +2005,48 @@ test('compilado: atendimentos por tipo da solicitação, com equipe ao lado de i
   assert.ok(ctx.apiInicio().dados.tipos_atendimento.includes('EQUIPE'));
   assert.ok(ctx.apiInicio().dados.tipos_atendimento.includes('INTERCONSULTA'));
 });
+
+test('limparDadosDeTeste: apaga pacientes e registros, mantém as configurações e faz uma cópia antes', () => {
+  const sis = sistemaComAdmissao();
+  const { ctx, google, admitir, atender } = sis;
+  const adm = admitir().dados.admissao;
+  solicitar(sis, adm);
+  atender(adm, { data: '2026-10-13' });
+  ctx.novaExecucao();
+  ctx.apiRegistrarAtividade({ admissao_id: adm.id, data: '2026-10-13', tipo: 'DISCUSSÃO DE CASO', quantidade: 1 });
+  ctx.novaExecucao();
+  ctx.apiRegistrarReuniao({ data: '2026-10-13', unidade_id: ctx.listar('UNIDADES')[0].id, tipo: 'GRUPO', quantidade: 1 });
+  ctx.novaExecucao();
+  const configuracao = ['SETORES', 'UNIDADES', 'PROFISSIONAIS', 'LISTAS', 'PRIORIDADES', 'MOTIVOS_SOLICITACAO', 'JUSTIFICATIVAS',
+    'FERIADOS', 'DESFECHOS', 'PARAMETROS'];
+  // Toda aba é configuração (fica) ou registro (sai): uma aba nova precisa entrar numa das listas.
+  assert.deepEqual([...configuracao, ...ctx.TABELAS_DE_REGISTROS].sort(), Object.keys(ctx.TABELAS).sort());
+  const antes = JSON.stringify(configuracao.map(t => ctx.listar(t)));
+  assert.ok(ctx.listar('PACIENTES').length > 0 && ctx.listar('ATENDIMENTOS').length > 0 && ctx.listar('REUNIOES').length > 0);
+
+  // Só a coordenação.
+  google.sessao.email = 'outra@exemplo.com';
+  ctx.novaExecucao();
+  assert.throws(() => ctx.limparDadosDeTeste(), /não tem acesso/);
+  google.sessao.email = 'coordenacao@exemplo.com';
+
+  ctx.novaExecucao();
+  const resumo = ctx.limparDadosDeTeste();
+  assert.match(resumo, /Cópia de segurança/);
+  assert.match(resumo, /PACIENTES: 1/);
+  // A cópia guarda os dados como estavam.
+  const copia = google.planilha.copias[0];
+  assert.ok(copia.getSheetByName('PACIENTES').linhas.length > 1);
+
+  ctx.novaExecucao();
+  for (const t of ctx.TABELAS_DE_REGISTROS) assert.equal(ctx.listar(t).length, 0, t);
+  assert.equal(JSON.stringify(configuracao.map(t => ctx.listar(t))), antes);
+  // O cabeçalho continua e o sistema volta a funcionar normalmente.
+  assert.equal(google.planilha.getSheetByName('PACIENTES').linhas.length, 1);
+  ctx.novaExecucao();
+  const novo = ctx.apiSalvarPaciente({ prontuario: '123', nome: 'Primeiro Paciente Real' });
+  assert.equal(novo.ok, true, novo.erro);
+  ctx.novaExecucao();
+  assert.equal(ctx.listar('PACIENTES').length, 1);
+  assert.equal(ctx.apiGestao({}).dados.itens.length, 0);
+});

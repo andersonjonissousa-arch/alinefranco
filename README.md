@@ -135,12 +135,22 @@ src/
   Interconsultas.js solicitações independentes, migração do legado e vínculo com respostas
   Gestao.js         telas de gestão: pacientes por unidade, interconsultas e prazos
   Historico.js      histórico completo do paciente: todas as internações numa linha do tempo
+  Limpeza.js        limparDadosDeTeste: apaga os registros de teste e mantém a configuração
   Autoteste.js      testarSistema: teste do fluxo inteiro no Google de verdade
   Desempenho.js     medirDesempenho: tempo de cada ação, antes e depois da leitura pela API
   ui/               tela (HTML, CSS e JavaScript, sem bibliotecas externas)
 dist/               o mesmo código em 4 arquivos, para instalar copiando e colando (npm run empacotar)
 tests/              testes com Node, com os serviços do Google simulados
 ```
+
+## Limpeza dos dados de teste
+
+Antes de começar a usar com dados reais, rode **`limparDadosDeTeste`** no editor do Apps Script, com a conta da coordenação.
+Ela apaga pacientes, admissões, transferências, interconsultas, descrições da demanda, atendimentos, atividades,
+desfechos registrados, reuniões e atividades gerenciais. Mantém a configuração: setores, unidades, profissionais,
+listas, prioridades, motivos, justificativas, feriados, cadastro de desfechos e parâmetros. Antes de apagar, faz uma
+cópia da planilha inteira no Drive de quem rodou; o registro de execução mostra o link da cópia e quantas linhas saíram
+de cada aba.
 
 ## Banco de dados
 

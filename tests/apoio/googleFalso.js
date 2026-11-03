@@ -15,6 +15,12 @@ class AbaFalsa {
   setName(nome) { this.nome = nome; return this; }
   appendRow(valores) { this.linhas.push(valores.map(String)); return this; }
   deleteRow(n) { this.linhas.splice(n - 1, 1); }
+  deleteRows(n, quantas) {
+    // Como a planilha de verdade: não deixa apagar todas as linhas abaixo do cabeçalho fixo.
+    if (n === 2 && n + quantas - 1 >= this.getMaxRows()) throw new Error('Não é possível excluir todas as linhas não congeladas.');
+    this.linhas.splice(n - 1, quantas);
+  }
+  insertRowsAfter() { return this; }
   getRange(linha, coluna, nLinhas = 1, nColunas = 1) {
     const aba = this;
     const intervalo = {
@@ -68,6 +74,12 @@ class PlanilhaFalsa {
   getSheetByName(nome) { return this.abas.find((a) => a.nome === nome) || null; }
   insertSheet(nome) { const a = new AbaFalsa(nome); this.abas.push(a); return a; }
   deleteSheet(aba) { this.abas = this.abas.filter((a) => a !== aba); }
+  copy(nome) {
+    const nova = new PlanilhaFalsa(nome);
+    nova.abas = this.abas.map((a) => { const c = new AbaFalsa(a.nome); c.linhas = a.linhas.map((l) => l.slice()); return c; });
+    (this.copias = this.copias || []).push(nova);
+    return nova;
+  }
 }
 
 /**
