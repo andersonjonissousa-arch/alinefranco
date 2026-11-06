@@ -2305,3 +2305,35 @@ test('sem internet: o mesmo envio de atendimento (id_envio) chegando duas vezes 
   ctx.novaExecucao();
   assert.equal(ctx.listar('ATENDIMENTOS').length, 2);
 });
+
+test('sem internet: cadastro de paciente e interconsulta reenviados com o mesmo id_envio gravam uma vez só', () => {
+  const sis = sistemaComAdmissao();
+  const { ctx, admitir } = sis;
+  const novo = { prontuario: '445566', nome: 'Paciente da Fila', id_envio: 'f0f1f2f3f4f5f6f7f8f9' };
+  ctx.novaExecucao();
+  const p1 = ctx.apiSalvarPaciente(novo);
+  assert.equal(p1.ok, true, p1.erro);
+  assert.equal(p1.dados.id, 'f0f1f2f3f4f5f6f7f8f9');
+  ctx.novaExecucao();
+  const p2 = ctx.apiSalvarPaciente(novo);
+  assert.equal(p2.ok, true, 'O reenvio não acusa prontuário repetido: ' + p2.erro);
+  assert.equal(p2.dados.id, p1.dados.id);
+  ctx.novaExecucao();
+  assert.equal(ctx.listar('PACIENTES').filter(p => p.prontuario === '445566').length, 1);
+  // Outro cadastro com o mesmo prontuário (envio diferente) continua barrado.
+  ctx.novaExecucao();
+  assert.match(ctx.apiSalvarPaciente({ prontuario: '445566', nome: 'Outro', id_envio: 'aaaabbbbccccddddeeee' }).erro, /Já existe paciente/);
+
+  const adm = admitir().dados.admissao;
+  const motivo = ctx.listar('MOTIVOS_SOLICITACAO').find(m => m.nome === 'RISCO DE SUICÍDIO');
+  const pedido = { admissao_id: adm.id, motivo_solicitacao_id: motivo.id, data_solicitacao: '2026-10-19', hora_solicitacao: '08:00',
+    para_quem: 'PACIENTE', id_envio: '0123456789abcdef0123' };
+  ctx.novaExecucao();
+  assert.equal(ctx.apiRegistrarInterconsulta(pedido).ok, true);
+  ctx.novaExecucao();
+  const de = ctx.apiRegistrarInterconsulta(pedido);
+  assert.equal(de.ok, true, de.erro);
+  ctx.novaExecucao();
+  assert.equal(ctx.listar('INTERCONSULTAS').filter(i => i.admissao_id === adm.id).length, 1, 'A solicitação não é duplicada');
+  assert.equal(ctx.buscarPorId('INTERCONSULTAS', '0123456789abcdef0123').prioridade_solicitacao, 'ALTA');
+});

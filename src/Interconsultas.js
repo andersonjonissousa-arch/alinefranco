@@ -76,6 +76,13 @@ function apiRegistrarInterconsulta(dados) {
   return responderGravando(function () {
     var usuario = usuarioAtual();
     dados = dados || {};
+    // Envio repetido pela fila da tela: não cria a mesma solicitação duas vezes.
+    var idEnvio = String(dados.id_envio || '').trim();
+    var jaGravada = jaGravadoPeloEnvio_('INTERCONSULTAS', idEnvio);
+    if (jaGravada) {
+      if (jaGravada.admissao_id !== dados.admissao_id) throw new Error('Identificação do envio já usada em outra internação.');
+      return detalheAdmissao(buscarPorId('ADMISSOES', jaGravada.admissao_id));
+    }
     var adm = buscarPorId('ADMISSOES', dados.admissao_id);
     if (!adm) throw new Error('Admissão não encontrada.');
     if (adm.status === STATUS_ADMISSAO.encerrada) throw new Error('Esta admissão está encerrada: o paciente saiu do hospital.');
@@ -96,6 +103,7 @@ function apiRegistrarInterconsulta(dados) {
     var temPrazo = prioridade && prioridade.prazo !== '' && tiposSolicitacaoComPrazo().indexOf('EQUIPE') !== -1;
     prepararInterconsultas_();
     inserir('INTERCONSULTAS', {
+      id: idEnvio || undefined,
       admissao_id: adm.id, unidade_id: unidadeNaData_(adm, data, hora), tipo_solicitacao: 'EQUIPE',
       motivo_solicitacao_id: motivo.id, data_solicitacao: data, hora_solicitacao: hora,
       para_quem: dados.para_quem, familiar_nome: nome, familiar_parentesco: parentesco,

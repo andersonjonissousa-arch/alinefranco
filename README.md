@@ -168,15 +168,16 @@ prontuário e hora) e a lista já aparece filtrada nele. Mensagens de erro ficam
 
 ## Internet ruim ou caindo
 
-O sistema é uma página do Google e precisa de internet para abrir. Com a página já aberta, o registro de
-atendimento não se perde:
-- **Rascunho:** o que é digitado no "Registrar atendimento" fica guardado neste computador e volta se a página
-  for atualizada ou fechada ("Rascunho recuperado"). Vale por 24 horas, só para a mesma conta, e some quando o
-  atendimento é gravado.
-- **Fila de envio:** se a internet cair ao clicar em Registrar, o atendimento fica guardado e uma faixa amarela no
-  topo avisa. Ele é enviado sozinho quando a conexão volta (ou no botão "Enviar agora"), inclusive depois de
+O sistema é uma página do Google e precisa de internet para abrir. Com a página já aberta, o **registro de
+atendimento**, o **cadastro de paciente novo** (tela Pacientes) e a **nova interconsulta** não se perdem:
+- **Rascunho:** o que é digitado fica guardado neste computador e volta se a página for atualizada ou fechada
+  ("Rascunho recuperado"). Vale por 24 horas, só para a mesma conta, e some quando o registro é gravado.
+- **Fila de envio:** se a internet cair ao clicar em Registrar ou Cadastrar, o registro fica guardado, o formulário
+  volta vazio (para ninguém registrar de novo) e uma faixa amarela no topo avisa. Ele é enviado sozinho quando a conexão volta (ou no botão "Enviar agora"), inclusive depois de
   atualizar a página, no mesmo computador e navegador. Cada envio leva uma identificação: se chegar duas vezes,
   o servidor grava uma vez só.
+- Alterar um cadastro existente e o cadastro rápido de paciente dentro da "Nova admissão" continuam precisando
+  de internet na hora.
 - Se o servidor recusar (um campo faltando, por exemplo), a faixa mostra o motivo; é só registrar de novo.
 - Os dados guardados ficam só no navegador daquele computador, separados por conta. Em computador compartilhado,
   não limpe os dados do navegador enquanto a faixa amarela estiver aparecendo.

@@ -100,6 +100,10 @@ function apiBuscarPacientes(termo) {
 function apiSalvarPaciente(dados) {
   return responderGravando(function () {
     usuarioAtual();
+    // Cadastro novo reenviado pela fila da tela: devolve o que já foi gravado, sem acusar prontuário repetido.
+    var idEnvio = dados.id ? '' : String(dados.id_envio || '').trim();
+    var jaGravado = jaGravadoPeloEnvio_('PACIENTES', idEnvio);
+    if (jaGravado) return jaGravado;
     var paciente = {
       id: dados.id || '',
       prontuario: normalizarProntuario(dados.prontuario),
@@ -136,6 +140,7 @@ function apiSalvarPaciente(dados) {
     var duplicado = acharDuplicado(listar('PACIENTES'), paciente);
     if (duplicado) throw new Error('Já existe paciente com o prontuário ' + paciente.prontuario + ': ' + duplicado.nome + '.');
     if (paciente.id) return atualizar('PACIENTES', paciente.id, paciente);
+    if (idEnvio) paciente.id = idEnvio;
     return inserir('PACIENTES', paciente);
   });
 }

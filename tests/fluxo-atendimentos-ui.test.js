@@ -1162,7 +1162,7 @@ test('sem internet: o envio que falha fica na fila e é mandado de novo, com a m
   tela.pedidos[0].reject(semRede);
   for (let i = 0; i < 12; i++) await Promise.resolve();
   assert.equal(fila().length, 1);
-  assert.match(tela.avisos.at(-1).mensagem, /ficou guardado neste computador e será enviado sozinho/);
+  assert.match(tela.avisos.at(-1).mensagem, /Ficou guardado neste computador e será enviado sozinho/);
   // A conexão voltou: manda de novo com o mesmo id_envio; confirmado, sai da fila.
   tela.ctx.enviarFila();
   assert.equal(tela.pedidos[1].nome, 'apiRegistrarAtendimento');
@@ -1182,4 +1182,61 @@ test('sem internet: o envio que falha fica na fila e é mandado de novo, com a m
   assert.equal(fila().length, 0);
   assert.equal(f2.elements.find(el => el.name === 'observacao').value, 'texto que não pode sumir');
   assert.match(tela.avisos.at(-1).mensagem, /Selecione a justificativa/);
+});
+
+test('sem internet: cadastro de paciente fica na fila, o formulário volta vazio e o envio sai depois com a mesma identificação', async () => {
+  const tela = carregar();
+  const guardado = comArmazenamento(tela);
+  tela.ctx.telaPacientes();
+  await tela.responder(0, { pacientes: [], pagina: 1, paginas: 1, total: 0, tamanho_pagina: 20 });
+  let form = formularioCom(tela, 'prontuario');
+  preencher(form, 'prontuario', '445566');
+  preencher(form, 'nome', 'Paciente da Fila');
+  form.emitir('input');
+  assert.ok(Object.keys(guardado).some(k => k.endsWith('rascunho_paciente_novo')), 'Rascunho do cadastro novo');
+  // Rascunho volta ao abrir a tela de novo.
+  tela.ctx.telaPacientes();
+  form = formularioCom(tela, 'prontuario');
+  assert.equal(form.elements.find(el => el.name === 'nome').value, 'Paciente da Fila');
+  form.emitir('submit');
+  const pedido = tela.pedidos.find(p => p.nome === 'apiSalvarPaciente');
+  assert.match(pedido.args[0].id_envio, /^[0-9a-f]{20}$/);
+  const semRede = new Error('NetworkError');
+  semRede.rede = true;
+  pedido.reject(semRede);
+  for (let i = 0; i < 12; i++) await Promise.resolve();
+  const fila = JSON.parse(guardado['gestao_psicologia_fila_envios']);
+  assert.equal(fila.length, 1);
+  assert.equal(fila[0].rotulo, 'Cadastro de PACIENTE DA FILA (prontuário 445566)');
+  assert.equal(formularioCom(tela, 'prontuario').elements.find(el => el.name === 'nome').value, '', 'Formulário vazio: ninguém cadastra de novo');
+  assert.equal(Object.keys(guardado).some(k => k.endsWith('rascunho_paciente_novo')), false);
+  tela.ctx.enviarFila();
+  const reenvio = tela.pedidos.at(-1);
+  assert.equal(reenvio.nome, 'apiSalvarPaciente');
+  assert.equal(reenvio.args[0].id_envio, pedido.args[0].id_envio);
+});
+
+test('sem internet: interconsulta tem rascunho e fila; guardada, o formulário volta vazio', async () => {
+  const tela = carregar();
+  const guardado = comArmazenamento(tela);
+  tela.ctx.desenharAtendimento(detalhe({ status: status.acompanhamento }));
+  let form = formularioCom(tela, 'data_solicitacao');
+  preencher(form, 'observacoes', 'pedido pela enfermagem');
+  form.emitir('input');
+  tela.ctx.desenharAtendimento(detalhe({ status: status.acompanhamento }));
+  form = formularioCom(tela, 'data_solicitacao');
+  assert.equal(form.elements.find(el => el.name === 'observacoes').value, 'pedido pela enfermagem');
+  assert.match(tela.conteudo.textContent, /Rascunho recuperado/);
+  preencher(form, 'motivo_solicitacao_id', 'motivo-alta');
+  form.emitir('submit');
+  const pedido = tela.pedidos.at(-1);
+  assert.equal(pedido.nome, 'apiRegistrarInterconsulta');
+  assert.match(pedido.args[0].id_envio, /^[0-9a-f]{20}$/);
+  const semRede = new Error('NetworkError');
+  semRede.rede = true;
+  pedido.reject(semRede);
+  for (let i = 0; i < 12; i++) await Promise.resolve();
+  assert.equal(JSON.parse(guardado['gestao_psicologia_fila_envios']).length, 1);
+  assert.equal(formularioCom(tela, 'data_solicitacao').elements.find(el => el.name === 'observacoes').value, '');
+  assert.match(tela.avisos.at(-1).mensagem, /Ficou guardado neste computador .*: Interconsulta de PACIENTE DE TESTE/);
 });

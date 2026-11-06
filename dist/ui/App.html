@@ -385,6 +385,48 @@
     gravarLocal(CHAVE_FILA, lerFila().filter(function (i) { return i.id !== id; }));
   }
 
+  /**
+   * Guarda o envio na fila antes de mandar e só tira quando o servidor confirma. Sem internet, ele fica guardado
+   * (o erro volta com guardado = true) e sai sozinho depois; o id_envio faz o servidor não gravar duas vezes.
+   * Recusado pelo servidor (ex.: campo faltando), sai da fila e o erro volta para a tela tratar.
+   */
+  function enviarGuardando(botao, nome, dados, rotulo, msgOk, chaveRascunho) {
+    dados.id_envio = novoIdEnvio();
+    var item = enfileirar(nome, dados, rotulo);
+    if (chaveRascunho) apagarRascunho(chaveRascunho);
+    botao.disabled = true;
+    return chamar(nome, dados).then(function (r) {
+      tirarDaFila(item.id);
+      avisar(msgOk, 'ok');
+      return r;
+    }).catch(function (e) {
+      if (e.rede && item.guardado) {
+        e.guardado = true;
+        avisar('Sem conexão. Ficou guardado neste computador e será enviado sozinho quando a internet voltar: ' + rotulo +
+          '. Não precisa registrar de novo.', 'erro');
+      } else {
+        tirarDaFila(item.id);
+        avisar(e.message, 'erro');
+      }
+      throw e;
+    }).finally(function () { botao.disabled = false; atualizarFaixaDaFila(); });
+  }
+
+  /** Liga o rascunho a um formulário: devolve o rascunho recuperado (ou null) e guarda a cada mudança. */
+  function rascunhoDoFormulario(form, chave, aoRestaurar) {
+    var r = lerRascunho(chave);
+    if (r) {
+      Array.prototype.forEach.call(form.elements, function (el) {
+        if (el.name && el.type !== 'hidden' && Object.prototype.hasOwnProperty.call(r.campos, el.name)) el.value = r.campos[el.name];
+      });
+      if (aoRestaurar) aoRestaurar();
+    }
+    var guardar = function () { guardarRascunho(chave, lerFormulario(form)); };
+    form.addEventListener('input', guardar);
+    form.addEventListener('change', guardar);
+    return r;
+  }
+
   var enviandoFila = false;
 
   /** Manda o que ficou guardado, um por vez. Para no primeiro sem internet; recusados ficam marcados na faixa. */
@@ -868,7 +910,12 @@
             String(dados.nome).toUpperCase() + ' (prontuário ' + dados.prontuario + ').\n\n' +
             'As internações, atendimentos e interconsultas deste cadastro passam a aparecer com os dados novos. ' +
             'Se for OUTRO paciente, clique em Cancelar e use "Novo paciente".')) return;
-        enviar(botao, chamar('apiSalvarPaciente', dados), novo ? 'Paciente cadastrado.' : 'Alterações salvas.').then(function (salvo) {
+        // Cadastro novo: rascunho e fila de envio, como no atendimento. Alteração segue direto.
+        var envio = novo
+          ? enviarGuardando(botao, 'apiSalvarPaciente', dados, 'Cadastro de ' + String(dados.nome).toUpperCase() +
+            ' (prontuário ' + dados.prontuario + ')', 'Paciente cadastrado.', 'rascunho_paciente_novo')
+          : enviar(botao, chamar('apiSalvarPaciente', dados), 'Alterações salvas.');
+        envio.then(function (salvo) {
           clearTimeout(espera);
           busca.value = salvo.prontuario;
           buscar(1);
@@ -879,8 +926,13 @@
           confirmacao.appendChild(h('strong', null, (novo ? '✓ Paciente cadastrado: ' : '✓ Cadastro atualizado: ') + salvo.nome));
           confirmacao.appendChild(h('div', null, 'Prontuário ' + salvo.prontuario + ' · gravado às ' + horaAgora() +
             '. Ele já aparece na lista acima.'));
-        }).catch(function () {});
+        }).catch(function (e) {
+          if (!novo) return;
+          // Guardado na fila: o formulário volta vazio; recusado: o que foi digitado continua no rascunho.
+          if (e.guardado) editar({}); else guardarRascunho('rascunho_paciente_novo', lerFormulario(form));
+        });
       });
+      if (!p.id) rascunhoDoFormulario(form, 'rascunho_paciente_novo');
       formulario.className = p.id ? 'cartao editando' : 'cartao';
       if (p.id) {
         // Deixa claro que o formulário está mexendo num cadastro existente, e não criando outro paciente.
@@ -1454,12 +1506,24 @@
         campo('Observações da solicitação', h('input', { name: 'observacoes' })));
       var botao = h('button', { class: 'btn', type: 'submit' }, 'Registrar interconsulta');
       form.appendChild(botao);
+      // Rascunho e fila de envio, como no registro de atendimento.
+      var chaveInterconsulta = 'rascunho_interconsulta_' + a.id;
+      var rascunhoInterconsulta = rascunhoDoFormulario(form, chaveInterconsulta, ajustarFamiliar);
       form.addEventListener('submit', function (ev) {
         ev.preventDefault();
-        enviar(botao, chamar('apiRegistrarInterconsulta', Object.assign(lerFormulario(form), { admissao_id: a.id })), 'Interconsulta registrada.')
-          .then(function (d) { if (navegacao === estado.navegacao) desenharAtendimento(d); }).catch(function () {});
+        var dados = Object.assign(lerFormulario(form), { admissao_id: a.id });
+        enviarGuardando(botao, 'apiRegistrarInterconsulta', dados,
+          'Interconsulta de ' + (a.paciente_nome || 'paciente') + ' em ' + dataBr(dados.data_solicitacao) + ' ' + dados.hora_solicitacao,
+          'Interconsulta registrada.', chaveInterconsulta)
+          .then(function (d) { if (navegacao === estado.navegacao) desenharAtendimento(d); })
+          .catch(function (e) {
+            if (e.guardado) { if (navegacao === estado.navegacao) desenharAtendimento(estado.detalheAberto); return; }
+            guardarRascunho(chaveInterconsulta, lerFormulario(form));
+          });
       });
-      bloco.appendChild(h('details', null, h('summary', null, 'Nova interconsulta'), form));
+      var detalhes = h('details', null, h('summary', null, 'Nova interconsulta'), avisoDeRascunho(rascunhoInterconsulta, chaveInterconsulta), form);
+      if (rascunhoInterconsulta) detalhes.setAttribute('open', '');
+      bloco.appendChild(detalhes);
     }
     itens.slice().reverse().forEach(function (i) {
       var linha = h('div', { class: 'cartao' },
@@ -1636,6 +1700,14 @@
       form);
   }
 
+  /** Aviso "Rascunho recuperado", com o botão para descartar e redesenhar a internação. */
+  function avisoDeRascunho(rascunho, chave) {
+    if (!rascunho) return null;
+    var descartar = h('button', { class: 'link', type: 'button' }, 'descartar rascunho');
+    descartar.addEventListener('click', function () { apagarRascunho(chave); desenharAtendimento(estado.detalheAberto); });
+    return h('p', { class: 'aviso-rascunho' }, 'Rascunho recuperado (digitado às ' + rascunho.quando.slice(11, 16) + '). Confira e clique em Registrar. ', descartar);
+  }
+
   function formularioAtendimento(a, interconsultas, transferencias) {
     var navegacao = estado.navegacao;
     var publico = seletor('publico', estado.cad.publicos.map(function (p) {
@@ -1692,47 +1764,21 @@
     ajustar();
     // Rascunho: o que foi digitado fica guardado neste computador e volta se a página for atualizada.
     var chaveRascunho = 'rascunho_atendimento_' + a.id;
-    var aviso = null;
-    var rascunho = lerRascunho(chaveRascunho);
-    if (rascunho) {
-      Array.prototype.forEach.call(form.elements, function (el) {
-        if (el.name && Object.prototype.hasOwnProperty.call(rascunho.campos, el.name)) el.value = rascunho.campos[el.name];
-      });
-      ajustar();
-      ajustarTipo();
-      var descartar = h('button', { class: 'link', type: 'button' }, 'descartar rascunho');
-      aviso = h('p', { class: 'aviso-rascunho' }, 'Rascunho recuperado (digitado às ' + rascunho.quando.slice(11, 16) + '). Confira e clique em Registrar. ', descartar);
-      descartar.addEventListener('click', function () { apagarRascunho(chaveRascunho); desenharAtendimento(estado.detalheAberto); });
-    }
-    var guardar = function () { guardarRascunho(chaveRascunho, lerFormulario(form)); };
-    form.addEventListener('input', guardar);
-    form.addEventListener('change', guardar);
+    var aviso = avisoDeRascunho(rascunhoDoFormulario(form, chaveRascunho, function () { ajustar(); ajustarTipo(); }), chaveRascunho);
     var botao = h('button', { class: 'btn', type: 'submit' }, 'Registrar atendimento');
     form.appendChild(botao);
     form.addEventListener('submit', function (ev) {
       ev.preventDefault();
-      // O envio fica na fila deste computador até o servidor confirmar. Sem internet, sai sozinho quando ela voltar;
-      // o id_envio faz o servidor reconhecer um envio repetido, sem duplicar.
-      var dados = Object.assign(lerFormulario(form), { admissao_id: a.id, id_envio: novoIdEnvio() });
-      var item = enfileirar('apiRegistrarAtendimento', dados,
-        'Atendimento de ' + (a.paciente_nome || 'paciente') + ' em ' + dataBr(dados.data) + ' ' + dados.hora);
-      apagarRascunho(chaveRascunho);
-      botao.disabled = true;
-      chamar('apiRegistrarAtendimento', dados).then(function (det) {
-        tirarDaFila(item.id);
-        avisar('Atendimento registrado.', 'ok');
-        if (navegacao === estado.navegacao) desenharAtendimento(det);
-      }).catch(function (e) {
-        if (e.rede && item.guardado) {
-          avisar('Sem conexão. O atendimento ficou guardado neste computador e será enviado sozinho quando a internet voltar. ' +
-            'Não precisa registrar de novo.', 'erro');
-        } else {
-          // Recusado pelo servidor (ex.: campo faltando): sai da fila e o que foi digitado continua na tela.
-          tirarDaFila(item.id);
-          guardar();
-          avisar(e.message, 'erro');
-        }
-      }).finally(function () { botao.disabled = false; atualizarFaixaDaFila(); });
+      var dados = Object.assign(lerFormulario(form), { admissao_id: a.id });
+      enviarGuardando(botao, 'apiRegistrarAtendimento', dados,
+        'Atendimento de ' + (a.paciente_nome || 'paciente') + ' em ' + dataBr(dados.data) + ' ' + dados.hora, 'Atendimento registrado.', chaveRascunho)
+        .then(function (det) { if (navegacao === estado.navegacao) desenharAtendimento(det); })
+        .catch(function (e) {
+          // Guardado na fila: o formulário volta vazio, para ninguém registrar de novo por engano.
+          if (e.guardado) { if (navegacao === estado.navegacao) desenharAtendimento(estado.detalheAberto); return; }
+          // Recusado pelo servidor: o que foi digitado continua na tela e no rascunho.
+          guardarRascunho(chaveRascunho, lerFormulario(form));
+        });
     });
     var titulo = a.status === estado.cad.status_admissao.aguardando ? 'Registrar 1º atendimento (avaliação)' : 'Registrar atendimento';
     return h('div', { class: 'cartao' }, h('h2', null, titulo), aviso, form);

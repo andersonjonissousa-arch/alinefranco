@@ -98,6 +98,17 @@ function responder(fn) {
   }
 }
 
+/**
+ * Envio repetido pela fila da tela (a internet caiu depois de gravar e o mesmo envio saiu de novo):
+ * id_envio vira o id do registro novo. Devolve o registro já gravado com esse id, ou null.
+ */
+function jaGravadoPeloEnvio_(tabela, idEnvio) {
+  idEnvio = String(idEnvio || '').trim();
+  if (!idEnvio) return null;
+  if (!/^[a-z0-9]{8,40}$/i.test(idEnvio)) throw new Error('Identificação do envio inválida.');
+  return buscarPorId(tabela, idEnvio);
+}
+
 /** Erros de permissão do Google viram o que a pessoa precisa pedir; os demais seguem como vieram. */
 function mensagemDeErro_(e) {
   var msg = (e && e.message) || String(e);

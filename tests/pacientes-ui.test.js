@@ -77,7 +77,8 @@ function carregarTela() {
     ['  function lerFormulario(', '  /** Desabilita o botão'],
     ['  function enviar(', '  function tela('],
     ['  function tela(', '  function ehCoordenacao('],
-    ['  function camposDemograficosPaciente(', '  // ---------- Admissões ----------']
+    ['  function camposDemograficosPaciente(', '  // ---------- Admissões ----------'],
+    ['  // ---------- Sem internet', '  // ---------- Gestão: por unidade']
   ]) {
     const de = html.indexOf(inicio);
     const ate = html.indexOf(fim, de);

@@ -2138,6 +2138,17 @@ function responder(fn) {
   }
 }
 
+/**
+ * Envio repetido pela fila da tela (a internet caiu depois de gravar e o mesmo envio saiu de novo):
+ * id_envio vira o id do registro novo. Devolve o registro já gravado com esse id, ou null.
+ */
+function jaGravadoPeloEnvio_(tabela, idEnvio) {
+  idEnvio = String(idEnvio || '').trim();
+  if (!idEnvio) return null;
+  if (!/^[a-z0-9]{8,40}$/i.test(idEnvio)) throw new Error('Identificação do envio inválida.');
+  return buscarPorId(tabela, idEnvio);
+}
+
 /** Erros de permissão do Google viram o que a pessoa precisa pedir; os demais seguem como vieram. */
 function mensagemDeErro_(e) {
   var msg = (e && e.message) || String(e);
@@ -2259,6 +2270,10 @@ function apiBuscarPacientes(termo) {
 function apiSalvarPaciente(dados) {
   return responderGravando(function () {
     usuarioAtual();
+    // Cadastro novo reenviado pela fila da tela: devolve o que já foi gravado, sem acusar prontuário repetido.
+    var idEnvio = dados.id ? '' : String(dados.id_envio || '').trim();
+    var jaGravado = jaGravadoPeloEnvio_('PACIENTES', idEnvio);
+    if (jaGravado) return jaGravado;
     var paciente = {
       id: dados.id || '',
       prontuario: normalizarProntuario(dados.prontuario),
@@ -2295,6 +2310,7 @@ function apiSalvarPaciente(dados) {
     var duplicado = acharDuplicado(listar('PACIENTES'), paciente);
     if (duplicado) throw new Error('Já existe paciente com o prontuário ' + paciente.prontuario + ': ' + duplicado.nome + '.');
     if (paciente.id) return atualizar('PACIENTES', paciente.id, paciente);
+    if (idEnvio) paciente.id = idEnvio;
     return inserir('PACIENTES', paciente);
   });
 }
@@ -3054,13 +3070,10 @@ function apiRegistrarAtendimento(dados) {
     var usuario = usuarioAtual();
     // Envio repetido (a internet caiu depois de gravar e a tela mandou de novo): o mesmo id_envio não duplica.
     var idEnvio = String(dados.id_envio || '').trim();
-    if (idEnvio) {
-      if (!/^[a-z0-9]{8,40}$/i.test(idEnvio)) throw new Error('Identificação do envio inválida.');
-      var jaGravado = buscarPorId('ATENDIMENTOS', idEnvio);
-      if (jaGravado) {
-        if (jaGravado.admissao_id !== dados.admissao_id) throw new Error('Identificação do envio já usada em outra internação.');
-        return detalheAdmissao(buscarPorId('ADMISSOES', jaGravado.admissao_id));
-      }
+    var jaGravado = jaGravadoPeloEnvio_('ATENDIMENTOS', idEnvio);
+    if (jaGravado) {
+      if (jaGravado.admissao_id !== dados.admissao_id) throw new Error('Identificação do envio já usada em outra internação.');
+      return detalheAdmissao(buscarPorId('ADMISSOES', jaGravado.admissao_id));
     }
     var adm = admissaoParaRegistro(dados.admissao_id);
     var data = normalizarData(dados.data);
@@ -3502,6 +3515,13 @@ function apiRegistrarInterconsulta(dados) {
   return responderGravando(function () {
     var usuario = usuarioAtual();
     dados = dados || {};
+    // Envio repetido pela fila da tela: não cria a mesma solicitação duas vezes.
+    var idEnvio = String(dados.id_envio || '').trim();
+    var jaGravada = jaGravadoPeloEnvio_('INTERCONSULTAS', idEnvio);
+    if (jaGravada) {
+      if (jaGravada.admissao_id !== dados.admissao_id) throw new Error('Identificação do envio já usada em outra internação.');
+      return detalheAdmissao(buscarPorId('ADMISSOES', jaGravada.admissao_id));
+    }
     var adm = buscarPorId('ADMISSOES', dados.admissao_id);
     if (!adm) throw new Error('Admissão não encontrada.');
     if (adm.status === STATUS_ADMISSAO.encerrada) throw new Error('Esta admissão está encerrada: o paciente saiu do hospital.');
@@ -3522,6 +3542,7 @@ function apiRegistrarInterconsulta(dados) {
     var temPrazo = prioridade && prioridade.prazo !== '' && tiposSolicitacaoComPrazo().indexOf('EQUIPE') !== -1;
     prepararInterconsultas_();
     inserir('INTERCONSULTAS', {
+      id: idEnvio || undefined,
       admissao_id: adm.id, unidade_id: unidadeNaData_(adm, data, hora), tipo_solicitacao: 'EQUIPE',
       motivo_solicitacao_id: motivo.id, data_solicitacao: data, hora_solicitacao: hora,
       para_quem: dados.para_quem, familiar_nome: nome, familiar_parentesco: parentesco,
