@@ -92,6 +92,11 @@
   .aviso.ok { background: var(--ok); }
   .aviso.fixo { pointer-events: auto; cursor: pointer; }
   .aviso .fechar-aviso { opacity: .85; font-size: 13px; }
+  /* Dentro do topo fixo: fica sempre à vista enquanto houver algo esperando a internet. */
+  .fila-envios { flex: 0 0 100%; background: var(--amarelo); border: 1px solid #e6b84b; border-radius: 6px; padding: 6px 12px; font-size: 14px; }
+  .fila-envios .btn { margin-left: 8px; }
+  .aviso-rascunho { background: var(--amarelo); border-radius: 6px; padding: 6px 10px; margin: 0 0 10px; font-size: 14px; }
+  @media print { .fila-envios { display: none !important; } }
   .cartao.editando { background: var(--amarelo); border-color: #e6b84b; }
   .cartao.editando .aviso-edicao { margin: 0 0 8px; color: #7a5d00; }
   .cartao.confirmacao { background: var(--verde); border-color: #a9d8b2; color: #14532d; }

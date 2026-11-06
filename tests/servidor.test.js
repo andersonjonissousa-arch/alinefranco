@@ -2272,3 +2272,36 @@ test('painel e Início: o prazo do 1º atendimento não marca atrasado; o compil
   const c = ctx.apiCompilado({ ano: '2026', mes: '10', eixo: 'UNIDADE' }).dados;
   assert.equal(c.secoes.find(s => s.titulo.startsWith('1º atendimento')).linhas.find(l => l.rotulo === 'FORA DO PRAZO').total, 1);
 });
+
+test('sem internet: o mesmo envio de atendimento (id_envio) chegando duas vezes grava uma vez só', () => {
+  const { ctx, admitir } = sistemaComAdmissao();
+  const adm = admitir().dados.admissao;
+  const outra = (() => {
+    ctx.novaExecucao();
+    const p2 = ctx.apiSalvarPaciente({ prontuario: '222', nome: 'Outro Paciente' }).dados;
+    ctx.novaExecucao();
+    return ctx.apiSalvarEntradaAdmissao({ paciente_id: p2.id, data_admissao: '2026-10-15', unidade_id: ctx.listar('UNIDADES')[0].id }).dados.admissao;
+  })();
+  const j = ctx.listar('JUSTIFICATIVAS').find(x => x.nome === 'POUCOS RECURSOS DE ENFRENTAMENTO');
+  const envio = { admissao_id: adm.id, data: '2026-10-14', hora: '10:00', publico: 'PACIENTE', tipo_atendimento: 'BUSCA ATIVA',
+    justificativa_id: j.id, descricao_demanda: 'HUMOR DEPRIMIDO OU ANSIOSO', id_envio: 'a1b2c3d4e5f60718293a' };
+  ctx.novaExecucao();
+  const r1 = ctx.apiRegistrarAtendimento(envio);
+  assert.equal(r1.ok, true, r1.erro);
+  assert.equal(r1.dados.atendimentos[0].id, 'a1b2c3d4e5f60718293a');
+  ctx.novaExecucao();
+  const r2 = ctx.apiRegistrarAtendimento(envio);
+  assert.equal(r2.ok, true, r2.erro);
+  ctx.novaExecucao();
+  assert.equal(ctx.listar('ATENDIMENTOS').length, 1, 'O reenvio não duplica');
+  assert.equal(ctx.listar('DESCRICOES_DEMANDA').filter(d => !d.excluido_em).length, 1);
+  ctx.novaExecucao();
+  assert.match(ctx.apiRegistrarAtendimento({ ...envio, admissao_id: outra.id }).erro, /já usada em outra internação/);
+  ctx.novaExecucao();
+  assert.match(ctx.apiRegistrarAtendimento({ ...envio, id_envio: 'x; drop' }).erro, /inválida/);
+  // Sem id_envio, continua como antes.
+  ctx.novaExecucao();
+  assert.equal(ctx.apiRegistrarAtendimento({ ...envio, id_envio: '', hora: '11:00' }).ok, true);
+  ctx.novaExecucao();
+  assert.equal(ctx.listar('ATENDIMENTOS').length, 2);
+});

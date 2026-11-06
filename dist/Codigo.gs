@@ -3052,6 +3052,16 @@ function inteiroEntre(valor, min, max, padrao) {
 function apiRegistrarAtendimento(dados) {
   return responderGravando(function () {
     var usuario = usuarioAtual();
+    // Envio repetido (a internet caiu depois de gravar e a tela mandou de novo): o mesmo id_envio não duplica.
+    var idEnvio = String(dados.id_envio || '').trim();
+    if (idEnvio) {
+      if (!/^[a-z0-9]{8,40}$/i.test(idEnvio)) throw new Error('Identificação do envio inválida.');
+      var jaGravado = buscarPorId('ATENDIMENTOS', idEnvio);
+      if (jaGravado) {
+        if (jaGravado.admissao_id !== dados.admissao_id) throw new Error('Identificação do envio já usada em outra internação.');
+        return detalheAdmissao(buscarPorId('ADMISSOES', jaGravado.admissao_id));
+      }
+    }
     var adm = admissaoParaRegistro(dados.admissao_id);
     var data = normalizarData(dados.data);
     validarDataRegistro(data, adm);
@@ -3082,6 +3092,7 @@ function apiRegistrarAtendimento(dados) {
       throw new Error('Informe a descrição da demanda no 1º atendimento.');
     }
     var atendimento = {
+      id: idEnvio || undefined,
       admissao_id: adm.id,
       unidade_id: unidadeDoRegistro_(dados, adm, data, hora),
       data: data,

@@ -1111,3 +1111,75 @@ test('painel de prazos: paciente com interconsulta aberta mostra só o prazo da 
   assert.match(linhas[0].textContent, /Interconsulta/);
   assert.doesNotMatch(tela.conteudo.textContent, /atrasado\b(?!s)/i);
 });
+
+function comArmazenamento(tela) {
+  const guardado = {};
+  tela.ctx.window = {
+    localStorage: { getItem: k => (k in guardado ? guardado[k] : null), setItem: (k, v) => { guardado[k] = String(v); }, removeItem: k => { delete guardado[k]; } },
+    crypto: require('node:crypto').webcrypto, addEventListener() {}, setInterval() {}
+  };
+  tela.ctx.estado.usuario.email = 'prof@exemplo.com';
+  return guardado;
+}
+
+test('sem internet: o atendimento digitado fica como rascunho e volta depois de atualizar a página', () => {
+  const tela = carregar();
+  const guardado = comArmazenamento(tela);
+  const d = detalhe({ status: status.acompanhamento });
+  tela.ctx.desenharAtendimento(d);
+  const form = formularioCom(tela, 'publico');
+  preencher(form, 'tipo_atendimento', 'BUSCA ATIVA');
+  preencher(form, 'observacao', 'Paciente chorosa, acolhida');
+  form.emitir('input');
+  assert.ok(Object.keys(guardado).some(k => k.includes('rascunho_atendimento_adm1')));
+  // "Atualizou a página": a tela é desenhada de novo do zero.
+  tela.ctx.desenharAtendimento(detalhe({ status: status.acompanhamento }));
+  const novo = formularioCom(tela, 'publico');
+  assert.equal(novo.elements.find(el => el.name === 'observacao').value, 'Paciente chorosa, acolhida');
+  assert.equal(novo.elements.find(el => el.name === 'tipo_atendimento').value, 'BUSCA ATIVA');
+  assert.match(tela.conteudo.textContent, /Rascunho recuperado \(digitado às \d{2}:\d{2}\)/);
+  // Rascunho de outra pessoa (computador compartilhado) não aparece.
+  tela.ctx.estado.usuario.email = 'outra@exemplo.com';
+  tela.ctx.desenharAtendimento(detalhe({ status: status.acompanhamento }));
+  assert.equal(formularioCom(tela, 'publico').elements.find(el => el.name === 'observacao').value, '');
+});
+
+test('sem internet: o envio que falha fica na fila e é mandado de novo, com a mesma identificação, quando a conexão volta', async () => {
+  const tela = carregar();
+  const guardado = comArmazenamento(tela);
+  tela.ctx.desenharAtendimento(detalhe({ status: status.acompanhamento }));
+  const form = formularioCom(tela, 'publico');
+  preencher(form, 'tipo_atendimento', 'BUSCA ATIVA');
+  form.emitir('submit');
+  assert.equal(tela.pedidos[0].nome, 'apiRegistrarAtendimento');
+  const idEnvio = tela.pedidos[0].args[0].id_envio;
+  assert.match(idEnvio, /^[0-9a-f]{20}$/);
+  const fila = () => JSON.parse(guardado['gestao_psicologia_fila_envios'] || '[]');
+  assert.equal(fila().length, 1, 'Guardado antes de mandar');
+  // A internet caiu: fica na fila.
+  const semRede = new Error('NetworkError: Connection failure due to HTTP 0');
+  semRede.rede = true;
+  tela.pedidos[0].reject(semRede);
+  for (let i = 0; i < 12; i++) await Promise.resolve();
+  assert.equal(fila().length, 1);
+  assert.match(tela.avisos.at(-1).mensagem, /ficou guardado neste computador e será enviado sozinho/);
+  // A conexão voltou: manda de novo com o mesmo id_envio; confirmado, sai da fila.
+  tela.ctx.enviarFila();
+  assert.equal(tela.pedidos[1].nome, 'apiRegistrarAtendimento');
+  assert.equal(tela.pedidos[1].args[0].id_envio, idEnvio);
+  await tela.responder(1, detalhe({ status: status.acompanhamento }));
+  assert.equal(fila().length, 0);
+  assert.match(tela.avisos.at(-1).mensagem, /enviado/);
+
+  // Recusado pelo servidor (não é falta de internet): sai da fila e o que foi digitado continua na tela.
+  formularioCom(tela, 'publico');
+  const f2 = formularioCom(tela, 'publico');
+  preencher(f2, 'tipo_atendimento', 'BUSCA ATIVA');
+  preencher(f2, 'observacao', 'texto que não pode sumir');
+  f2.emitir('submit');
+  tela.pedidos[2].reject(new Error('Selecione a justificativa no registro do atendimento.'));
+  for (let i = 0; i < 12; i++) await Promise.resolve();
+  assert.equal(fila().length, 0);
+  assert.equal(f2.elements.find(el => el.name === 'observacao').value, 'texto que não pode sumir');
+  assert.match(tela.avisos.at(-1).mensagem, /Selecione a justificativa/);
+});

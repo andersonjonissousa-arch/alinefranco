@@ -24,7 +24,12 @@
     return new Promise(function (resolve, reject) {
       google.script.run
         .withSuccessHandler(function (r) { r && r.ok ? resolve(r.dados) : reject(new Error(r ? r.erro : 'Sem resposta.')); })
-        .withFailureHandler(function (e) { reject(erroDoGoogle(e)); })[nome].apply(null, args);
+        .withFailureHandler(function (e) {
+          var erro = erroDoGoogle(e);
+          // Falha antes de o servidor responder (sem internet, conexão caiu): dá para tentar de novo depois.
+          if (erro.message !== MENSAGEM_PERMISSAO) erro.rede = true;
+          reject(erro);
+        })[nome].apply(null, args);
     });
   }
 
@@ -308,6 +313,137 @@
             h('td', null, selo(p.situacao)));
         }))));
     }).catch(function (e) { avisar(e.message, 'erro'); });
+  }
+
+  // ---------- Sem internet: rascunho e fila de envio guardados neste computador ----------
+  // Ficam no navegador (localStorage), separados por usuário, e somem quando o servidor confirma a gravação.
+  // Rascunhos valem por 24 horas. Se o navegador não deixar guardar, o sistema funciona como antes.
+
+  var PREFIXO_LOCAL = 'gestao_psicologia_';
+  var CHAVE_FILA = 'fila_envios';
+
+  function lerLocal(chave) {
+    try {
+      var v = window.localStorage.getItem(PREFIXO_LOCAL + chave);
+      return v ? JSON.parse(v) : null;
+    } catch (e) { return null; }
+  }
+
+  function gravarLocal(chave, valor) {
+    try {
+      if (valor === null) window.localStorage.removeItem(PREFIXO_LOCAL + chave);
+      else window.localStorage.setItem(PREFIXO_LOCAL + chave, JSON.stringify(valor));
+      return true;
+    } catch (e) { return false; }
+  }
+
+  function emailAtual() { return String((estado.usuario || {}).email || '').toLowerCase(); }
+
+  function agoraLocal() {
+    var d = new Date();
+    var dois = function (n) { return ('0' + n).slice(-2); };
+    return d.getFullYear() + '-' + dois(d.getMonth() + 1) + '-' + dois(d.getDate()) + ' ' + dois(d.getHours()) + ':' + dois(d.getMinutes());
+  }
+
+  function lerRascunho(chave) {
+    var r = lerLocal(chave);
+    if (!r || r.email !== emailAtual() || !r.quando) return null;
+    if (Date.now() - (r.salvo_em || 0) > 24 * 60 * 60 * 1000) { gravarLocal(chave, null); return null; }
+    return r;
+  }
+
+  function guardarRascunho(chave, campos) {
+    gravarLocal(chave, { email: emailAtual(), quando: agoraLocal(), salvo_em: Date.now(), campos: campos });
+  }
+
+  function apagarRascunho(chave) { gravarLocal(chave, null); }
+
+  function novoIdEnvio() {
+    var hex = '';
+    try {
+      var bytes = new Uint8Array(10);
+      window.crypto.getRandomValues(bytes);
+      Array.prototype.forEach.call(bytes, function (b) { hex += ('0' + b.toString(16)).slice(-2); });
+    } catch (e) {
+      for (var i = 0; i < 20; i++) hex += Math.floor(Math.random() * 16).toString(16);
+    }
+    return hex;
+  }
+
+  function lerFila() { return lerLocal(CHAVE_FILA) || []; }
+
+  /** Guarda o envio antes de mandar. item.guardado diz se o navegador aceitou guardar. */
+  function enfileirar(nome, dados, rotulo) {
+    var item = { id: dados.id_envio, nome: nome, dados: dados, rotulo: rotulo, email: emailAtual(), criado: agoraLocal(), erro: '' };
+    var fila = lerFila();
+    fila.push(item);
+    item.guardado = gravarLocal(CHAVE_FILA, fila);
+    return item;
+  }
+
+  function tirarDaFila(id) {
+    gravarLocal(CHAVE_FILA, lerFila().filter(function (i) { return i.id !== id; }));
+  }
+
+  var enviandoFila = false;
+
+  /** Manda o que ficou guardado, um por vez. Para no primeiro sem internet; recusados ficam marcados na faixa. */
+  function enviarFila() {
+    if (enviandoFila) return;
+    var pendentes = lerFila().filter(function (i) { return i.email === emailAtual() && !i.erro; });
+    if (!pendentes.length) { atualizarFaixaDaFila(); return; }
+    enviandoFila = true;
+    var proximo = function (n) {
+      if (n >= pendentes.length) { enviandoFila = false; atualizarFaixaDaFila(); return; }
+      var item = pendentes[n];
+      chamar(item.nome, item.dados).then(function () {
+        tirarDaFila(item.id);
+        avisar(item.rotulo + ': enviado.', 'ok');
+        proximo(n + 1);
+      }).catch(function (e) {
+        if (e.rede) { enviandoFila = false; atualizarFaixaDaFila(); return; }
+        gravarLocal(CHAVE_FILA, lerFila().map(function (i) { return i.id === item.id ? Object.assign(i, { erro: e.message }) : i; }));
+        proximo(n + 1);
+      });
+    };
+    proximo(0);
+  }
+
+  /** Faixa no topo: o que está guardado neste computador esperando internet, e o que o servidor recusou. */
+  function atualizarFaixaDaFila() {
+    var faixa = document.getElementById('fila-envios');
+    if (!faixa || faixa.id !== 'fila-envios') return;
+    var minha = lerFila().filter(function (i) { return i.email === emailAtual(); });
+    faixa.textContent = '';
+    faixa.hidden = !minha.length;
+    if (!minha.length) return;
+    var esperando = minha.filter(function (i) { return !i.erro; });
+    if (esperando.length) {
+      var agora = h('button', { class: 'btn sec', type: 'button' }, 'Enviar agora');
+      agora.addEventListener('click', enviarFila);
+      faixa.appendChild(h('div', { class: 'linha' },
+        h('span', null, '⚠ ' + esperando.length + ' registro(s) guardado(s) neste computador esperando a internet: ' +
+          esperando.map(function (i) { return i.rotulo; }).join('; ') + '. Serão enviados sozinhos. Não limpe os dados do navegador.'), agora));
+    }
+    minha.filter(function (i) { return i.erro; }).forEach(function (i) {
+      var descartar = h('button', { class: 'link perigo', type: 'button' }, 'descartar');
+      descartar.addEventListener('click', function () {
+        if (!confirm('Descartar "' + i.rotulo + '"? Ele não foi gravado no sistema.')) return;
+        tirarDaFila(i.id);
+        atualizarFaixaDaFila();
+      });
+      faixa.appendChild(h('div', null, '✗ ' + i.rotulo + ' não foi gravado: ' + i.erro + '. Registre de novo com os dados certos e ', descartar, '.'));
+    });
+  }
+
+  /** Na abertura: manda o que sobrou da última vez e tenta de novo quando a internet voltar. */
+  function iniciarFilaDeEnvios() {
+    atualizarFaixaDaFila();
+    enviarFila();
+    try {
+      window.addEventListener('online', enviarFila);
+      window.setInterval(function () { if (lerFila().some(function (i) { return i.email === emailAtual() && !i.erro; })) enviarFila(); }, 30000);
+    } catch (e) { /* sem janela (testes) */ }
   }
 
   // ---------- Gestão: por unidade, interconsultas e prazos ----------
@@ -1194,6 +1330,7 @@
   }
 
   function desenharAtendimento(det) {
+    estado.detalheAberto = det;
     var a = det.admissao;
     var st = estado.cad.status_admissao;
     var main = tela('Atendimentos · ' + (det.paciente ? det.paciente.nome : a.paciente_nome));
@@ -1553,15 +1690,52 @@
     }
     publico.addEventListener('change', ajustar);
     ajustar();
+    // Rascunho: o que foi digitado fica guardado neste computador e volta se a página for atualizada.
+    var chaveRascunho = 'rascunho_atendimento_' + a.id;
+    var aviso = null;
+    var rascunho = lerRascunho(chaveRascunho);
+    if (rascunho) {
+      Array.prototype.forEach.call(form.elements, function (el) {
+        if (el.name && Object.prototype.hasOwnProperty.call(rascunho.campos, el.name)) el.value = rascunho.campos[el.name];
+      });
+      ajustar();
+      ajustarTipo();
+      var descartar = h('button', { class: 'link', type: 'button' }, 'descartar rascunho');
+      aviso = h('p', { class: 'aviso-rascunho' }, 'Rascunho recuperado (digitado às ' + rascunho.quando.slice(11, 16) + '). Confira e clique em Registrar. ', descartar);
+      descartar.addEventListener('click', function () { apagarRascunho(chaveRascunho); desenharAtendimento(estado.detalheAberto); });
+    }
+    var guardar = function () { guardarRascunho(chaveRascunho, lerFormulario(form)); };
+    form.addEventListener('input', guardar);
+    form.addEventListener('change', guardar);
     var botao = h('button', { class: 'btn', type: 'submit' }, 'Registrar atendimento');
     form.appendChild(botao);
     form.addEventListener('submit', function (ev) {
       ev.preventDefault();
-      var dados = Object.assign(lerFormulario(form), { admissao_id: a.id });
-      enviar(botao, chamar('apiRegistrarAtendimento', dados), 'Atendimento registrado.').then(function (det) { if (navegacao === estado.navegacao) desenharAtendimento(det); }).catch(function () {});
+      // O envio fica na fila deste computador até o servidor confirmar. Sem internet, sai sozinho quando ela voltar;
+      // o id_envio faz o servidor reconhecer um envio repetido, sem duplicar.
+      var dados = Object.assign(lerFormulario(form), { admissao_id: a.id, id_envio: novoIdEnvio() });
+      var item = enfileirar('apiRegistrarAtendimento', dados,
+        'Atendimento de ' + (a.paciente_nome || 'paciente') + ' em ' + dataBr(dados.data) + ' ' + dados.hora);
+      apagarRascunho(chaveRascunho);
+      botao.disabled = true;
+      chamar('apiRegistrarAtendimento', dados).then(function (det) {
+        tirarDaFila(item.id);
+        avisar('Atendimento registrado.', 'ok');
+        if (navegacao === estado.navegacao) desenharAtendimento(det);
+      }).catch(function (e) {
+        if (e.rede && item.guardado) {
+          avisar('Sem conexão. O atendimento ficou guardado neste computador e será enviado sozinho quando a internet voltar. ' +
+            'Não precisa registrar de novo.', 'erro');
+        } else {
+          // Recusado pelo servidor (ex.: campo faltando): sai da fila e o que foi digitado continua na tela.
+          tirarDaFila(item.id);
+          guardar();
+          avisar(e.message, 'erro');
+        }
+      }).finally(function () { botao.disabled = false; atualizarFaixaDaFila(); });
     });
     var titulo = a.status === estado.cad.status_admissao.aguardando ? 'Registrar 1º atendimento (avaliação)' : 'Registrar atendimento';
-    return h('div', { class: 'cartao' }, h('h2', null, titulo), form);
+    return h('div', { class: 'cartao' }, h('h2', null, titulo), aviso, form);
   }
 
   function botaoExcluir(api, id) {
@@ -2398,6 +2572,7 @@
     document.getElementById('usuario').textContent = dados.usuario.nome + ' · ' + dados.usuario.perfil.toLowerCase();
     if (!ehCoordenacao()) document.querySelectorAll('[data-coordenacao]').forEach(function (b) { b.remove(); });
     abrir('inicio', dados.painel);
+    iniciarFilaDeEnvios();
   }).catch(function (e) {
     var main = tela('Sem acesso');
     main.appendChild(h('div', { class: 'cartao' }, h('p', null, e.message)));

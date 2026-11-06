@@ -166,6 +166,21 @@ A limpeza dos dados de teste não apaga esse registro.
 Ao cadastrar um paciente, a tela mostra uma confirmação que fica visível ("✓ Paciente cadastrado", com nome,
 prontuário e hora) e a lista já aparece filtrada nele. Mensagens de erro ficam na tela até a pessoa clicar.
 
+## Internet ruim ou caindo
+
+O sistema é uma página do Google e precisa de internet para abrir. Com a página já aberta, o registro de
+atendimento não se perde:
+- **Rascunho:** o que é digitado no "Registrar atendimento" fica guardado neste computador e volta se a página
+  for atualizada ou fechada ("Rascunho recuperado"). Vale por 24 horas, só para a mesma conta, e some quando o
+  atendimento é gravado.
+- **Fila de envio:** se a internet cair ao clicar em Registrar, o atendimento fica guardado e uma faixa amarela no
+  topo avisa. Ele é enviado sozinho quando a conexão volta (ou no botão "Enviar agora"), inclusive depois de
+  atualizar a página, no mesmo computador e navegador. Cada envio leva uma identificação: se chegar duas vezes,
+  o servidor grava uma vez só.
+- Se o servidor recusar (um campo faltando, por exemplo), a faixa mostra o motivo; é só registrar de novo.
+- Os dados guardados ficam só no navegador daquele computador, separados por conta. Em computador compartilhado,
+  não limpe os dados do navegador enquanto a faixa amarela estiver aparecendo.
+
 ## Problemas de acesso
 
 - **"Você não tem permissão para chamar SpreadsheetApp.openById"**: a conta abriu o sistema sem dar todas as
