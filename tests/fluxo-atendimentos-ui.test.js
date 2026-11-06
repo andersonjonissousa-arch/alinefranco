@@ -1169,7 +1169,7 @@ test('sem internet: o envio que falha fica na fila e é mandado de novo, com a m
   assert.equal(tela.pedidos[1].args[0].id_envio, idEnvio);
   await tela.responder(1, detalhe({ status: status.acompanhamento }));
   assert.equal(fila().length, 0);
-  assert.match(tela.avisos.at(-1).mensagem, /enviado/);
+  assert.match(tela.avisos.at(-1).mensagem, /Enviado ao sistema: Atendimento de/);
 
   // Recusado pelo servidor (não é falta de internet): sai da fila e o que foi digitado continua na tela.
   formularioCom(tela, 'publico');
@@ -1239,4 +1239,64 @@ test('sem internet: interconsulta tem rascunho e fila; guardada, o formulário v
   assert.equal(JSON.parse(guardado['gestao_psicologia_fila_envios']).length, 1);
   assert.equal(formularioCom(tela, 'data_solicitacao').elements.find(el => el.name === 'observacoes').value, '');
   assert.match(tela.avisos.at(-1).mensagem, /Ficou guardado neste computador .*: Interconsulta de PACIENTE DE TESTE/);
+});
+
+test('sem internet: nova admissão com paciente novo vai para a fila na ordem paciente → admissão', async () => {
+  const tela = carregar();
+  const guardado = comArmazenamento(tela);
+  const fila = () => JSON.parse(guardado['gestao_psicologia_fila_envios'] || '[]');
+  const semRede = () => { const e = new Error('NetworkError'); e.rede = true; return e; };
+  tela.ctx.novaAdmissao();
+  // A busca falha sem internet: a tela oferece o cadastro de paciente novo.
+  const busca = tela.todos().find(el => el.type === 'search');
+  busca.value = '909090';
+  busca.emitir('input');
+  tela.dispararTimers();
+  tela.pedidos.at(-1).reject(semRede());
+  for (let i = 0; i < 12; i++) await Promise.resolve();
+  assert.match(tela.conteudo.textContent, /Sem internet: não dá para buscar os pacientes agora/);
+  const cadastro = formularioCom(tela, 'nome');
+  preencher(cadastro, 'nome', 'Paciente da Fila');
+  cadastro.emitir('submit');
+  const pedidoPaciente = tela.pedidos.at(-1);
+  assert.equal(pedidoPaciente.nome, 'apiSalvarPaciente');
+  pedidoPaciente.reject(semRede());
+  for (let i = 0; i < 12; i++) await Promise.resolve();
+  assert.match(tela.conteudo.textContent, /PACIENTE DA FILA.*cadastro guardado neste computador, esperando a internet/);
+  // A admissão não vai direto: entra na fila depois do paciente.
+  const form = formularioCom(tela, 'data_admissao');
+  preencher(form, 'data_admissao', '2026-10-19');
+  preencher(form, 'unidade_id', 'u1');
+  const antes = tela.pedidos.length;
+  form.emitir('submit');
+  const itens = fila();
+  assert.deepEqual(itens.map(i => i.nome), ['apiSalvarPaciente', 'apiSalvarEntradaAdmissao']);
+  assert.equal(itens[1].dados.paciente_id, pedidoPaciente.args[0].id_envio, 'A admissão aponta para a identificação do paciente da fila');
+  assert.equal(itens[1].rotulo, 'Admissão de PACIENTE DA FILA em 19/10/2026');
+  // A fila tenta mandar: primeiro o paciente.
+  assert.equal(tela.pedidos.length, antes + 1);
+  assert.equal(tela.pedidos.at(-1).nome, 'apiSalvarPaciente');
+  assert.deepEqual(tela.navegacao.at(-1), { nome: 'admissoes', arg: { nova: true } });
+  // A internet volta: paciente confirmado, depois a admissão.
+  await tela.responder(tela.pedidos.length - 1, { id: pedidoPaciente.args[0].id_envio });
+  assert.equal(tela.pedidos.at(-1).nome, 'apiSalvarEntradaAdmissao');
+  await tela.responder(tela.pedidos.length - 1, detalhe());
+  assert.equal(fila().length, 0);
+});
+
+test('sem internet: rascunho da nova admissão volta com o paciente escolhido', () => {
+  const tela = carregar();
+  comArmazenamento(tela);
+  tela.ctx.guardarRascunho('rascunho_admissao_nova', { data_admissao: '2026-10-18', unidade_id: 'u1', observacoes: 'veio da emergência',
+    paciente: { id: 'p1', nome: 'PACIENTE DE TESTE', prontuario: '123' } });
+  tela.ctx.novaAdmissao();
+  assert.match(tela.conteudo.textContent, /Rascunho recuperado/);
+  assert.match(tela.conteudo.textContent, /PACIENTE DE TESTE/);
+  const form = formularioCom(tela, 'data_admissao');
+  assert.equal(form.elements.find(el => el.name === 'observacoes').value, 'veio da emergência');
+  form.emitir('submit');
+  const pedido = tela.pedidos.at(-1);
+  assert.equal(pedido.nome, 'apiSalvarEntradaAdmissao');
+  assert.equal(pedido.args[0].paciente_id, 'p1');
+  assert.match(pedido.args[0].id_envio, /^[0-9a-f]{20}$/);
 });

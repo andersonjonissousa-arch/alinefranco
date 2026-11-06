@@ -2588,6 +2588,10 @@ function salvarCamposAdmissao_(dados, campos, exigirExistente, exigirAcompanhame
   return responderGravando(function () {
     var usuario = usuarioAtual();
     dados = dados || {};
+    // Admissão nova reenviada pela fila da tela: devolve a que já foi gravada, sem criar outra.
+    var idEnvio = dados.id ? '' : String(dados.id_envio || '').trim();
+    var jaGravada = jaGravadoPeloEnvio_('ADMISSOES', idEnvio);
+    if (jaGravada) return detalheAdmissao(jaGravada);
     if (exigirExistente && !dados.id) throw new Error('Informe a admissão.');
     var atual = dados.id ? buscarPorId('ADMISSOES', dados.id) : null;
     if (dados.id && !atual) throw new Error('Admissão não encontrada.');
@@ -2595,7 +2599,7 @@ function salvarCamposAdmissao_(dados, campos, exigirExistente, exigirAcompanhame
     if (atual && campos.indexOf('paciente_id') !== -1 && dados.paciente_id && dados.paciente_id !== atual.paciente_id) {
       throw new Error('O paciente de uma admissão existente não pode ser trocado.');
     }
-    var combinado = Object.assign({}, atual || {}, { id: atual ? atual.id : '' });
+    var combinado = Object.assign({}, atual || {}, { id: atual ? atual.id : '', id_novo: idEnvio });
     campos.forEach(function (c) {
       if (Object.prototype.hasOwnProperty.call(dados, c)) combinado[c] = dados[c];
     });
@@ -2966,7 +2970,7 @@ function salvarAdmissao_(dados, usuario, permitirJustificativaPendente) {
 
   var salvo = atual
     ? atualizar('ADMISSOES', atual.id, adm)
-    : inserir('ADMISSOES', Object.assign({ criado_por: usuario.id, status: STATUS_ADMISSAO.aguardando }, adm));
+    : inserir('ADMISSOES', Object.assign({ id: dados.id_novo || undefined, criado_por: usuario.id, status: STATUS_ADMISSAO.aguardando }, adm));
   registrarDesfecho(salvo, usuario);
   return detalheAdmissao(recalcularAdmissao(salvo.id));
 }

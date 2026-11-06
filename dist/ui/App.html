@@ -436,11 +436,18 @@
     if (!pendentes.length) { atualizarFaixaDaFila(); return; }
     enviandoFila = true;
     var proximo = function (n) {
-      if (n >= pendentes.length) { enviandoFila = false; atualizarFaixaDaFila(); return; }
+      if (n >= pendentes.length) {
+        enviandoFila = false;
+        // Algo entrou na fila enquanto enviava (ex.: a admissão de um paciente da fila): manda também.
+        var vistos = pendentes.map(function (i) { return i.id; });
+        if (lerFila().some(function (i) { return i.email === emailAtual() && !i.erro && vistos.indexOf(i.id) === -1; })) enviarFila();
+        else atualizarFaixaDaFila();
+        return;
+      }
       var item = pendentes[n];
       chamar(item.nome, item.dados).then(function () {
         tirarDaFila(item.id);
-        avisar(item.rotulo + ': enviado.', 'ok');
+        avisar('Enviado ao sistema: ' + item.rotulo + '.', 'ok');
         proximo(n + 1);
       }).catch(function (e) {
         if (e.rede) { enviandoFila = false; atualizarFaixaDaFila(); return; }
@@ -1869,7 +1876,7 @@
   }
 
   /** Escolha do paciente na admissão nova: busca e, se não achar, cadastro na hora. */
-  function seletorPaciente(aoEscolher) {
+  function seletorPaciente(aoEscolher, inicial) {
     var caixa = h('div', { class: 'cartao' }, h('h2', null, 'Paciente'));
     var busca = h('input', { type: 'search', placeholder: 'Prontuário ou nome', autocomplete: 'off' });
     var resultado = h('div');
@@ -1877,7 +1884,8 @@
     function mostrarEscolhido(p) {
       caixa.textContent = '';
       caixa.appendChild(h('h2', null, 'Paciente'));
-      caixa.appendChild(h('div', { class: 'linha' }, h('div', null, h('strong', null, p.nome), h('div', { class: 'suave' }, 'Pront. ' + p.prontuario)),
+      caixa.appendChild(h('div', { class: 'linha' }, h('div', null, h('strong', null, p.nome), h('div', { class: 'suave' }, 'Pront. ' + p.prontuario +
+        (p.pendente ? ' · cadastro guardado neste computador, esperando a internet' : ''))),
         h('button', { class: 'btn sec', type: 'button', onclick: function () { aoEscolher(null); caixa.replaceWith(seletorPaciente(aoEscolher)); } }, 'Trocar')));
       aoEscolher(p);
     }
@@ -1891,7 +1899,14 @@
       form.appendChild(botao);
       form.addEventListener('submit', function (ev) {
         ev.preventDefault();
-        enviar(botao, chamar('apiSalvarPaciente', lerFormulario(form)), 'Paciente cadastrado.').then(mostrarEscolhido).catch(function () {});
+        var dados = lerFormulario(form);
+        // Sem internet, o cadastro vai para a fila e o paciente já fica escolhido com a identificação dele.
+        enviarGuardando(botao, 'apiSalvarPaciente', dados, 'Cadastro de ' + String(dados.nome).toUpperCase() +
+          ' (prontuário ' + dados.prontuario + ')', 'Paciente cadastrado.', null)
+          .then(mostrarEscolhido)
+          .catch(function (e) {
+            if (e.guardado) mostrarEscolhido({ id: dados.id_envio, nome: String(dados.nome).toUpperCase(), prontuario: dados.prontuario, pendente: true });
+          });
       });
       return form;
     }
@@ -1909,12 +1924,20 @@
           });
           resultado.appendChild(h('p', { class: 'suave' }, lista.length ? 'Não é nenhum destes? Cadastre:' : 'Paciente não encontrado. Cadastre:'));
           resultado.appendChild(cadastrar(termo));
-        }).catch(function (e) { avisar(e.message, 'erro'); });
+        }).catch(function (e) {
+          if (!e.rede) { avisar(e.message, 'erro'); return; }
+          // Sem internet não dá para buscar; dá para cadastrar paciente novo, que vai para a fila.
+          resultado.textContent = '';
+          resultado.appendChild(h('p', { class: 'aviso-rascunho' }, 'Sem internet: não dá para buscar os pacientes agora. ' +
+            'Se o paciente já tem cadastro, espere a internet voltar. Se é a primeira internação dele, cadastre abaixo.'));
+          resultado.appendChild(cadastrar(termo));
+        });
       }, 300);
     });
     caixa.appendChild(campo('Buscar', busca));
     caixa.appendChild(resultado);
-    setTimeout(function () { busca.focus(); }, 0);
+    if (inicial) mostrarEscolhido(inicial);
+    else setTimeout(function () { busca.focus(); }, 0);
     return caixa;
   }
 
@@ -1928,7 +1951,18 @@
     var navegacao = estado.navegacao;
     var area = h('div');
     var pacienteId = a.paciente_id || '';
-    if (!a.id) area.appendChild(seletorPaciente(function (p) { pacienteId = p ? p.id : ''; }));
+    // Admissão nova: rascunho (com o paciente escolhido) e fila de envio, como no atendimento.
+    var CHAVE_RASCUNHO = 'rascunho_admissao_nova';
+    var rascunho = a.id ? null : lerRascunho(CHAVE_RASCUNHO);
+    var paciente = rascunho && rascunho.campos.paciente ? rascunho.campos.paciente : null;
+    var guardarAdmissao = function () {};
+    if (!a.id) {
+      area.appendChild(seletorPaciente(function (p) {
+        paciente = p;
+        pacienteId = p ? p.id : '';
+        guardarAdmissao();
+      }, paciente));
+    }
     var v = function (k) { return a[k] || ''; };
     var data = function (nome, rotulo, obrig) {
       return campo(rotulo, h('input', { name: nome, type: 'date', value: v(nome), max: estado.cad.hoje, required: obrig }));
@@ -1946,14 +1980,49 @@
         campo('Observações', h('textarea', { name: 'observacoes', rows: 3 }, v('observacoes')))));
     var botao = h('button', { class: 'btn', type: 'submit' }, a.id ? 'Salvar admissão' : 'Registrar admissão');
     form.appendChild(botao);
+    var aviso = null;
+    if (!a.id) {
+      guardarAdmissao = function () { guardarRascunho(CHAVE_RASCUNHO, Object.assign(lerFormulario(form), { paciente: paciente })); };
+      if (rascunho) {
+        Array.prototype.forEach.call(form.elements, function (el) {
+          if (el.name && Object.prototype.hasOwnProperty.call(rascunho.campos, el.name)) el.value = rascunho.campos[el.name];
+        });
+        var descartar = h('button', { class: 'link', type: 'button' }, 'descartar rascunho');
+        descartar.addEventListener('click', function () { apagarRascunho(CHAVE_RASCUNHO); abrir('admissoes', { nova: true }); });
+        aviso = h('p', { class: 'aviso-rascunho' }, 'Rascunho recuperado (digitado às ' + rascunho.quando.slice(11, 16) + '). Confira e clique em Registrar. ', descartar);
+      }
+      form.addEventListener('input', guardarAdmissao);
+      form.addEventListener('change', guardarAdmissao);
+    }
     form.addEventListener('submit', function (ev) {
       ev.preventDefault();
       if (!pacienteId) { avisar('Escolha ou cadastre o paciente.', 'erro'); return; }
       var dados = Object.assign(lerFormulario(form), { id: a.id || '', paciente_id: pacienteId });
-      enviar(botao, chamar('apiSalvarEntradaAdmissao', dados), 'Admissão salva.')
-        .then(function (det) { if (navegacao === estado.navegacao) aoSalvar(det); }).catch(function () {});
+      if (a.id) {
+        enviar(botao, chamar('apiSalvarEntradaAdmissao', dados), 'Admissão salva.')
+          .then(function (det) { if (navegacao === estado.navegacao) aoSalvar(det); }).catch(function () {});
+        return;
+      }
+      var rotulo = 'Admissão de ' + ((paciente && paciente.nome) || 'paciente') + ' em ' + dataBr(dados.data_admissao);
+      // Paciente cadastrado sem internet, ainda na fila: a admissão entra na fila logo depois dele, na mesma ordem.
+      if (lerFila().some(function (i) { return i.id === pacienteId; })) {
+        dados.id_envio = novoIdEnvio();
+        enfileirar('apiSalvarEntradaAdmissao', dados, rotulo);
+        apagarRascunho(CHAVE_RASCUNHO);
+        avisar('Admissão guardada neste computador. Ela será enviada logo depois do cadastro do paciente, quando a internet voltar.', 'erro');
+        enviarFila();
+        if (navegacao === estado.navegacao) abrir('admissoes', { nova: true });
+        return;
+      }
+      enviarGuardando(botao, 'apiSalvarEntradaAdmissao', dados, rotulo, 'Admissão salva.', CHAVE_RASCUNHO)
+        .then(function (det) { if (navegacao === estado.navegacao) aoSalvar(det); })
+        .catch(function (e) {
+          // Guardada na fila: a tela volta vazia, para ninguém registrar de novo; recusada: o que foi digitado continua.
+          if (e.guardado) { if (navegacao === estado.navegacao) abrir('admissoes', { nova: true }); return; }
+          guardarAdmissao();
+        });
     });
-    area.appendChild(a.id ? form : h('div', { class: 'cartao' }, form));
+    area.appendChild(a.id ? form : h('div', { class: 'cartao' }, aviso, form));
     return area;
   }
 

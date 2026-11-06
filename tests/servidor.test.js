@@ -2337,3 +2337,30 @@ test('sem internet: cadastro de paciente e interconsulta reenviados com o mesmo 
   assert.equal(ctx.listar('INTERCONSULTAS').filter(i => i.admissao_id === adm.id).length, 1, 'A solicitação não é duplicada');
   assert.equal(ctx.buscarPorId('INTERCONSULTAS', '0123456789abcdef0123').prioridade_solicitacao, 'ALTA');
 });
+
+test('sem internet: admissão nova reenviada não duplica; paciente da fila e admissão chegam em ordem e ficam ligados', () => {
+  const { ctx, unidade } = sistemaComAdmissao();
+  // Na fila: primeiro o cadastro do paciente (id gerado na tela), depois a admissão que já aponta para ele.
+  const paciente = { prontuario: '909090', nome: 'Paciente Da Fila', id_envio: '1111aaaa2222bbbb3333' };
+  const admissao = { paciente_id: '1111aaaa2222bbbb3333', data_admissao: '2026-10-19', unidade_id: unidade.id, observacoes: 'sem internet',
+    id_envio: '4444cccc5555dddd6666' };
+  ctx.novaExecucao();
+  assert.equal(ctx.apiSalvarPaciente(paciente).ok, true);
+  ctx.novaExecucao();
+  const a1 = ctx.apiSalvarEntradaAdmissao(admissao);
+  assert.equal(a1.ok, true, a1.erro);
+  assert.equal(a1.dados.admissao.id, '4444cccc5555dddd6666');
+  assert.equal(a1.dados.paciente.nome, 'PACIENTE DA FILA');
+  // O reenvio devolve a mesma admissão (sem acusar "já existe admissão aberta").
+  ctx.novaExecucao();
+  const a2 = ctx.apiSalvarEntradaAdmissao(admissao);
+  assert.equal(a2.ok, true, a2.erro);
+  assert.equal(a2.dados.admissao.id, a1.dados.admissao.id);
+  ctx.novaExecucao();
+  assert.equal(ctx.listar('ADMISSOES').filter(a => a.paciente_id === '1111aaaa2222bbbb3333').length, 1);
+  // Se a admissão chegasse antes do paciente, seria recusada, sem gravar nada.
+  ctx.novaExecucao();
+  const fora = ctx.apiSalvarEntradaAdmissao({ ...admissao, paciente_id: '9999eeee9999eeee9999', id_envio: '7777ffff7777ffff7777' });
+  assert.equal(fora.ok, false);
+  assert.match(fora.erro, /Paciente não encontrado/);
+});
