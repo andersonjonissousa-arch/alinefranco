@@ -4,7 +4,7 @@
  */
 
 var APP = {
-  nome: 'Gestão da Psicologia',
+  nome: 'Gestão da Psicologia · HGWA',
   propDbId: 'DB_ID',
   fusoHorario: 'America/Fortaleza',
   inicioIndicadorPrimeiro: '2026-11-03'

@@ -7,7 +7,7 @@
  */
 
 var APP = {
-  nome: 'Gestão da Psicologia',
+  nome: 'Gestão da Psicologia · HGWA',
   propDbId: 'DB_ID',
   fusoHorario: 'America/Fortaleza',
   inicioIndicadorPrimeiro: '2026-11-03'
@@ -2085,7 +2085,7 @@ function paginaDeAutorizacao_(url) {
     '.c{max-width:560px;margin:48px auto;padding:24px;background:#fff;border:1px solid #c9d8ea;border-radius:8px}' +
     'h1{font-size:20px;margin:0 0 12px}a.b{display:inline-block;margin-top:12px;padding:10px 16px;border-radius:6px;' +
     'background:#2f6f9f;color:#fff;text-decoration:none}li{margin:4px 0}</style></head><body><div class="c">' +
-    '<h1>Gestão da Psicologia: falta autorizar o acesso</h1>' +
+    '<h1>Gestão da Psicologia do HGWA: falta autorizar o acesso</h1>' +
     '<p>Sua conta Google ainda não deu ao sistema todas as permissões de que ele precisa para ler e gravar a planilha.</p>' +
     '<ol><li>Clique no botão abaixo.</li><li>Escolha a conta cadastrada no sistema.</li>' +
     '<li>Na tela do Google, marque <strong>todas</strong> as opções (ou "Selecionar tudo") e clique em <strong>Continuar</strong>.</li>' +

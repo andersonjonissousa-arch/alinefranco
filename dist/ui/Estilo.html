@@ -26,19 +26,21 @@
     background: var(--fundo);
   }
   .topo {
-    display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px;
+    display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px;
     padding: 10px 16px; background: var(--azul); border-bottom: 1px solid #b4cdf2;
     position: sticky; top: 0; z-index: 5;
   }
   .marca { font-weight: 700; color: var(--primaria-escura); }
+  .marca { white-space: nowrap; }
+  .marca-hospital { display: inline-block; margin-left: 4px; padding: 0 7px; border-radius: 999px; background: var(--rosa); font-size: 13px; letter-spacing: .5px; }
   .menu { display: flex; flex-wrap: wrap; gap: 4px; flex: 1; }
   .menu button {
-    border: 0; background: none; padding: 8px 12px; border-radius: var(--raio);
+    border: 0; background: none; padding: 8px 8px; border-radius: var(--raio);
     color: #3e4c59; cursor: pointer; font: inherit;
   }
   .menu button:hover { background: var(--azul-claro); }
   .menu button.ativo { background: var(--rosa); color: var(--primaria-escura); font-weight: 600; }
-  .usuario { color: #3e4c59; font-size: 13px; }
+  .usuario { color: #3e4c59; font-size: 12px; white-space: nowrap; }
 
   .conteudo { max-width: 1100px; margin: 0 auto; padding: 16px; }
   h1 { font-size: 22px; margin: 4px 0 16px; }

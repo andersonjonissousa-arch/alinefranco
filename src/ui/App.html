@@ -279,6 +279,7 @@
   function telaInicio(painelInicial) {
     var primeiro = estado.usuario.nome.split(' ')[0].toLowerCase().replace(/^./, function (c) { return c.toUpperCase(); });
     var main = tela('Olá, ' + primeiro);
+    main.appendChild(h('p', { class: 'suave' }, 'Gestão da Psicologia do HGWA'));
     var resumo = h('div', { class: 'indicadores' }, h('p', { class: 'carregando' }, 'Carregando…'));
     var lista = h('div', { class: 'cartao tabela-rolagem' });
     main.appendChild(resumo);
