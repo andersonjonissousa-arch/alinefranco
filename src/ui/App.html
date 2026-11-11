@@ -1764,7 +1764,7 @@
       campo('Tipo da solicitação', tipo), campoInterconsulta, campoDemanda,
       campo('Justificativa do acompanhamento / próximo retorno', justificativa),
       campo('Profissional', seletor('profissional_id', opcoesProfissionais(), estado.usuario.id, false)),
-      campo('Observação', h('input', { name: 'observacao', placeholder: 'Opcional' })));
+      campo('Observação', h('input', { name: 'observacao', placeholder: 'Descreva o atendimento', required: true })));
     function ajustar() {
       quantos.hidden = publico.value === 'PACIENTE';
     }

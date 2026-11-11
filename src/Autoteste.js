@@ -53,7 +53,7 @@ function testarSistema() {
     item = daAdmissao(dados(apiInterconsultas({ situacao: 'PENDENTES' }), 'Gestão: interconsultas pendentes'));
     verificar(item && item.prazos.interconsulta.estado === 'PENDENTE', 'Gestão: interconsulta aparece aguardando resposta');
 
-    det = dados(apiRegistrarAtendimento({ tipo_atendimento: 'BUSCA ATIVA', admissao_id: adm.id, data: hojeIso, hora: horaAgora, publico: 'PACIENTE',
+    det = dados(apiRegistrarAtendimento({ observacao: 'Teste', tipo_atendimento: 'BUSCA ATIVA', admissao_id: adm.id, data: hojeIso, hora: horaAgora, publico: 'PACIENTE',
       descricao_demanda: 'RISCO DE SUICÍDIO' }), 'Atendimento: registro ao paciente');
     adm = det && det.admissao;
     verificar(adm && adm.descricao_demanda === 'RISCO DE SUICÍDIO', 'Descrição da demanda gravada no 1º atendimento (v27)', adm && adm.descricao_demanda);
@@ -66,12 +66,12 @@ function testarSistema() {
     verificar(item && item.prazos.retorno.estado === 'PENDENTE' && item.prazos.retorno.prazo === adm.proximo_prazo,
       'Gestão: próximo retorno pela matriz de seguimento');
 
-    det = dados(apiRegistrarAtendimento({ tipo_atendimento: 'BUSCA ATIVA', justificativa_id: justificativa.id,
+    det = dados(apiRegistrarAtendimento({ observacao: 'Teste', tipo_atendimento: 'BUSCA ATIVA', justificativa_id: justificativa.id,
       admissao_id: adm.id, data: hojeIso, hora: horaAgora, publico: 'FAMÍLIA', quantidade: 2
     }), 'Atendimento: registro à família (2 pessoas)');
     verificar(det && det.atendimentos.some(function (a) { return a.publico === 'FAMÍLIA' && a.conta_prazo === 'SIM'; }),
       'Atendimento à família conta para o prazo (v27)');
-    det = dados(apiRegistrarAtendimento({ tipo_atendimento: 'SEGUIMENTO PSICOLÓGICO', justificativa_id: justificativa.id,
+    det = dados(apiRegistrarAtendimento({ observacao: 'Teste', tipo_atendimento: 'SEGUIMENTO PSICOLÓGICO', justificativa_id: justificativa.id,
       admissao_id: adm.id, data: hojeIso, hora: horaAgora, publico: 'PACIENTE E FAMÍLIA', quantidade: 1
     }), 'Atendimento: registro ao paciente e à família');
     verificar(det && det.atendimentos.some(function (a) { return a.publico === 'PACIENTE E FAMÍLIA' && a.conta_prazo === 'SIM'; }),

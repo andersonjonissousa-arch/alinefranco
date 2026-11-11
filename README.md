@@ -148,6 +148,8 @@ dist/               o mesmo código em 4 arquivos, para instalar copiando e cola
 tests/              testes com Node, com os serviços do Google simulados
 ```
 
+A **observação** do registro de atendimento é obrigatória (na tela e no servidor).
+
 ## Registro de alterações
 
 Tudo o que é incluído, alterado ou excluído pelo sistema fica registrado na aba **AUDITORIA**, gravada junto com

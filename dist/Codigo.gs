@@ -3108,6 +3108,7 @@ function apiRegistrarAtendimento(dados) {
     if (adm.status === STATUS_ADMISSAO.aguardando && !descricaoDemanda && !adm.descricao_demanda) {
       throw new Error('Informe a descrição da demanda no 1º atendimento.');
     }
+    if (!String(dados.observacao || '').trim()) throw new Error('Preencha a observação do atendimento.');
     var atendimento = {
       id: idEnvio || undefined,
       admissao_id: adm.id,
@@ -4212,7 +4213,7 @@ function testarSistema() {
     item = daAdmissao(dados(apiInterconsultas({ situacao: 'PENDENTES' }), 'Gestão: interconsultas pendentes'));
     verificar(item && item.prazos.interconsulta.estado === 'PENDENTE', 'Gestão: interconsulta aparece aguardando resposta');
 
-    det = dados(apiRegistrarAtendimento({ tipo_atendimento: 'BUSCA ATIVA', admissao_id: adm.id, data: hojeIso, hora: horaAgora, publico: 'PACIENTE',
+    det = dados(apiRegistrarAtendimento({ observacao: 'Teste', tipo_atendimento: 'BUSCA ATIVA', admissao_id: adm.id, data: hojeIso, hora: horaAgora, publico: 'PACIENTE',
       descricao_demanda: 'RISCO DE SUICÍDIO' }), 'Atendimento: registro ao paciente');
     adm = det && det.admissao;
     verificar(adm && adm.descricao_demanda === 'RISCO DE SUICÍDIO', 'Descrição da demanda gravada no 1º atendimento (v27)', adm && adm.descricao_demanda);
@@ -4225,12 +4226,12 @@ function testarSistema() {
     verificar(item && item.prazos.retorno.estado === 'PENDENTE' && item.prazos.retorno.prazo === adm.proximo_prazo,
       'Gestão: próximo retorno pela matriz de seguimento');
 
-    det = dados(apiRegistrarAtendimento({ tipo_atendimento: 'BUSCA ATIVA', justificativa_id: justificativa.id,
+    det = dados(apiRegistrarAtendimento({ observacao: 'Teste', tipo_atendimento: 'BUSCA ATIVA', justificativa_id: justificativa.id,
       admissao_id: adm.id, data: hojeIso, hora: horaAgora, publico: 'FAMÍLIA', quantidade: 2
     }), 'Atendimento: registro à família (2 pessoas)');
     verificar(det && det.atendimentos.some(function (a) { return a.publico === 'FAMÍLIA' && a.conta_prazo === 'SIM'; }),
       'Atendimento à família conta para o prazo (v27)');
-    det = dados(apiRegistrarAtendimento({ tipo_atendimento: 'SEGUIMENTO PSICOLÓGICO', justificativa_id: justificativa.id,
+    det = dados(apiRegistrarAtendimento({ observacao: 'Teste', tipo_atendimento: 'SEGUIMENTO PSICOLÓGICO', justificativa_id: justificativa.id,
       admissao_id: adm.id, data: hojeIso, hora: horaAgora, publico: 'PACIENTE E FAMÍLIA', quantidade: 1
     }), 'Atendimento: registro ao paciente e à família');
     verificar(det && det.atendimentos.some(function (a) { return a.publico === 'PACIENTE E FAMÍLIA' && a.conta_prazo === 'SIM'; }),
@@ -4380,7 +4381,7 @@ function medirDesempenho() {
     var n = 0;
     comparar('Registrar atendimento', function () {
       n++;
-      return apiRegistrarAtendimento({ tipo_atendimento: 'BUSCA ATIVA', descricao_demanda: 'HUMOR DEPRIMIDO OU ANSIOSO', admissao_id: adm.id, data: adicionarDias(hojeIso, -1), hora: '08:' + (n < 10 ? '0' : '') + n, publico: 'PACIENTE' });
+      return apiRegistrarAtendimento({ observacao: 'Teste', tipo_atendimento: 'BUSCA ATIVA', descricao_demanda: 'HUMOR DEPRIMIDO OU ANSIOSO', admissao_id: adm.id, data: adicionarDias(hojeIso, -1), hora: '08:' + (n < 10 ? '0' : '') + n, publico: 'PACIENTE' });
     });
     comparar('Salvar admissão', function () {
       n++;

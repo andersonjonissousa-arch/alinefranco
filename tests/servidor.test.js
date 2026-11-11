@@ -201,7 +201,7 @@ function sistemaComAdmissao() {
     // v27: o 1º atendimento exige a descrição da demanda; o teste informa uma quando a admissão ainda não tem.
     const semDescricao = !(ctx.buscarPorId('ADMISSOES', adm.id) || {}).descricao_demanda;
     ctx.novaExecucao();
-    const r = ctx.apiRegistrarAtendimento({ admissao_id: adm.id, data: '2026-10-14', hora: '10:00', publico: 'PACIENTE',
+    const r = ctx.apiRegistrarAtendimento({ observacao: 'Observação de teste', admissao_id: adm.id, data: '2026-10-14', hora: '10:00', publico: 'PACIENTE',
       tipo_atendimento: extra && extra.interconsulta_id ? 'INTERCONSULTA' : 'BUSCA ATIVA',
       ...(semDescricao ? { descricao_demanda: 'HUMOR DEPRIMIDO OU ANSIOSO' } : {}), ...extra });
     ctx.novaExecucao();
@@ -348,7 +348,7 @@ test('fluxo separado: retomada mantém ID e nova internação mantém os histór
   assert.equal(segunda.dados.atendimentos.length, 0);
   assert.equal(segunda.dados.desfechos.length, 0);
   ctx.novaExecucao();
-  const registro = ctx.apiRegistrarAtendimento({ admissao_id: segunda.dados.admissao.id, data: '2026-10-20', hora: '10:00', publico: 'PACIENTE', tipo_atendimento: 'BUSCA ATIVA',
+  const registro = ctx.apiRegistrarAtendimento({ observacao: 'Observação de teste', admissao_id: segunda.dados.admissao.id, data: '2026-10-20', hora: '10:00', publico: 'PACIENTE', tipo_atendimento: 'BUSCA ATIVA',
     descricao_demanda: 'HUMOR DEPRIMIDO OU ANSIOSO', justificativa_id: j.id });
   assert.equal(registro.ok, true, registro.erro);
   assert.equal(registro.dados.atendimentos.length, 1);
@@ -1532,7 +1532,7 @@ test('gravação pela API: registrar atendimento lê uma vez, grava uma linha no
   const { ctx, admitir } = sistemaComAdmissao();
   const adm = admitir().dados.admissao;
   const { r, cont } = contarChamadas(ctx, () =>
-    ctx.apiRegistrarAtendimento({ tipo_atendimento: 'BUSCA ATIVA', admissao_id: adm.id, data: '2026-10-14', hora: '10:00', publico: 'PACIENTE', descricao_demanda: 'HUMOR DEPRIMIDO OU ANSIOSO' }));
+    ctx.apiRegistrarAtendimento({ observacao: 'Observação de teste', tipo_atendimento: 'BUSCA ATIVA', admissao_id: adm.id, data: '2026-10-14', hora: '10:00', publico: 'PACIENTE', descricao_demanda: 'HUMOR DEPRIMIDO OU ANSIOSO' }));
   assert.equal(r.ok, true, r.erro);
   // Três abas com linhas novas: o atendimento, a descrição da demanda do 1º atendimento e o registro de alterações.
   assert.deepEqual({ ...cont }, { batchGet: 1, append: 3, batchUpdate: 1, trava: 1 });
@@ -1553,7 +1553,7 @@ test('gravação pela API: o que fica na memória depois de gravar e excluir é 
     assert.equal(naMemoria, tudo());
     return r.dados;
   };
-  const det = verificar(() => ctx.apiRegistrarAtendimento({ tipo_atendimento: 'BUSCA ATIVA', admissao_id: adm.id, data: '2026-10-15', hora: '09:00', publico: 'PACIENTE' }));
+  const det = verificar(() => ctx.apiRegistrarAtendimento({ observacao: 'Observação de teste', tipo_atendimento: 'BUSCA ATIVA', admissao_id: adm.id, data: '2026-10-15', hora: '09:00', publico: 'PACIENTE' }));
   verificar(() => ctx.apiRegistrarAtividade({ admissao_id: adm.id, data: '2026-10-15', tipo: 'DISCUSSÃO DE CASO', quantidade: 1 }));
   const primeiro = det.atendimentos.find((a) => a.data === '2026-10-13');
   const depois = verificar(() => ctx.apiExcluirAtendimento(primeiro.id));
@@ -1660,12 +1660,12 @@ test('v27: descrição da demanda é exigida no 1º atendimento e corrigível de
   assert.equal(sem.ok, false);
   assert.match(sem.erro, /descrição da demanda/);
   ctx.novaExecucao();
-  const primeiro = ctx.apiRegistrarAtendimento({ ...base, descricao_demanda: 'HUMOR DEPRIMIDO OU ANSIOSO' });
+  const primeiro = ctx.apiRegistrarAtendimento({ observacao: 'Observação de teste', ...base, descricao_demanda: 'HUMOR DEPRIMIDO OU ANSIOSO' });
   assert.equal(primeiro.ok, true, primeiro.erro);
   assert.equal(primeiro.dados.admissao.descricao_demanda, 'HUMOR DEPRIMIDO OU ANSIOSO');
   // Os retornos não pedem a descrição de novo.
   ctx.novaExecucao();
-  assert.equal(ctx.apiRegistrarAtendimento({ ...base, data: '2026-10-16' }).ok, true);
+  assert.equal(ctx.apiRegistrarAtendimento({ observacao: 'Observação de teste', ...base, data: '2026-10-16' }).ok, true);
 
   ctx.novaExecucao();
   assert.equal(ctx.apiSalvarDescricaoDemanda({ id: adm.id, descricao_demanda: '' }).ok, false);
@@ -2284,7 +2284,7 @@ test('sem internet: o mesmo envio de atendimento (id_envio) chegando duas vezes 
   })();
   const j = ctx.listar('JUSTIFICATIVAS').find(x => x.nome === 'POUCOS RECURSOS DE ENFRENTAMENTO');
   const envio = { admissao_id: adm.id, data: '2026-10-14', hora: '10:00', publico: 'PACIENTE', tipo_atendimento: 'BUSCA ATIVA',
-    justificativa_id: j.id, descricao_demanda: 'HUMOR DEPRIMIDO OU ANSIOSO', id_envio: 'a1b2c3d4e5f60718293a' };
+    justificativa_id: j.id, descricao_demanda: 'HUMOR DEPRIMIDO OU ANSIOSO', observacao: 'Paciente acolhida', id_envio: 'a1b2c3d4e5f60718293a' };
   ctx.novaExecucao();
   const r1 = ctx.apiRegistrarAtendimento(envio);
   assert.equal(r1.ok, true, r1.erro);
@@ -2296,12 +2296,12 @@ test('sem internet: o mesmo envio de atendimento (id_envio) chegando duas vezes 
   assert.equal(ctx.listar('ATENDIMENTOS').length, 1, 'O reenvio não duplica');
   assert.equal(ctx.listar('DESCRICOES_DEMANDA').filter(d => !d.excluido_em).length, 1);
   ctx.novaExecucao();
-  assert.match(ctx.apiRegistrarAtendimento({ ...envio, admissao_id: outra.id }).erro, /já usada em outra internação/);
+  assert.match(ctx.apiRegistrarAtendimento({ observacao: 'Observação de teste', ...envio, admissao_id: outra.id }).erro, /já usada em outra internação/);
   ctx.novaExecucao();
-  assert.match(ctx.apiRegistrarAtendimento({ ...envio, id_envio: 'x; drop' }).erro, /inválida/);
+  assert.match(ctx.apiRegistrarAtendimento({ observacao: 'Observação de teste', ...envio, id_envio: 'x; drop' }).erro, /inválida/);
   // Sem id_envio, continua como antes.
   ctx.novaExecucao();
-  assert.equal(ctx.apiRegistrarAtendimento({ ...envio, id_envio: '', hora: '11:00' }).ok, true);
+  assert.equal(ctx.apiRegistrarAtendimento({ observacao: 'Observação de teste', ...envio, id_envio: '', hora: '11:00' }).ok, true);
   ctx.novaExecucao();
   assert.equal(ctx.listar('ATENDIMENTOS').length, 2);
 });
@@ -2363,4 +2363,21 @@ test('sem internet: admissão nova reenviada não duplica; paciente da fila e ad
   const fora = ctx.apiSalvarEntradaAdmissao({ ...admissao, paciente_id: '9999eeee9999eeee9999', id_envio: '7777ffff7777ffff7777' });
   assert.equal(fora.ok, false);
   assert.match(fora.erro, /Paciente não encontrado/);
+});
+
+test('atendimento: a observação é obrigatória', () => {
+  const { ctx, admitir, j } = sistemaComAdmissao();
+  const adm = admitir().dados.admissao;
+  const base = { admissao_id: adm.id, data: '2026-10-14', hora: '10:00', publico: 'PACIENTE', tipo_atendimento: 'BUSCA ATIVA',
+    justificativa_id: j.id, descricao_demanda: 'HUMOR DEPRIMIDO OU ANSIOSO' };
+  for (const observacao of [undefined, '', '   ']) {
+    ctx.novaExecucao();
+    const r = ctx.apiRegistrarAtendimento({ ...base, observacao });
+    assert.equal(r.ok, false);
+    assert.match(r.erro, /Preencha a observação do atendimento/);
+  }
+  ctx.novaExecucao();
+  assert.equal(ctx.listar('ATENDIMENTOS').length, 0);
+  ctx.novaExecucao();
+  assert.equal(ctx.apiRegistrarAtendimento({ ...base, observacao: 'Paciente acolhida' }).ok, true);
 });

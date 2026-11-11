@@ -538,6 +538,7 @@ function apiRegistrarAtendimento(dados) {
     if (adm.status === STATUS_ADMISSAO.aguardando && !descricaoDemanda && !adm.descricao_demanda) {
       throw new Error('Informe a descrição da demanda no 1º atendimento.');
     }
+    if (!String(dados.observacao || '').trim()) throw new Error('Preencha a observação do atendimento.');
     var atendimento = {
       id: idEnvio || undefined,
       admissao_id: adm.id,

@@ -1300,3 +1300,10 @@ test('sem internet: rascunho da nova admissão volta com o paciente escolhido', 
   assert.equal(pedido.args[0].paciente_id, 'p1');
   assert.match(pedido.args[0].id_envio, /^[0-9a-f]{20}$/);
 });
+
+test('registro de atendimento: o campo observação é obrigatório', () => {
+  const tela = carregar();
+  tela.ctx.desenharAtendimento(detalhe({ status: status.acompanhamento }));
+  const campo = formularioCom(tela, 'publico').elements.find(el => el.name === 'observacao');
+  assert.ok(campo.required !== undefined && campo.required !== false, 'observação sem required');
+});
