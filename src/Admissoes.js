@@ -56,6 +56,25 @@ function apiSalvarDesfechoAdmissao(dados) {
   return salvarCamposAdmissao_(dados, ['desfecho_id', 'data_desfecho'], true, false);
 }
 
+/**
+ * Desfaz um desfecho lançado por engano (por exemplo, alta no paciente errado): a internação volta como estava
+ * antes e o lançamento do desfecho sai do histórico. Quem lançou ou a coordenação. Fica no registro de alterações.
+ */
+function apiDesfazerDesfecho(id) {
+  var permissao = responder(function () {
+    var usuario = usuarioAtual();
+    var adm = buscarPorId('ADMISSOES', id);
+    if (!adm) throw new Error('Admissão não encontrada.');
+    if (!adm.desfecho_id) throw new Error('Esta internação não tem desfecho para desfazer.');
+    var vigente = desfechoVigente(adm.id);
+    if (vigente) exigirAutorOuCoordenacao(vigente, usuario);
+    else exigirCoordenacao();
+    return true;
+  });
+  if (!permissao.ok) return permissao;
+  return salvarCamposAdmissao_({ id: id, desfecho_id: '', data_desfecho: '' }, ['desfecho_id', 'data_desfecho'], true, false);
+}
+
 function mapaPorId(nome) {
   var mapa = {};
   listar(nome).forEach(function (x) { mapa[x.id] = x; });

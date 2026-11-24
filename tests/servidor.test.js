@@ -29,7 +29,7 @@ test('configurar cria as abas, semeia dados e pode rodar de novo sem duplicar', 
   assert.deepEqual(nomes.sort(), Object.keys(ctx.TABELAS).sort());
   assert.equal(ctx.listar('SETORES').length, ctx.SETORES_INICIAIS.length);
   assert.equal(ctx.listar('UNIDADES').length, 18);
-  assert.equal(ctx.listar('DESFECHOS').length, 6);
+  assert.equal(ctx.listar('DESFECHOS').length, 8);
   assert.equal(ctx.listar('PARAMETROS')[0].valor, '3');
   assert.equal(ctx.listar('JUSTIFICATIVAS').length, ctx.JUSTIFICATIVAS_INICIAIS.length);
   assert.equal(ctx.listar('FERIADOS').length, ctx.FERIADOS_NACIONAIS.length);
@@ -2380,4 +2380,62 @@ test('atendimento: a observação é obrigatória', () => {
   assert.equal(ctx.listar('ATENDIMENTOS').length, 0);
   ctx.novaExecucao();
   assert.equal(ctx.apiRegistrarAtendimento({ ...base, observacao: 'Paciente acolhida' }).ok, true);
+});
+
+test('desfechos: evasão hospitalar e alta a pedido entram no banco novo e em bancos antigos, sem duplicar', () => {
+  const { ctx } = carregarSistema();
+  ctx.configurar();
+  ctx.novaExecucao();
+  const nomes = () => { ctx.novaExecucao(); return ctx.listar('DESFECHOS').map(d => d.nome); };
+  assert.ok(nomes().includes('EVASÃO HOSPITALAR') && nomes().includes('ALTA A PEDIDO'));
+  assert.equal(ctx.listar('DESFECHOS').find(d => d.nome === 'ALTA A PEDIDO').encerra_admissao, 'SIM');
+  // Banco de antes: só os seis antigos.
+  ctx.comTrava(() => ['EVASÃO HOSPITALAR', 'ALTA A PEDIDO'].forEach(n => ctx.excluir('DESFECHOS', ctx.listar('DESFECHOS').find(d => d.nome === n).id)));
+  assert.equal(nomes().length, 6);
+  ctx.novaExecucao();
+  ctx.configurar();
+  assert.equal(nomes().length, 8);
+  ctx.novaExecucao();
+  ctx.configurar();
+  assert.equal(nomes().length, 8, 'Rodar de novo não duplica');
+});
+
+test('desfazer desfecho: alta lançada no paciente errado volta ao acompanhamento; só o autor ou a coordenação', () => {
+  const sis = sistemaComAdmissao();
+  const { ctx, google, admitir, atender, desfecho } = sis;
+  const adm = admitir().dados.admissao;
+  atender(adm, { data: '2026-10-14' });
+  ctx.novaExecucao();
+  assert.equal(ctx.apiDesfazerDesfecho(adm.id).erro, 'Esta internação não tem desfecho para desfazer.');
+  ctx.novaExecucao();
+  const alta = ctx.apiSalvarDesfechoAdmissao({ id: adm.id, desfecho_id: desfecho('ALTA').id, data_desfecho: '2026-10-16' });
+  assert.equal(alta.dados.admissao.status, 'ENCERRADA');
+  ctx.novaExecucao();
+  const r = ctx.apiDesfazerDesfecho(adm.id);
+  assert.equal(r.ok, true, r.erro);
+  assert.equal(r.dados.admissao.status, 'EM ACOMPANHAMENTO');
+  assert.equal(r.dados.admissao.desfecho_id, '');
+  assert.equal(r.dados.desfechos.length, 0, 'O lançamento do desfecho sai do histórico');
+  assert.equal(r.dados.atendimentos.length, 1, 'Atendimentos e demais registros ficam');
+  ctx.novaExecucao();
+  const exclusoes = ctx.listar('AUDITORIA').filter(a => a.acao === 'EXCLUSÃO' && a.tabela === 'DESFECHOS_REGISTRADOS');
+  assert.equal(exclusoes.length, 1, 'Fica no registro de alterações');
+  // Outra profissional (não é autora nem coordenação) não desfaz.
+  ctx.novaExecucao();
+  ctx.apiSalvarDesfechoAdmissao({ id: adm.id, desfecho_id: desfecho('ALTA').id, data_desfecho: '2026-10-16' });
+  ctx.novaExecucao();
+  ctx.comTrava(() => ctx.inserir('PROFISSIONAIS', { nome: 'OUTRA', email: 'outra@exemplo.com', categoria: 'PROFISSIONAL DA EMPRESA', perfil: 'PROFISSIONAL', ativo: 'SIM' }));
+  google.sessao.email = 'outra@exemplo.com';
+  ctx.novaExecucao();
+  assert.match(ctx.apiDesfazerDesfecho(adm.id).erro, /Só quem registrou ou a coordenação/);
+  google.sessao.email = 'coordenacao@exemplo.com';
+  ctx.novaExecucao();
+  assert.equal(ctx.apiDesfazerDesfecho(adm.id).ok, true);
+  // Se já há outra internação aberta do paciente, não reabre a antiga (a regra de sempre).
+  ctx.novaExecucao();
+  ctx.apiSalvarDesfechoAdmissao({ id: adm.id, desfecho_id: desfecho('ALTA').id, data_desfecho: '2026-10-16' });
+  ctx.novaExecucao();
+  ctx.apiSalvarEntradaAdmissao({ paciente_id: adm.paciente_id, data_admissao: '2026-10-19', unidade_id: ctx.listar('UNIDADES')[0].id });
+  ctx.novaExecucao();
+  assert.match(ctx.apiDesfazerDesfecho(adm.id).erro, /já tem uma admissão aberta/);
 });

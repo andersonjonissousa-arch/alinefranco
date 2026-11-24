@@ -138,8 +138,12 @@ var LISTAS_INICIAIS = {
 /** Desfechos: os que encerram a admissão (paciente saiu do hospital) e os que encerram só o acompanhamento. */
 var DESFECHOS_INICIAIS = [
   ['ALTA', 'SIM'], ['ÓBITO', 'SIM'], ['TRANSFERÊNCIA', 'SIM'],
-  ['SEM CONDIÇÕES CLÍNICAS E/OU SOCIAIS', 'NÃO'], ['ALTA PSICOLÓGICA', 'NÃO'], ['RECUSA', 'NÃO']
+  ['SEM CONDIÇÕES CLÍNICAS E/OU SOCIAIS', 'NÃO'], ['ALTA PSICOLÓGICA', 'NÃO'], ['RECUSA', 'NÃO'],
+  ['EVASÃO HOSPITALAR', 'SIM'], ['ALTA A PEDIDO', 'SIM']
 ];
+
+/** Desfechos acrescentados em versões novas: o "configurar" inclui em bancos já existentes, se faltarem. */
+var DESFECHOS_GARANTIDOS = [['EVASÃO HOSPITALAR', 'SIM'], ['ALTA A PEDIDO', 'SIM']];
 
 /** Parâmetros editáveis pela coordenação. */
 var PARAMETROS_INICIAIS = [

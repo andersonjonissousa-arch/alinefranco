@@ -1307,3 +1307,29 @@ test('registro de atendimento: o campo observação é obrigatório', () => {
   const campo = formularioCom(tela, 'publico').elements.find(el => el.name === 'observacao');
   assert.ok(campo.required !== undefined && campo.required !== false, 'observação sem required');
 });
+
+test('desfecho: confirma com nome e prontuário e oferece desfazer quando foi lançado por engano', async () => {
+  const tela = carregar();
+  const perguntas = [];
+  let resposta = false;
+  tela.ctx.confirm = (m) => { perguntas.push(m); return resposta; };
+  tela.ctx.desenharAtendimento(detalhe({ status: status.acompanhamento }));
+  const form = formularioCom(tela, 'desfecho_id');
+  preencher(form, 'desfecho_id', 'd1');
+  preencher(form, 'data_desfecho', cad.hoje);
+  form.emitir('submit');
+  assert.match(perguntas[0], /Registrar ALTA para PACIENTE DE TESTE \(prontuário 123\)\?/);
+  assert.equal(tela.pedidos.length, 0, 'Cancelado: nada é enviado');
+  assert.equal(tela.todos().some(el => el.tagName === 'BUTTON' && /Desfazer este desfecho/.test(el.textContent)), false, 'Sem desfecho, sem botão de desfazer');
+  // Com desfecho lançado: o botão aparece.
+  const encerrado = detalhe({ status: status.encerrada, desfecho_id: 'd1', desfecho_nome: 'ALTA', data_desfecho: cad.hoje });
+  encerrado.desfechos = [{ id: 'h1', data: cad.hoje, desfecho_nome: 'ALTA', encerra_admissao: 'SIM', vigente: 'SIM', unidade_nome: 'UNIDADE TESTE' }];
+  tela.ctx.desenharAtendimento(encerrado);
+  botao(tela, /Desfazer este desfecho/).emitir('click');
+  assert.match(perguntas[1], /Desfazer o desfecho ALTA de PACIENTE DE TESTE \(prontuário 123\)\?/);
+  assert.equal(tela.pedidos.length, 0);
+  resposta = true;
+  botao(tela, /Desfazer este desfecho/).emitir('click');
+  assert.equal(tela.pedidos[0].nome, 'apiDesfazerDesfecho');
+  assert.deepEqual(tela.pedidos[0].args, ['adm1']);
+});

@@ -1638,7 +1638,9 @@
 
   function formularioDesfecho(a) {
     var navegacao = estado.navegacao;
+    // Aberto quando já há desfecho: é onde se confere e, se foi lançado por engano, se desfaz.
     var bloco = h('details', { class: 'cartao' }, h('summary', null, h('h2', { class: 'inline' }, 'Desfecho da admissão')));
+    if (a.desfecho_id) bloco.setAttribute('open', '');
     var form = h('form', { class: 'linha' },
       campo('Desfecho', seletor('desfecho_id', opcoesDesfechos(), a.desfecho_id, 'Sem desfecho')),
       campo('Data do desfecho', h('input', { name: 'data_desfecho', type: 'date', value: a.data_desfecho || '', max: estado.cad.hoje })));
@@ -1646,10 +1648,29 @@
     form.appendChild(botao);
     form.addEventListener('submit', function (ev) {
       ev.preventDefault();
-      enviar(botao, chamar('apiSalvarDesfechoAdmissao', Object.assign(lerFormulario(form), { id: a.id })), 'Desfecho salvo.')
+      var dados = lerFormulario(form);
+      // Confirma com nome e prontuário: pacientes com o mesmo nome já levaram desfecho trocado.
+      if (dados.desfecho_id) {
+        var escolhido = estado.cad.desfechos.filter(function (d) { return d.id === dados.desfecho_id; })[0];
+        if (!confirm('Registrar ' + (escolhido ? escolhido.nome : 'o desfecho') + ' para ' + (a.paciente_nome || 'o paciente') +
+          ' (prontuário ' + (a.prontuario || '—') + ')?\n\nConfira se é mesmo este paciente.')) return;
+      }
+      enviar(botao, chamar('apiSalvarDesfechoAdmissao', Object.assign(dados, { id: a.id })), 'Desfecho salvo.')
         .then(function (det) { if (navegacao === estado.navegacao) desenharAtendimento(det); }).catch(function () {});
     });
     bloco.appendChild(form);
+    if (a.desfecho_id) {
+      // Desfazer: para o desfecho lançado por engano (ex.: no paciente errado). A internação volta como estava.
+      var desfazer = h('button', { class: 'btn perigo', type: 'button' }, 'Desfazer este desfecho (lançado por engano)');
+      desfazer.addEventListener('click', function () {
+        if (!confirm('Desfazer o desfecho ' + (a.desfecho_nome || '') + ' de ' + (a.paciente_nome || 'este paciente') +
+          ' (prontuário ' + (a.prontuario || '—') + ')?\n\nA internação volta a ficar em acompanhamento, como se o desfecho nunca tivesse sido lançado.')) return;
+        enviar(desfazer, chamar('apiDesfazerDesfecho', a.id), 'Desfecho desfeito.')
+          .then(function (det) { if (navegacao === estado.navegacao) desenharAtendimento(det); }).catch(function () {});
+      });
+      bloco.appendChild(h('p', { class: 'suave' }, 'Lançou o desfecho no paciente errado? Desfaça aqui. Para só corrigir o tipo ou a data, use o formulário acima.'));
+      bloco.appendChild(desfazer);
+    }
     return bloco;
   }
 

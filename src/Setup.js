@@ -136,9 +136,17 @@ function semearFeriados() {
 }
 
 function semearDesfechos() {
-  if (listar('DESFECHOS').length) return;
-  DESFECHOS_INICIAIS.forEach(function (d, i) {
-    inserir('DESFECHOS', { nome: d[0], encerra_admissao: d[1], ordem: i + 1, ativo: 'SIM' });
+  if (!listar('DESFECHOS').length) {
+    DESFECHOS_INICIAIS.forEach(function (d, i) {
+      inserir('DESFECHOS', { nome: d[0], encerra_admissao: d[1], ordem: i + 1, ativo: 'SIM' });
+    });
+    return;
+  }
+  // Banco já em uso: só acrescenta os que faltam, sem mexer nos existentes.
+  var existentes = listar('DESFECHOS');
+  DESFECHOS_GARANTIDOS.forEach(function (d) {
+    var existe = existentes.some(function (x) { return normalizarTexto(x.nome) === normalizarTexto(d[0]); });
+    if (!existe) inserir('DESFECHOS', { nome: d[0], encerra_admissao: d[1], ordem: existentes.length + 1, ativo: 'SIM' });
   });
 }
 

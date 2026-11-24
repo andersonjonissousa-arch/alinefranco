@@ -38,7 +38,7 @@ Início e Gestão abrem diretamente a tela Atendimentos ao selecionar um pacient
 
 - **Admissão = cada entrada do paciente no hospital.** Uma nova admissão só é aberta depois que a anterior
   foi encerrada por um desfecho de saída do hospital.
-- **Desfechos** (configuráveis): ALTA, ÓBITO e TRANSFERÊNCIA encerram a admissão. SEM CONDIÇÕES
+- **Desfechos** (configuráveis): ALTA, ÓBITO, TRANSFERÊNCIA, EVASÃO HOSPITALAR e ALTA A PEDIDO encerram a admissão. SEM CONDIÇÕES
   CLÍNICAS E/OU SOCIAIS, ALTA PSICOLÓGICA e RECUSA encerram só o acompanhamento: se o paciente segue
   internado, o acompanhamento é retomado na mesma admissão e os prazos recomeçam na data da retomada.
 - **1º atendimento (avaliação):** tem que acontecer em até 3 dias úteis da data de admissão no hospital
@@ -149,6 +149,15 @@ tests/              testes com Node, com os serviços do Google simulados
 ```
 
 A **observação** do registro de atendimento é obrigatória (na tela e no servidor).
+
+## Desfazer um desfecho lançado por engano
+
+Na tela da internação (Atendimentos), o cartão **Desfecho da admissão** abre sozinho quando há desfecho e traz o botão
+**Desfazer este desfecho**. Ele tira o lançamento do histórico e a internação volta ao acompanhamento, com os
+atendimentos e demais registros intactos. Quem lançou o desfecho ou a coordenação pode desfazer; fica no registro de
+alterações. Se o paciente já tem outra internação aberta, a antiga não reabre. Para achar uma internação encerrada,
+use Pacientes > histórico > "Abrir esta internação", ou o filtro "Todos" em Atendimentos. Ao registrar um desfecho, a tela
+pergunta com o nome e o prontuário do paciente, para evitar trocar com um homônimo.
 
 ## Registro de alterações
 

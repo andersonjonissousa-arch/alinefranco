@@ -141,8 +141,12 @@ var LISTAS_INICIAIS = {
 /** Desfechos: os que encerram a admissão (paciente saiu do hospital) e os que encerram só o acompanhamento. */
 var DESFECHOS_INICIAIS = [
   ['ALTA', 'SIM'], ['ÓBITO', 'SIM'], ['TRANSFERÊNCIA', 'SIM'],
-  ['SEM CONDIÇÕES CLÍNICAS E/OU SOCIAIS', 'NÃO'], ['ALTA PSICOLÓGICA', 'NÃO'], ['RECUSA', 'NÃO']
+  ['SEM CONDIÇÕES CLÍNICAS E/OU SOCIAIS', 'NÃO'], ['ALTA PSICOLÓGICA', 'NÃO'], ['RECUSA', 'NÃO'],
+  ['EVASÃO HOSPITALAR', 'SIM'], ['ALTA A PEDIDO', 'SIM']
 ];
+
+/** Desfechos acrescentados em versões novas: o "configurar" inclui em bancos já existentes, se faltarem. */
+var DESFECHOS_GARANTIDOS = [['EVASÃO HOSPITALAR', 'SIM'], ['ALTA A PEDIDO', 'SIM']];
 
 /** Parâmetros editáveis pela coordenação. */
 var PARAMETROS_INICIAIS = [
@@ -1991,9 +1995,17 @@ function semearFeriados() {
 }
 
 function semearDesfechos() {
-  if (listar('DESFECHOS').length) return;
-  DESFECHOS_INICIAIS.forEach(function (d, i) {
-    inserir('DESFECHOS', { nome: d[0], encerra_admissao: d[1], ordem: i + 1, ativo: 'SIM' });
+  if (!listar('DESFECHOS').length) {
+    DESFECHOS_INICIAIS.forEach(function (d, i) {
+      inserir('DESFECHOS', { nome: d[0], encerra_admissao: d[1], ordem: i + 1, ativo: 'SIM' });
+    });
+    return;
+  }
+  // Banco já em uso: só acrescenta os que faltam, sem mexer nos existentes.
+  var existentes = listar('DESFECHOS');
+  DESFECHOS_GARANTIDOS.forEach(function (d) {
+    var existe = existentes.some(function (x) { return normalizarTexto(x.nome) === normalizarTexto(d[0]); });
+    if (!existe) inserir('DESFECHOS', { nome: d[0], encerra_admissao: d[1], ordem: existentes.length + 1, ativo: 'SIM' });
   });
 }
 
@@ -2624,6 +2636,25 @@ function apiSalvarAcompanhamento(dados) {
 /** Registra ou corrige o desfecho da admissão escolhida, mantendo seu histórico. */
 function apiSalvarDesfechoAdmissao(dados) {
   return salvarCamposAdmissao_(dados, ['desfecho_id', 'data_desfecho'], true, false);
+}
+
+/**
+ * Desfaz um desfecho lançado por engano (por exemplo, alta no paciente errado): a internação volta como estava
+ * antes e o lançamento do desfecho sai do histórico. Quem lançou ou a coordenação. Fica no registro de alterações.
+ */
+function apiDesfazerDesfecho(id) {
+  var permissao = responder(function () {
+    var usuario = usuarioAtual();
+    var adm = buscarPorId('ADMISSOES', id);
+    if (!adm) throw new Error('Admissão não encontrada.');
+    if (!adm.desfecho_id) throw new Error('Esta internação não tem desfecho para desfazer.');
+    var vigente = desfechoVigente(adm.id);
+    if (vigente) exigirAutorOuCoordenacao(vigente, usuario);
+    else exigirCoordenacao();
+    return true;
+  });
+  if (!permissao.ok) return permissao;
+  return salvarCamposAdmissao_({ id: id, desfecho_id: '', data_desfecho: '' }, ['desfecho_id', 'data_desfecho'], true, false);
 }
 
 function mapaPorId(nome) {
