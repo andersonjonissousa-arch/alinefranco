@@ -58,8 +58,18 @@ function prepararAba(banco, nome) {
   });
   cabecalho.setValues([colunas]).setFontWeight('bold').setBackground('#e8eef7');
   aba.setFrozenRows(1);
-  // Tudo como texto: evita que a planilha converta ids, prontuários e datas sozinha.
-  aba.getRange(1, 1, aba.getMaxRows(), colunas.length).setNumberFormat('@');
+  // Texto em tudo, menos nas colunas de número (COLUNAS_NUMERICAS): evita que a planilha converta ids, prontuários
+  // e datas sozinha, sem transformar em texto os números que já estão lá. Faixas seguidas saem numa chamada só.
+  var linhas = aba.getMaxRows();
+  var inicio = 0;
+  for (var i = 0; i <= colunas.length; i++) {
+    var texto = i < colunas.length && COLUNAS_NUMERICAS.indexOf(colunas[i]) === -1;
+    if (texto && !inicio) inicio = i + 1;
+    if (!texto && inicio) {
+      aba.getRange(1, inicio, linhas, i - inicio + 1).setNumberFormat('@');
+      inicio = 0;
+    }
+  }
   return aba;
 }
 

@@ -47,7 +47,11 @@ class AbaFalsa {
       },
       setFontWeight() { return intervalo; },
       setBackground() { return intervalo; },
-      setNumberFormat() { return intervalo; },
+      setNumberFormat(formato) {
+        aba.formatos = aba.formatos || {};
+        for (let c = 0; c < nColunas; c++) aba.formatos[coluna + c] = formato;
+        return intervalo;
+      },
       setFontSize() { return intervalo; },
       setFontStyle() { return intervalo; },
       setFontColor() { return intervalo; }

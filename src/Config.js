@@ -94,6 +94,13 @@ var TABELAS = {
   AUDITORIA: ['id', 'quando', 'email', 'acao', 'tabela', 'registro_id', 'admissao_id', 'paciente_id', 'dados']
 };
 
+/**
+ * Colunas de número: o "configurar" não aplica a elas o formato de texto e nunca mexe no formato que a planilha
+ * já tem nelas (quem analisa os dados soma essas colunas). O resto das colunas é texto, para a planilha não
+ * converter ids, prontuários e datas sozinha.
+ */
+var COLUNAS_NUMERICAS = ['quantidade', 'ordem', 'dias_ate_primeiro_atendimento', 'horas_resposta'];
+
 /** Tabelas lidas só quando pedidas (crescem sem parar e não são usadas nas telas do dia a dia). */
 var TABELAS_SOB_DEMANDA = ['AUDITORIA'];
 

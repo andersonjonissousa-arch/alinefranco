@@ -216,6 +216,14 @@ listas, prioridades, motivos, justificativas, feriados, cadastro de desfechos e 
 cópia da planilha inteira no Drive de quem rodou; o registro de execução mostra o link da cópia e quantas linhas saíram
 de cada aba.
 
+## Formato das colunas da planilha
+
+O `configurar` aplica o formato de texto às colunas do banco, para a planilha não converter ids, prontuários e datas
+sozinha, **menos** às colunas de número (`quantidade`, `ordem`, `dias_ate_primeiro_atendimento` e `horas_resposta`, em
+`COLUNAS_NUMERICAS`, em `src/Config.js`): nelas ele não toca no formato que a planilha já tem. Quem soma ou analisa os
+dados pode deixar essas colunas como número sem medo de uma atualização transformá-las em texto. Se uma coluna nova for
+numérica, é só incluí-la nessa lista.
+
 ## Banco de dados
 
 Uma planilha Google, uma aba por tabela, primeira linha com o nome das colunas. Tudo é gravado como

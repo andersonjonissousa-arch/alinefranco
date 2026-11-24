@@ -97,6 +97,13 @@ var TABELAS = {
   AUDITORIA: ['id', 'quando', 'email', 'acao', 'tabela', 'registro_id', 'admissao_id', 'paciente_id', 'dados']
 };
 
+/**
+ * Colunas de número: o "configurar" não aplica a elas o formato de texto e nunca mexe no formato que a planilha
+ * já tem nelas (quem analisa os dados soma essas colunas). O resto das colunas é texto, para a planilha não
+ * converter ids, prontuários e datas sozinha.
+ */
+var COLUNAS_NUMERICAS = ['quantidade', 'ordem', 'dias_ate_primeiro_atendimento', 'horas_resposta'];
+
 /** Tabelas lidas só quando pedidas (crescem sem parar e não são usadas nas telas do dia a dia). */
 var TABELAS_SOB_DEMANDA = ['AUDITORIA'];
 
@@ -1917,8 +1924,18 @@ function prepararAba(banco, nome) {
   });
   cabecalho.setValues([colunas]).setFontWeight('bold').setBackground('#e8eef7');
   aba.setFrozenRows(1);
-  // Tudo como texto: evita que a planilha converta ids, prontuários e datas sozinha.
-  aba.getRange(1, 1, aba.getMaxRows(), colunas.length).setNumberFormat('@');
+  // Texto em tudo, menos nas colunas de número (COLUNAS_NUMERICAS): evita que a planilha converta ids, prontuários
+  // e datas sozinha, sem transformar em texto os números que já estão lá. Faixas seguidas saem numa chamada só.
+  var linhas = aba.getMaxRows();
+  var inicio = 0;
+  for (var i = 0; i <= colunas.length; i++) {
+    var texto = i < colunas.length && COLUNAS_NUMERICAS.indexOf(colunas[i]) === -1;
+    if (texto && !inicio) inicio = i + 1;
+    if (!texto && inicio) {
+      aba.getRange(1, inicio, linhas, i - inicio + 1).setNumberFormat('@');
+      inicio = 0;
+    }
+  }
   return aba;
 }
 

@@ -2439,3 +2439,35 @@ test('desfazer desfecho: alta lançada no paciente errado volta ao acompanhament
   ctx.novaExecucao();
   assert.match(ctx.apiDesfazerDesfecho(adm.id).erro, /já tem uma admissão aberta/);
 });
+
+test('configurar: colunas de número (quantidade) não recebem formato de texto e o formato existente não é tocado', () => {
+  const { ctx, google } = carregarSistema();
+  ctx.configurar();
+  const aba = google.planilha.getSheetByName('ATENDIMENTOS');
+  const coluna = nome => ctx.TABELAS.ATENDIMENTOS.indexOf(nome) + 1;
+  assert.equal(aba.formatos[coluna('id')], '@');
+  assert.equal(aba.formatos[coluna('data')], '@');
+  assert.equal(aba.formatos[coluna('observacao')], '@');
+  assert.equal(aba.formatos[coluna('quantidade')], undefined, 'quantidade (coluna G) fica fora do formato de texto');
+  assert.equal(coluna('quantidade'), 7);
+  // A coordenação deixou a coluna como número; rodar o configurar de novo não muda isso.
+  aba.formatos[coluna('quantidade')] = '0';
+  ctx.novaExecucao();
+  ctx.configurar();
+  assert.equal(aba.formatos[coluna('quantidade')], '0');
+  assert.equal(aba.formatos[coluna('id')], '@');
+  // As outras abas com quantidade seguem a mesma regra.
+  for (const t of ['ATIVIDADES', 'REUNIOES', 'GERENCIAIS']) {
+    assert.equal(google.planilha.getSheetByName(t).formatos[ctx.TABELAS[t].indexOf('quantidade') + 1], undefined, t);
+  }
+});
+
+test('atendimento à família: a quantidade é gravada na planilha como número, não como texto', () => {
+  const { ctx, google, admitir, atender } = sistemaComAdmissao();
+  const adm = admitir().dados.admissao;
+  assert.equal(atender(adm, { data: '2026-10-14', publico: 'FAMÍLIA', quantidade: '3' }).ok, true);
+  const aba = google.planilha.getSheetByName('ATENDIMENTOS');
+  const q = aba.linhas[1][ctx.TABELAS.ATENDIMENTOS.indexOf('quantidade')];
+  assert.equal(q, 3);
+  assert.equal(typeof q, 'number');
+});
